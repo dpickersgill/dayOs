@@ -30,38 +30,49 @@
 3. Under Billing, pick Public Works and its add-ons, yearly. Only municipal plans are offered for a municipality, and ski plans for a ski area.
 4. The owner adds the crew (role Crew) and front desk (role Front desk) under Settings, Team and logins, imports the street list under Settings, Streets (paste one street per line), and connects Stripe under Settings, Payments for bulk pickup fees.
 
-5. Turning on Water, Sewer or Stormwater (here, or by a plan in Billing) gives the municipality that add-on's ready-made inspection checklists once (Valve exercise, Hydrant flush and inspection, Manhole inspection, Pump station round, Outfall dry-weather screening, Inlet inspection, Stormwater facility inspection). Turning an add-on off and on again never adds them twice, and a checklist the municipality changed or retired never comes back. Their map items (hydrants, manholes, pump stations, outfalls, inlets, basins) stay on the map when an add-on is turned off; only adding new ones of those kinds needs it on.
-6. A municipality with a GIS file of its valves and hydrants: there is no import yet. Put the main ones on the map from the office (Map, Add a point, tap), or have the crew add them by GPS as they exercise them; the tag column is what ties them to their paper records.
-## Street alert texts for a municipality (which number sends)
-
-Street notices, alert sign-up codes and welcome texts go through `src/lib/sms.js` on the one Twilio account that sends
-every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number they come from:
-
-- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`). Nothing to set up per
-  municipality. Its STOP and START replies already reach `POST /api/v1/twilio/sms` (the "A message comes in" webhook,
-  see Text HELP set-up above and FEATURES.md): a STOP is written to every customer record and every municipality's alert
-  list with that phone (`alert_addresses`), so no one texts it again; START lifts only a stop that came by text. Twilio
-  itself also blocks the shared number from texting a phone after STOP, at every tenant.
-- **A number of the municipality's own** (optional, when a borough wants its alerts to come from one number residents
-  save). Buy a toll-free number on the same account, verify it the way Text HELP set-up steps 1 and 4 describe, with the
-  municipality as the business, use case category "Public Service Announcement" (or Customer Care), and sample messages
-  such as "Riverbend Borough: Water is off on Dayton Street for a water main repair. Details: https://<host>/alerts/<slug>/AB3CDE Reply STOP to stop texts."
-  Opt-in: residents sign up on `/alerts/<slug>`, confirm with a texted code and get a welcome text saying how to stop.
-  Set the number's (or its Messaging Service's) "A message comes in" webhook to `https://<PUBLIC_URL host>/api/v1/twilio/sms`,
-  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then a
-  manager enters the number under Street notices, Settings, Texting number; the screen shows the webhook address too.
-  Clear it to go back to the shared number.
-
-Sending is in the background: a send writes one queued row per phone and email (`street_notice_deliveries`) and
-answers at once; the server that took the request sends them six at a time, and the 5-minute guests job
-(`/internal/jobs/guests`, `street_notices` in its answer) sends anything left and the scheduled notices that are due. A
-row a stopped server left half-sent is marked failed after 15 minutes rather than sent again. Twilio's own rate for the
-number applies on top (a toll-free number takes a few texts a second; a 2,000-resident notice takes some minutes).
-Water, boil water, sewer and street closure notices go at any hour; the others wait for 8 AM (`src/lib/quiet.js`).
-
 ## The demo borough
 
-`SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.
+`SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`, run in name order (base, assets, requests, bulk pickup, street notices, buildings). Running it again also turns every municipal add-on back on. The borough has sample response targets (Requests, Settings), so the repair record shows requests that met them and requests that did not.
+
+## Public pages for a municipality
+
+Every municipal public page is `https://<app address>/<page>/<web name>`, with no sign-in. Link them from the municipality's website.
+
+| Page | Address | What it is | App |
+|---|---|---|---|
+| Report a problem | `/report/<web name>` | A resident reports a pothole or a street light. The status page is the same address with `#s=<token>`, sent to the resident. | Resident requests |
+| Open requests | `/open-requests/<web name>` | The map of open requests and those fixed in the last 30 days. Off until a manager turns it on. | Resident requests |
+| Street alerts | `/alerts/<web name>` | Sign up for texts and emails about a street. `/alerts/<web name>/<code>` is one notice; `/alerts/<web name>/manage/<token>` is a resident's own choices. | Resident requests |
+| Bulk pickup | `/bulk-pickup/<web name>` | Book and pay for a bulk trash pickup. `?booking=<token>` is one booking. | Trash and recycling |
+
+Each page reads its data from `/api/v1/public/<web name>/<page>` (`report`, `open-requests`, `alerts`, `bulk-pickup`, and `streets` for the street names). A ski area, or a municipality with the app off, gets "Page not found" there. To check a new municipality: open each address, then `curl -s https://<app address>/api/v1/public/<web name>/streets` should list its streets.
+
+## Texts to residents: one number, one STOP rule
+
+- A municipality texts residents from one number: its own (Street notices, Settings, Texting number, set up as in "Street alert texts" below) or, without one, the shared Verdynt/OS number (`TWILIO_FROM`). Request updates, bulk pickup messages and street alerts all use it.
+- A resident who texts STOP gets no more texts from the municipality, of any kind. Only a START texted back turns them on again. Staff cannot turn them back on, and ticking "text me" on the report page, a bulk pickup booking or the alert sign-up does not either. The page says: "This phone has texts turned off. Text START to <number> to turn them back on."
+- A STOP to a municipality's own number counts for that municipality only. A STOP to the shared number counts for every ski area and every municipality that texts from the shared number, because the phone company then blocks that number for all of them.
+- Both kinds of reply arrive at `POST /api/v1/twilio/sms` (the "A message comes in" webhook, see Text HELP set-up). Each yes and no is kept: `resident_consent` for the resident, `alert_consent_events` for the alert list.
+- When a resident says texts stopped coming: Requests or Bulk pickup shows the resident's texts as off, and Street notices, Residents shows the phone as stopped. Ask them to text START to the number shown on the page.
+
+## Work orders and Right-to-Know
+
+Work orders are public records in Pennsylvania. Work orders, Download spreadsheet gives them with the filters on screen. A work order made from a resident request leaves without the house number and the resident's own words: the street and cross street stay. Managers can tick Include contact details for internal use; that is logged with their name (audit log, `export_contacts`). The same rule holds for the repair record (Requests, Ledger), bulk pickups (Bulk pickup, Report) and the alert list (Street notices, Residents).
+
+## Water, Sewer and Stormwater for a municipality (the add-ons)
+
+1. Turning on Water, Sewer or Stormwater (here, or by a plan in Billing) gives the municipality that add-on's ready-made inspection checklists once (Valve exercise, Hydrant flush and inspection, Manhole inspection, Pump station round, Outfall dry-weather screening, Inlet inspection, Stormwater facility inspection). Turning an add-on off and on again never adds them twice, and a checklist the municipality changed or retired never comes back. Their map items (hydrants, manholes, pump stations, outfalls, inlets, basins) stay on the map when an add-on is turned off; only adding new ones of those kinds needs it on.
+2. A municipality with a GIS file of its valves and hydrants: there is no import yet. Put the main ones on the map from the office (Map, Add a point, tap), or have the crew add them by GPS as they exercise them; the tag column is what ties them to their paper records.
+
+## Resident report page (municipal edition, Requests)
+
+- The page is `/report/<slug>` on the app's address (for example `<app address>/report/riverbend-borough`). A manager finds the link and a QR code under Requests, Settings, The report page: copy the link onto the municipality's website ("Report a problem" on its home page and its public works page), and print the QR code for flyers, the counter, the newsletter and the trucks. The page needs no app or account.
+- Before telling residents about it: in Requests, Settings, set the municipal office phone and the after-hours number (shown for water and sewer categories), choose the categories (and which need a phone or email), set the response standards, set the street classes, and tick who is alerted about new requests. The street list itself is under Settings, Streets.
+- Texts go from the municipality's texting number (its own, or the shared Twilio number) with the one STOP rule (see "Texts to residents" above); email through Postmark. Without them, requests still work and no messages go.
+- Limits: `REPORT_RATE_LIMIT` (10 reports an hour per address and municipality), `REPORT_PHOTO_LIMIT` (10 photo uploads an hour per report; 3 are kept), `REPORT_STOP_LIMIT`. Leave them as they are in production.
+- The public map of open requests is off until a manager ticks it; its address is `/open-requests/<slug>`.
+- A Right-to-Know request for request records: Requests, Ledger, pick the street or dates, Download CSV or Print. Leave "Include contact details" unticked; it is for internal use, managers only, and logged.
+- Upgrading needs `npm run migrate` (adds `residents`, `resident_consent`, `request_*`, `requests`, `streets.street_class`, `work_orders.request_id` and the work order source `request`).
 
 ## Bulk pickup for a municipality (Trash and recycling)
 
@@ -72,9 +83,39 @@ Water, boil water, sewer and street closure notices go at any hour; the others w
 4. The Connect webhook (`STRIPE_CONNECT_WEBHOOK_SECRET`) must be set, as for ski areas: it is how a payment books the stop. Refunds go back through the same account, and the platform fee is 0 unless the console sets one.
 5. A refund that Stripe did not take shows in `card_returns` (kind `bulk`) as failed and is retried by the daily job.
 
-**Linking the page from the municipal website.** The page is `https://<app address>/public/<web name>/bulk-pickup` (Bulk pickup, Settings shows it with Copy link). Put it on the website's trash or public works page as "Book a bulk pickup online", and in the newsletter and on the trash calendar. It works on a phone and needs no login. A QR code on the bulk pickup flyer at the office works too. Turning off "Residents can book online" leaves the page up with a call-us message.
+**Linking the page from the municipal website.** The page is `https://<app address>/bulk-pickup/<web name>` (Bulk pickup, Settings shows it with Copy link). Put it on the website's trash or public works page as "Book a bulk pickup online", and in the newsletter and on the trash calendar. It works on a phone and needs no login. A QR code on the bulk pickup flyer at the office works too. Turning off "Residents can book online" leaves the page up with a call-us message.
 
 **Before turning it on.** Import the street list (Settings, Streets), check collection days, cutoff, stops a day, sizes and prices, and the rules, and add the year's holidays under Days with no pickup. Residents who said yes get a reminder the afternoon before; Twilio and Postmark must be set up for texts and emails (as for the rest of the app).
+
+## Street alert texts for a municipality (which number sends)
+
+Street notices, alert sign-up codes and welcome texts go through `src/lib/sms.js` on the one Twilio account that sends
+every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number they come from:
+
+- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`). Nothing to set up per
+  municipality. Its STOP and START replies already reach `POST /api/v1/twilio/sms` (the "A message comes in" webhook,
+  see Text HELP set-up and FEATURES.md): a STOP is written to every customer record and, for every municipality that
+  texts from the shared number, to each resident with that phone and its alert list (`resident_consent`,
+  `alert_addresses`), so no one texts it again; START lifts only a stop that came by text. Twilio itself also blocks the
+  shared number from texting a phone after STOP, at every tenant.
+- **A number of the municipality's own** (optional, when a borough wants its alerts to come from one number residents
+  save). Buy a toll-free number on the same account, verify it the way Text HELP set-up steps 1 and 4 describe, with the
+  municipality as the business, use case category "Public Service Announcement" (or Customer Care), and sample messages
+  such as "Riverbend Borough: Water is off on Dayton Street for a water main repair. Details: https://<host>/alerts/<slug>/AB3CDE Reply STOP to stop texts."
+  Opt-in: residents sign up on `/alerts/<slug>`, confirm with a texted code and get a welcome text saying how to stop.
+  Set the number's (or its Messaging Service's) "A message comes in" webhook to `https://<PUBLIC_URL host>/api/v1/twilio/sms`,
+  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then a
+  manager enters the number under Street notices, Settings, Texting number; the screen shows the webhook address too.
+  From then on every text to a resident (alerts, request updates, bulk pickup messages) comes from it, and a STOP or
+  START texted to it counts for this municipality only. Clear it to go back to the shared number.
+
+Sending is in the background: a send writes one queued row per phone and email (`street_notice_deliveries`) and
+answers at once; the server that took the request sends them six at a time, and the 5-minute guests job
+(`/internal/jobs/guests`, `street_notices` in its answer) sends anything left and the scheduled notices that are due. A
+row a stopped server left half-sent is marked failed after 15 minutes rather than sent again. Twilio's own rate for the
+number applies on top (a toll-free number takes a few texts a second; a 2,000-resident notice takes some minutes).
+Water, boil water, sewer and street closure notices go at any hour; the others wait for 8 AM (`src/lib/quiet.js`).
+
 ## Buildings for a municipality (the Buildings add-on)
 
 1. Turn on Buildings for the municipality in the console (Apps). Its library of life-safety checks (extinguishers, sprinklers, fire alarm, exit lights, kitchen hood, elevator, boiler, backflow, generator, playground, HVAC, roof) is made at that moment, once. Changing or turning off a check later never brings the original back.
@@ -403,16 +444,6 @@ Upgrading needs `npm run migrate` (adds the access level column and the rules ta
 - Requests grouped into a flood alert patrol at most once per flood every 30 seconds (`HELP_FLOOD_ALERT_GAP_S`, leave it in production). A lost child always alerts at once.
 - Held alerts (the next flood push, the summary) are saved and go out from the process's timer, the next board load or guest request at that mountain, or the 5-minute guests job (`summitops-guests`), once each. Worst case when the timer is lost: the gap plus 5 minutes. Keep the guests job running.
 - Upgrading needs `npm run migrate` (adds `dispatch_calls.same_phone_of`, `dispatch_alert_state` and `dispatch_calls.flood_pending_at`).
-
-## Resident report page (municipal edition, Requests)
-
-- The page is `/report/<slug>` on the app's address (for example `<app address>/report/riverbend-borough`). A manager finds the link and a QR code under Requests, Settings, The report page: copy the link onto the municipality's website ("Report a problem" on its home page and its public works page), and print the QR code for flyers, the counter, the newsletter and the trucks. The page needs no app or account.
-- Before telling residents about it: in Requests, Settings, set the municipal office phone and the after-hours number (shown for water and sewer categories), choose the categories (and which need a phone or email), set the response standards, set the street classes, and tick who is alerted about new requests. The street list itself is under Settings, Streets.
-- Texts go through the shared Twilio number and its STOP handling (`/api/v1/twilio/sms`, see Text HELP set-up); email through Postmark. Without them, requests still work and no messages go.
-- Limits: `REPORT_RATE_LIMIT` (10 reports an hour per address and municipality), `REPORT_PHOTO_LIMIT` (10 photo uploads an hour per report; 3 are kept), `REPORT_STOP_LIMIT`. Leave them as they are in production.
-- The public map of open requests is off until a manager ticks it; its address is `/open-requests/<slug>`.
-- A Right-to-Know request for request records: Requests, Ledger, pick the street or dates, Download CSV or Print. Leave "Include contact details" unticked; it is for internal use, managers only, and logged.
-- Upgrading needs `npm run migrate` (adds `residents`, `resident_consent`, `request_*`, `requests`, `streets.street_class`, `work_orders.request_id` and the work order source `request`).
 
 ## Terrain park
 Upgrading needs `npm run migrate` (creates park_areas, park_features, park_placements and park_inspections). Park crew sign in with the `staff` role; managers and owners can do everything. To make a past day editable for the crew there is no switch: a manager makes the change. `node db/reset.js <slug> --yes` also clears the park, and `node db/demo.js <slug>` loads 12 demo features placed for today.

@@ -291,7 +291,7 @@ async function settings(box) {
     h('p', { class: 'muted' }, 'Managers always can. Pick Crew logins who may write and send notices too, for a break after hours.'),
     boxes.length ? h('div', { class: 'stack tight' }, ...boxes.map((b) => h('label', { class: 'check', for: `crew-${b.c.id}` }, b.el, ` ${b.c.name}`))) : h('p', { class: 'muted' }, 'No Crew logins yet.'),
     h('h2', null, 'Texting number'),
-    field('Your own number (optional)', from, `Empty: texts come from the shared Verdynt/OS number${s.default_from ? ` (${s.default_from})` : ''}. A number of your own is set up with Verdynt/OS support first.`),
+    field('Your own number (optional)', from, `Empty: texts come from the shared Verdynt/OS number${s.default_from ? ` (${s.default_from})` : ''}. A number of your own is set up with Verdynt/OS support first. Every text to residents then comes from it: alerts, request updates and bulk pickup messages.`),
     h('p', { class: 'muted small' }, `For whoever sets up the number in Twilio: replies such as STOP go to ${s.inbound_url}`),
     h('div', { class: 'row' }, save)));
 }
