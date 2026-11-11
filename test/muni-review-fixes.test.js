@@ -532,3 +532,20 @@ test('C: a boil water advisory is refused at send, and held at its scheduled tim
   assert.equal((await q('SELECT COUNT(*) AS n FROM street_notice_deliveries WHERE notice_id = ?', [later.id]))[0].n, 0, 'nothing was sent');
   for (const id of [now.id, later.id]) ok(await api('DELETE', `/street-notices/${id}`, { token: A.token }));
 });
+
+test('first use, all at once: several first visits each see the full defaults, made once (categories, bulk sizes, building checks)', async () => {
+  const M = await createMuniTenant(base, { slug: `rf-race-${suffix}`, modules: { solidwaste: true, buildings: true } });
+  const { DEFAULT_CATEGORIES } = require('../src/lib/requests');
+  const pages = await Promise.all(Array.from({ length: 10 }, () => api('GET', `/public/${M.slug}/report`)));
+  for (const p of pages) assert.deepEqual(ok(p).categories.map((c) => c.name).sort(), DEFAULT_CATEGORIES.map((c) => c[0]).sort(), 'every caller sees every category');
+  const [[c]] = await pool.query('SELECT COUNT(*) AS n, COUNT(DISTINCT name) AS d FROM request_categories WHERE tenant_id = ?', [M.id]);
+  assert.deepEqual([Number(c.n), Number(c.d)], [DEFAULT_CATEGORIES.length, DEFAULT_CATEGORIES.length]);
+  const bulk = await Promise.all(Array.from({ length: 10 }, () => api('GET', '/solid-waste/settings', { token: M.token })));
+  for (const b of bulk) assert.deepEqual(ok(b).sizes.map((s) => s.name), ['Small', 'Medium', 'Large', 'Metal']);
+  const [[z]] = await pool.query('SELECT COUNT(*) AS n FROM bulk_sizes WHERE tenant_id = ?', [M.id]);
+  assert.equal(Number(z.n), 4, 'the sizes were made once');
+  const lib = await Promise.all(Array.from({ length: 6 }, () => api('GET', '/buildings', { token: M.token })));
+  for (const l of lib) ok(l);
+  const [[t]] = await pool.query('SELECT COUNT(*) AS n, COUNT(DISTINCT code) AS d FROM life_safety_tasks WHERE tenant_id = ?', [M.id]);
+  assert.ok(Number(t.n) > 0 && Number(t.n) === Number(t.d), `the building checks were made once: ${t.n} rows, ${t.d} codes`);
+});

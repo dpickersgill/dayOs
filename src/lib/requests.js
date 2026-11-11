@@ -11,7 +11,7 @@
 // Resident contact details (lib/residents.js) never go on a public page, in an alert, in a log, to AI, or in an export
 // unless a manager picks "include contact details" (audited).
 const crypto = require('crypto');
-const { pool, one, rows } = require('../db');
+const { pool, one, rows, tx } = require('../db');
 const { nowIn, utcFromLocal } = require('./util');
 const R = require('./residents');
 const PS = require('./publicsends');
@@ -41,13 +41,18 @@ const CLASS_WORDS = { any: 'Any street', local: 'Local', collector: 'Collector',
 // ---------------------------------------------------------------- setup
 /** The municipality's categories and settings row, made with the defaults the first time anyone asks. */
 async function ensureSetup(conn, tenantId) {
-  const n = await one(conn, 'SELECT COUNT(*) AS n FROM request_categories WHERE tenant_id = ?', [tenantId]);
-  if (!Number(n.n)) {
+  if (await one(conn, 'SELECT 1 AS x FROM request_settings WHERE tenant_id = ?', [tenantId])) return;
+  // The first use makes the settings row and the default categories in one transaction (as bulk pickup does): a second
+  // caller at the same moment waits on the settings row's key until the first has committed, then finds everything.
+  await tx(async (c) => {
+    const [made] = await c.query('INSERT IGNORE INTO request_settings (tenant_id) VALUES (?)', [tenantId]);
+    if (made.affectedRows !== 1) return;
+    const n = await one(c, 'SELECT COUNT(*) AS n FROM request_categories WHERE tenant_id = ?', [tenantId]);
+    if (Number(n.n)) return; // set up before the settings row existed
     for (const [i, [name, contact, after, color]] of DEFAULT_CATEGORIES.entries()) {
-      await conn.query('INSERT IGNORE INTO request_categories (tenant_id, name, needs_contact, after_hours, color, sort) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, name, contact, after, color, (i + 1) * 10]);
+      await c.query('INSERT IGNORE INTO request_categories (tenant_id, name, needs_contact, after_hours, color, sort) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, name, contact, after, color, (i + 1) * 10]);
     }
-  }
-  await conn.query('INSERT IGNORE INTO request_settings (tenant_id) VALUES (?)', [tenantId]);
+  });
 }
 
 async function settingsOf(conn, tenantId) {
