@@ -134,10 +134,21 @@ function moduleFor(path) {
   return null;
 }
 
+// Ski-area routes with no app key of their own (review fix, 2026.11.19): lost and found, waivers, attractions, the daily
+// and weekly reports, and the ski Today board. A municipality is refused them like any app it does not have (403,
+// module_disabled); its own Today is built from each municipal app's /today (lib/today.js).
+const MOUNTAIN_ONLY = ['/lost-found', '/waivers', '/attractions', '/reports', '/board'];
+const mountainOnly = (path) => MOUNTAIN_ONLY.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(`${p}.`));
+
 /** Signed-in requests: refuse the ones that belong to an app this mountain has turned off. */
 function moduleGate(req, _res, next) {
   (async () => {
     const path = require('./pathcheck').normal(req.path); // capitals or a trailing slash reach the same routes
+    if (mountainOnly(path) && (await stateOf(req.auth.tenantId)).org === 'municipality') {
+      const e = new AppError(403, 'This is part of the ski area edition and is not turned on for your municipality');
+      e.details = { code: 'module_disabled', module: null };
+      throw e;
+    }
     const key = moduleFor(path);
     if (!key) return;
     const { on, org } = await stateOf(req.auth.tenantId);
@@ -183,4 +194,4 @@ async function requireModule(tenantId, module) {
   if (!s.on.has(module)) throw off(module, s.org);
 }
 
-module.exports = { MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC };
+module.exports = { MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC, MOUNTAIN_ONLY };

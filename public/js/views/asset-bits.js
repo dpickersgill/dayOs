@@ -96,17 +96,19 @@ export function inspectDialog(target, templates, { save, photoPath, done, title,
   const box = h('div', { class: 'stack' });
   const err = h('div');
   let sheet = null;
+  // Shown only when the checklist has pass-or-fail items: readings and dates are never passed for you.
+  const allPass = h('button', { type: 'button', class: 'btn small' }, 'Mark the rest as pass');
+  allPass.addEventListener('click', () => sheet.markRestPass());
   const sendPhoto = async (file) => (await sendBytes('POST', `${photoPath}?file_name=${encodeURIComponent(file.name || 'photo.jpg')}`, file)).id;
   const drawItems = () => {
     const t = active.find((x) => String(x.id) === chooser.value);
     sheet = answerSheet(t.items, resultChips, { photo: sendPhoto });
     clear(box).append(sheet.el);
+    allPass.hidden = !sheet.hasPassItems;
     if (t.sets_condition) box.append(h('p', { class: 'muted small' }, 'The condition score you give here becomes its condition.'));
   };
   chooser.addEventListener('change', drawItems);
   drawItems();
-  const allPass = h('button', { type: 'button', class: 'btn small' }, 'Mark the rest as pass');
-  allPass.addEventListener('click', () => sheet.markRestPass());
   const n1 = (v) => Math.round(Number(v) * 10) / 10;
   const hours = meters ? h('input', { type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Hours now', placeholder: target.hours ? String(n1(target.hours)) : 'Hours now' }) : null;
   const miles = meters ? h('input', { type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Miles now', placeholder: target.miles !== null && target.miles !== undefined ? String(n1(target.miles)) : 'Miles now' }) : null;

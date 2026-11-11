@@ -144,7 +144,7 @@ function pickChips(id, labelledBy, options) {
 /**
  * Answers for a list of steps. `chips(id, labelledBy)` makes the pass/fail/na control a screen already uses
  * ({ el, get, set }). opts.photo(file) sends a photo for a step that needs one and returns its id. Returns
- * { el, answers: [{ key, get(), missing(), needsNote(), needsPhoto(), focus() }], markRestPass() }.
+ * { el, answers: [{ key, get(), missing(), needsNote(), needsPhoto(), focus() }], markRestPass(), hasPassItems }.
  */
 export function answerSheet(steps, chips, opts = {}) {
   const answers = steps.map((raw, i) => {
@@ -184,7 +184,8 @@ export function answerSheet(steps, chips, opts = {}) {
       missing: () => !na.checked && read() === '', needsNote: () => false, needsPhoto: () => needsPhoto(na.checked), focus: () => (control.focus ? control.focus() : null), pass: () => {} };
   });
   const el = h('div', { class: 'stack' }, answers.map((a) => a.el));
-  return { el, answers, markRestPass: () => answers.forEach((a) => a.pass()) };
+  // hasPassItems: whether "Mark the rest as pass" can do anything (readings, dates and choices are never passed for you).
+  return { el, answers, markRestPass: () => answers.forEach((a) => a.pass()), hasPassItems: answers.some((a) => a.step.type === 'pass') };
 }
 
 /** Pass, Fail and N/A as three chips; tap again to clear. Fires 'change' on the group. */

@@ -1,5 +1,5 @@
 import { get, post, put } from '../api.js';
-import { h, clear, ctx, table, state, input, select, field, button, toast, dialog, fmtRange, fmtDateTime, empty, errorBox } from '../ui.js';
+import { h, clear, ctx, table, state, input, select, field, button, toast, dialog, fmtRange, fmtDateTime, empty, errorBox, isMuni } from '../ui.js';
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -70,7 +70,7 @@ export async function render(root) {
     clock.append(h('div', { class: 'row' }, instructor ? h('a', { class: 'btn small', href: '#/availability' }, 'My availability') : button('Set my weekly availability', () => availabilityDialog(m.staff_id, ''), { small: true })));
     // Lessons and program groups count as work too: an instructor with lessons never sees "No published shifts".
     let lessons = [];
-    if (ctx.me && ['instructor', 'manager', 'owner'].includes(ctx.me.role)) { try { lessons = (await get('/skischool/my-schedule')).data; } catch (_) { lessons = []; } }
+    if (ctx.me && !isMuni() && ['instructor', 'manager', 'owner'].includes(ctx.me.role)) { try { lessons = (await get('/skischool/my-schedule')).data; } catch (_) { lessons = []; } }
     const all = [...m.shifts.map((x) => ({ ...x, what: x.position })), ...lessons.map((x) => ({ starts_at: x.starts_at, ends_at: x.ends_at, what: `${x.kind === 'program' ? 'Program: ' : 'Lesson: '}${x.title}${x.level_words && x.level_words !== 'All levels' ? `, ${x.level_words}` : ''}` }))]
       .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)));
     clear(shifts).append(h('header', null, h('h2', null, 'Coming up')),

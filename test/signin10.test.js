@@ -240,7 +240,7 @@ test('in the browser: Remember me, show password, two tabs, and the 10-minute ta
     const tab3 = await ctx.newPage();
     await tab3.goto(`${base}/`);
     await tab3.waitForSelector('form[data-step=signin]');
-    assert.match(await tab3.textContent('.signin-mountain'), new RegExp(`Mountain: ${A.slug}`));
+    assert.match(await tab3.textContent('.signin-mountain'), new RegExp(`Organization: ${A.slug}`));
     assert.equal(await tab3.inputValue('input[name=login]'), `owner@${A.slug}.test`);
     assert.equal(await tab3.inputValue('input[name=password]'), '');
     assert.equal(await tab3.isChecked('input[name=remember]'), true);

@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const { pool, tx, rows, one } = require('../db');
 const config = require('../config');
 const { z, validate, paramId, partialOf, dateStr } = require('../lib/util');
-const { AppError, bad, forbidden, notFound } = require('../lib/errors');
+const { AppError, bad, conflict, forbidden, notFound } = require('../lib/errors');
 const M = require('../lib/modules');
 const sandbox = require('../lib/sandbox');
 const demoUsage = require('../lib/demousage');
@@ -438,6 +438,7 @@ router.get('/tenants/:id', twoStepRead, async (req, res) => {
     billing: bill ? { ...bill, addons: BL.ids(bill.addons), trial_ends_on: BL.dateOf(bill.trial_ends_on), paid_until: BL.dateOf(bill.paid_until), comped: Boolean(Number(bill.comped)) } : null,
     billing_standing: await BL.standingOf(id), billing_events: billEvents, card_payments: await require('../lib/connect').state(id),
     assistant: await assistantUse(id),
+    texting_number: t.org_type === 'municipality' ? ((await one(pool, 'SELECT from_number FROM street_notice_settings WHERE tenant_id = ?', [id])) || {}).from_number || null : undefined,
     platform_fees: await one(pool, "SELECT COUNT(*) AS payments, COALESCE(SUM(platform_fee_cents), 0) AS fee_cents, COALESCE(SUM(amount_cents), 0) AS amount_cents FROM order_payments WHERE tenant_id = ? AND processor = 'stripe' AND processor_account IS NOT NULL", [id]) });
 });
 
@@ -589,6 +590,32 @@ async function assistantUse(id) {
 }
 
 /** The assistant's monthly spending cap for one mountain, in cents (default $50). */
+// A municipality's own texting number (street alerts, request and bulk pickup texts). Only the platform operator sets it,
+// once the number is bought in Twilio and its "A message comes in" points at /api/v1/twilio/sms. Refused: the shared
+// numbers, a Text HELP number, and a number another tenant has (lib/residents.js ownNumberProblem). Empty: the shared one.
+router.put('/tenants/:id/texting-number', needsAccess, validate(z.object({ from_number: z.string().trim().max(30).nullable() })), async (req, res) => {
+  const id = paramId(req);
+  const t = await one(pool, 'SELECT id, org_type FROM tenants WHERE id = ?', [id]);
+  if (!t) throw notFound('Mountain');
+  if (t.org_type !== 'municipality') throw bad('Only a municipality has its own texting number. A ski area\'s Text HELP number is set in its Patrol settings.');
+  const RES = require('../lib/residents');
+  let from = null;
+  if (req.body.from_number) {
+    const problem = await RES.ownNumberProblem(pool, id, req.body.from_number);
+    if (problem) throw bad(problem);
+    from = require('../lib/sms').e164(req.body.from_number.replace(/[^\d+]/g, ''));
+  }
+  try {
+    await pool.query('INSERT INTO street_notice_settings (tenant_id, from_number) VALUES (?, ?) ON DUPLICATE KEY UPDATE from_number = VALUES(from_number)', [id, from]);
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') throw conflict('Another municipality already texts from that number. Each texting number belongs to one municipality.');
+    throw err;
+  }
+  require('../lib/streetnotices').forget(id);
+  await log(pool, req, id, 'texting_number', { from_number: from });
+  res.json({ from_number: from });
+});
+
 router.put('/tenants/:id/assistant-cap', needsAccess, validate(z.object({ cap_cents: z.number().int().min(0).max(1000000) })), async (req, res) => {
   const id = paramId(req);
   const t = await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]);

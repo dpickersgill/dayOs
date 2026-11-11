@@ -9,7 +9,7 @@ function h(tag, a, ...kids) {
   for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : String(c));
   return el;
 }
-const loadLeaflet = () => (window.L ? Promise.resolve(window.L) : new Promise((ok, no) => { const s = h('script', { src: new URL('../../vendor/leaflet/leaflet.js', import.meta.url).href }); s.onload = () => ok(window.L); s.onerror = no; document.head.append(s); }));
+const loadLeaflet = () => (window.L ? Promise.resolve(window.L) : new Promise((ok, no) => { const s = h('script', { src: new URL('../vendor/leaflet/leaflet.js', import.meta.url).href /* /r/<release>/js/ -> /r/<release>/vendor/, like kiosk.js */ }); s.onload = () => ok(window.L); s.onerror = no; document.head.append(s); }));
 const day = (s) => (s ? new Date(`${s}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '');
 
 async function start() {

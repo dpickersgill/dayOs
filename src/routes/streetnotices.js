@@ -61,10 +61,16 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_CHARS[b % CO
 const sentNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 // ---------------------------------------------------------------- who may send
+const idList = (v) => String(v || '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
 async function settingsOf(tenantId) {
-  const s = await one(pool, 'SELECT crew_senders, from_number FROM street_notice_settings WHERE tenant_id = ?', [tenantId]);
-  const ids = String((s && s.crew_senders) || '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
-  return { crew_senders: ids, from_number: (s && s.from_number) || null };
+  const s = await one(pool, 'SELECT crew_senders, certified_operators, from_number FROM street_notice_settings WHERE tenant_id = ?', [tenantId]);
+  return { crew_senders: idList(s && s.crew_senders), certified_operators: idList(s && s.certified_operators), from_number: (s && s.from_number) || null };
+}
+/** The active logins a manager marked as certified water operators (Settings): [{ id, name }]. Only they can be named as issuing a boil water advisory. */
+async function certifiedOperators(db, tenantId) {
+  const ids = (await settingsOf(tenantId)).certified_operators;
+  if (!ids.length) return [];
+  return rows(db, `SELECT u.id, ${NAME} AS name FROM users u ${USER_JOIN} WHERE u.tenant_id = ? AND u.active = 1 AND u.id IN (?) ORDER BY name`, [tenantId, ids]);
 }
 async function canSend(req) {
   if (isManager(req)) return true;
@@ -87,7 +93,7 @@ router.get('/setup', anyone, async (req, res) => {
   const t = req.auth.tenantId;
   const tenant = await tenantOf(req);
   const streets = await rows(pool, 'SELECT id, name FROM streets WHERE tenant_id = ? AND active = 1 ORDER BY name', [t]);
-  const operators = await rows(pool, `SELECT u.id, ${NAME} AS name FROM users u ${USER_JOIN} WHERE u.tenant_id = ? AND u.active = 1 AND u.role IN ('owner','manager','staff') ORDER BY name`, [t]);
+  const operators = await certifiedOperators(pool, t);
   const on = await modules.enabledKeys(t);
   res.json({
     types: SN.TYPES.map((x) => ({ key: x.key, label: x.label, topic: x.topic, urgent: x.urgent, work_order: x.workOrder, operator: Boolean(x.operator), sms: x.sms, body: x.body })),
@@ -132,8 +138,9 @@ async function checkNotice(db, tenantId, b) {
   if (b.starts_at && b.ends_expected_at && normDateTime(b.ends_expected_at) < normDateTime(b.starts_at)) throw bad('The expected end is before the start. Check both times.');
   if (!SN.TYPE[b.type].operator) return null;
   if (!b.issued_by_user_id) throw bad(`Pick the certified operator who issued this boil water advisory. ${SN.OPERATOR_RULE}`, [{ path: 'issued_by_user_id', label: 'Issued by', message: 'Pick the certified operator who issued it' }]);
-  const op = await one(db, `SELECT u.id, ${NAME} AS name FROM users u ${USER_JOIN} WHERE u.tenant_id = ? AND u.id = ? AND u.active = 1`, [tenantId, b.issued_by_user_id]);
-  if (!op) throw bad('The operator you picked is not an active login here. Pick again.');
+  // Only a login a manager listed as a certified operator (Street notices, Settings) can be named as issuing it.
+  const op = (await certifiedOperators(db, tenantId)).find((o) => Number(o.id) === Number(b.issued_by_user_id));
+  if (!op) throw bad('Pick one of your certified operators. A manager lists them in Street notices, Settings, Certified operators.', [{ path: 'issued_by_user_id', label: 'Issued by', message: 'Pick a certified operator' }]);
   return op;
 }
 async function writeAreas(conn, tenantId, noticeId, areas) {
@@ -253,10 +260,10 @@ router.get('/residents/streets', anyone, async (req, res) => {
   res.json({ data: data.map((r) => ({ ...r, residents: Number(r.residents), phones: Number(r.phones), emails: Number(r.emails), waiting: Number(r.waiting) })), total: Number(total.n) });
 });
 
-const signupList = (tenantId, streetId) => rows(pool, `SELECT s.id, s.resident_id, r.name, s.phone, s.email, s.house_number, s.unit, s.topics, s.by_text, s.by_email, s.status, s.source, s.created_at, s.confirmed_at,
+const signupList = (tenantId, streetId) => rows(pool, `SELECT s.id, s.resident_id, s.name, s.phone, s.email, s.house_number, s.unit, s.topics, s.by_text, s.by_email, s.status, s.source, s.created_at, s.confirmed_at,
     st.name AS street, (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'sms' AND a.addr = RIGHT(REGEXP_REPLACE(COALESCE(s.phone, ''), '[^0-9]', ''), 10)) AS texts_stopped_at,
     (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'email' AND a.addr = LOWER(s.email)) AS emails_stopped_at
-  FROM alert_signups s JOIN residents r ON r.tenant_id = s.tenant_id AND r.id = s.resident_id JOIN streets st ON st.tenant_id = s.tenant_id AND st.id = s.street_id
+  FROM alert_signups s JOIN streets st ON st.tenant_id = s.tenant_id AND st.id = s.street_id
   WHERE s.tenant_id = ? AND s.status IN ('active','pending') ${streetId ? 'AND s.street_id = ?' : ''} ORDER BY st.name, s.house_no IS NULL, s.house_no, s.house_number, s.id LIMIT 5000`, streetId ? [tenantId, streetId] : [tenantId]);
 
 router.get('/residents', desk, async (req, res) => {
@@ -310,23 +317,28 @@ router.post('/residents/import', mgr, validate(importBody), async (req, res) => 
     const topics = ['water', ...String(row.topics || '').toLowerCase().split(/[\s,;]+/).filter((x) => SN.TOPIC_KEYS.includes(x))];
     const r = await tx(async (conn) => {
       const residentId = await upsertResident(conn, t, { name: row.name || null, phone, email, streetId, houseNumber: row.house_number || null, unit: row.unit || null }, { source: 'import', userId: req.auth.userId });
-      const dup = await one(conn, `SELECT id FROM alert_signups WHERE tenant_id = ? AND resident_id = ? AND street_id = ? AND status = 'active' AND COALESCE(house_number, '') = ? AND COALESCE(unit, '') = ?
-        AND COALESCE(phone, '') = ? AND COALESCE(LOWER(email), '') = ? LIMIT 1`, [t, residentId, streetId, (row.house_number || '').slice(0, 20), (row.unit || '').slice(0, 20), phone || '', email || '']);
-      if (dup) return 'already';
-      let stopped = false;
+      // One sign-up for each phone or email, like the public page: a manage link reaches only its own.
+      let added = 0; let stopped = false;
       for (const [channel, v] of [['sms', phone], ['email', email]]) {
         if (!v) continue;
+        const dup = await one(conn, `SELECT id FROM alert_signups WHERE tenant_id = ? AND street_id = ? AND status = 'active' AND COALESCE(house_number, '') = ? AND COALESCE(unit, '') = ?
+          AND ${channel === 'sms' ? 'by_text = 1 AND phone = ?' : 'by_email = 1 AND LOWER(email) = ?'} LIMIT 1`, [t, streetId, (row.house_number || '').slice(0, 20), (row.unit || '').slice(0, 20), v]);
+        if (dup) continue;
         const a = await SN.addressRow(conn, t, channel, v);
         // A phone that texted STOP, or an address that used the stop link, stays stopped: the import is not a new yes.
-        if (a.stopped_at || (channel === 'sms' && await RES.stoppedByText(conn, t, v))) { stopped = true; continue; }
-        if (!a.confirmed_at) await conn.query("UPDATE alert_addresses SET confirmed_at = UTC_TIMESTAMP(), confirmed_by = 'import' WHERE tenant_id = ? AND id = ?", [t, a.id]);
-        await SN.recordAnswer(conn, t, a.id, 'opted_in', 'import', req.auth.userId);
-        const cur = await one(conn, 'SELECT texts_ok, emails_ok FROM residents WHERE tenant_id = ? AND id = ?', [t, residentId]);
-        if (!Number(cur[channel === 'sms' ? 'texts_ok' : 'emails_ok'])) await RES.recordConsent(conn, t, residentId, channel, true, 'import', req.auth.userId);
+        if (a.stopped_at || (channel === 'sms' && await RES.stoppedByText(conn, t, v))) stopped = true;
+        else {
+          if (!a.confirmed_at) await conn.query("UPDATE alert_addresses SET confirmed_at = UTC_TIMESTAMP(), confirmed_by = 'import' WHERE tenant_id = ? AND id = ?", [t, a.id]);
+          await SN.recordAnswer(conn, t, a.id, 'opted_in', 'import', req.auth.userId);
+          const cur = await one(conn, 'SELECT texts_ok, emails_ok FROM residents WHERE tenant_id = ? AND id = ?', [t, residentId]);
+          if (!Number(cur[channel === 'sms' ? 'texts_ok' : 'emails_ok'])) await RES.recordConsent(conn, t, residentId, channel, true, 'import', req.auth.userId);
+        }
+        await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, by_text, by_email, status, source, consent_note, created_by, confirmed_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'import', ?, ?, UTC_TIMESTAMP())`, [t, residentId, row.name ? row.name.slice(0, 120) : null, streetId, row.house_number ? row.house_number.slice(0, 20) : null, SN.houseNo(row.house_number),
+          row.unit ? row.unit.slice(0, 20) : null, channel === 'sms' ? v : null, channel === 'email' ? v : null, [...new Set(topics)].join(','), channel === 'sms' ? 1 : 0, channel === 'email' ? 1 : 0, req.body.consent_note, req.auth.userId]);
+        added += 1;
       }
-      await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, street_id, house_number, house_no, unit, phone, email, topics, by_text, by_email, status, source, consent_note, created_by, confirmed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'import', ?, ?, UTC_TIMESTAMP())`, [t, residentId, streetId, row.house_number ? row.house_number.slice(0, 20) : null, SN.houseNo(row.house_number),
-        row.unit ? row.unit.slice(0, 20) : null, phone, email, [...new Set(topics)].join(','), phone ? 1 : 0, email ? 1 : 0, req.body.consent_note, req.auth.userId]);
+      if (!added) return 'already';
       return stopped ? 'stopped' : 'added';
     });
     if (r === 'already') out.already += 1; else { out.added += 1; if (r === 'stopped') out.stopped += 1; }
@@ -343,24 +355,35 @@ router.post('/residents/signups/:id/end', desk, async (req, res) => {
 });
 
 // ---------------------------------------------------------------- settings
+const OWN_NUMBER_WORDS = 'Ask Verdynt to set up your own texting number.';
 router.get('/settings', mgr, async (req, res) => {
   const s = await settingsOf(req.auth.tenantId);
   const crew = await rows(pool, `SELECT u.id, ${NAME} AS name FROM users u ${USER_JOIN} WHERE u.tenant_id = ? AND u.active = 1 AND u.role = 'staff' ORDER BY name`, [req.auth.tenantId]);
-  res.json({ ...s, crew, default_from: process.env.TWILIO_FROM && !/^MG/.test(process.env.TWILIO_FROM) ? process.env.TWILIO_FROM : null, inbound_url: `${baseUrl(req)}/api/v1/twilio/sms` });
+  const logins = await rows(pool, `SELECT u.id, ${NAME} AS name, u.role FROM users u ${USER_JOIN} WHERE u.tenant_id = ? AND u.active = 1 AND u.role IN ('owner','manager','staff') ORDER BY name`, [req.auth.tenantId]);
+  // The texting number is shown, never changed here: only Verdynt sets a municipality's own number (platform console).
+  res.json({ ...s, crew, logins, own_number_words: OWN_NUMBER_WORDS, default_from: RES.sayNumber((await RES.textingNumber(pool, req.auth.tenantId)) || '') || null });
 });
-router.put('/settings', mgr, validate(z.object({ crew_senders: z.array(z.coerce.number().int().positive()).max(50).default([]), from_number: z.string().trim().max(30).nullable().optional() })), async (req, res) => {
+router.put('/settings', mgr, validate(z.object({
+  crew_senders: z.array(z.coerce.number().int().positive()).max(50).default([]),
+  certified_operators: z.array(z.coerce.number().int().positive()).max(50).optional(),
+  from_number: z.string().trim().max(30).nullable().optional(),
+})), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
+  const cur = await settingsOf(t);
+  if (b.from_number !== undefined && (b.from_number || null) !== cur.from_number && (require('../lib/sms').e164(b.from_number || '') || null) !== cur.from_number) throw forbidden(`Only Verdynt sets a municipality's texting number. ${OWN_NUMBER_WORDS}`);
   const ids = [...new Set(b.crew_senders)];
   if (ids.length) {
     const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'staff' AND active = 1 AND id IN (?)", [t, ids]);
     if (Number(c.n) !== ids.length) throw bad('Only active Crew logins can be picked to send notices.');
   }
-  const from = b.from_number ? require('../lib/helpline').normalNumber(b.from_number) : null;
-  if (b.from_number && !from) throw bad('The texting number must be a full phone number, like +16105550100');
-  await pool.query('INSERT INTO street_notice_settings (tenant_id, crew_senders, from_number, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE crew_senders = VALUES(crew_senders), from_number = VALUES(from_number), updated_by = VALUES(updated_by)',
-    [t, ids.join(',') || null, from, req.auth.userId]);
-  SN.forget(t);
-  await audit(pool, req, 'settings', 'street_notice_settings', t, { crew_senders: ids, from_number: from });
+  const ops = b.certified_operators === undefined ? cur.certified_operators : [...new Set(b.certified_operators)];
+  if (ops.length) {
+    const [[c]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role IN ('owner','manager','staff') AND active = 1 AND id IN (?)", [t, ops]);
+    if (Number(c.n) !== ops.length) throw bad('Only active owner, manager and Crew logins can be marked as certified operators.');
+  }
+  await pool.query('INSERT INTO street_notice_settings (tenant_id, crew_senders, certified_operators, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE crew_senders = VALUES(crew_senders), certified_operators = VALUES(certified_operators), updated_by = VALUES(updated_by)',
+    [t, ids.join(',') || null, ops.join(',') || null, req.auth.userId]);
+  await audit(pool, req, 'settings', 'street_notice_settings', t, { crew_senders: ids, certified_operators: ops });
   res.json(await settingsOf(t));
 });
 
@@ -590,17 +613,25 @@ publicRouter.post('/:slug/alerts', validate(signupBody), async (req, res) => {
     }
   }
   const topics = [...new Set(['water', ...b.topics])].join(',');
-  const signup = await tx(async (conn) => {
+  // Nobody is joined to a resident here: the phone joins only once its code is entered, and the email only once its link
+  // is pressed (residentForConfirmed). A phone and an email given together are two sign-ups, one for each, so neither can
+  // see or change what came in through the other.
+  const made = await tx(async (conn) => {
     if (phone) await claimCode(conn, t.id, phone);
-    const residentId = await upsertResident(conn, t.id, { name: b.name || null, phone, email, streetId: street.id, houseNumber: b.house_number, unit: b.unit || null }, { source: 'street_notices' });
-    const [r] = await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, street_id, house_number, house_no, unit, phone, email, topics, status, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'web')`, [t.id, residentId, street.id, b.house_number, SN.houseNo(b.house_number), b.unit || null, phone, email, topics]);
-    return { id: r.insertId, resident_id: residentId, phone, email };
+    const out = {};
+    for (const [channel, v] of [['sms', phone], ['email', email]]) {
+      if (!v) continue;
+      const [r] = await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, status, source)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'web')`, [t.id, b.name || null, street.id, b.house_number, SN.houseNo(b.house_number), b.unit || null,
+        channel === 'sms' ? v : null, channel === 'email' ? v : null, topics]);
+      out[channel] = { id: r.insertId, phone: channel === 'sms' ? v : null, email: channel === 'email' ? v : null };
+    }
+    return out;
   });
-  if (phone) await sendCode(t, signup);
-  const emailSent = email ? await sendEmailLink(req, t, signup) : false;
+  if (made.sms) await sendCode(t, made.sms);
+  const emailSent = made.email ? await sendEmailLink(req, t, made.email) : false;
   if (!phone && !emailSent) throw new AppError(502, 'We could not send an email to that address. Check it and try again.');
-  res.status(201).json({ ref: SN.signupRef(t.id, signup.id), needs_code: Boolean(phone), phone_hint: phone ? phoneHint(phone) : null, email_sent: emailSent, minutes: CODE_MINUTES });
+  res.status(201).json({ ref: SN.signupRef(t.id, (made.sms || made.email).id), needs_code: Boolean(phone), phone_hint: phone ? phoneHint(phone) : null, email_sent: emailSent, minutes: CODE_MINUTES });
 });
 
 async function signupOf(t, ref) {
@@ -610,13 +641,22 @@ async function signupOf(t, ref) {
   if (!s || s.status === 'ended') throw bad('This sign-up has ended. Start again.');
   return s;
 }
-/** The sign-up is confirmed: active, older copies of the same address for this resident end (the new one replaces them). */
+/**
+ * The sign-up's phone (channel 'sms') or email is confirmed: it joins the resident with that same phone or email (or a new
+ * one with only what was confirmed; lib/residents.js residentForConfirmed, which never changes a resident), turns active,
+ * and an older copy of the same address through the same phone or email ends (the new one replaces it). Returns the
+ * alert_addresses row of what was confirmed: the manage link belongs to it.
+ */
 async function activate(conn, t, s, channel) {
-  await conn.query(`UPDATE alert_signups SET status = 'active', confirmed_at = COALESCE(confirmed_at, UTC_TIMESTAMP()), ${channel === 'sms' ? 'by_text = 1, code_hash = NULL, code_tries = 0' : 'by_email = 1'}
-    WHERE tenant_id = ? AND id = ?`, [t.id, s.id]);
-  await conn.query(`UPDATE alert_signups SET status = 'ended', ended_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND resident_id = ? AND id < ? AND status = 'active' AND street_id = ?
-    AND COALESCE(house_number, '') = ? AND COALESCE(unit, '') = ? AND COALESCE(phone, '') = ? AND COALESCE(email, '') = ?`, [t.id, s.resident_id, s.id, s.street_id, s.house_number || '', s.unit || '', s.phone || '', s.email || '']);
+  const residentId = s.resident_id || await RES.residentForConfirmed(conn, t.id, channel, { name: s.name, phone: s.phone, email: s.email, streetId: s.street_id, houseNumber: s.house_number, unit: s.unit });
+  await conn.query(`UPDATE alert_signups SET resident_id = ?, status = 'active', confirmed_at = COALESCE(confirmed_at, UTC_TIMESTAMP()), ${channel === 'sms' ? 'by_text = 1, code_hash = NULL, code_tries = 0' : 'by_email = 1'}
+    WHERE tenant_id = ? AND id = ?`, [residentId, t.id, s.id]);
+  const same = channel === 'sms' ? ["by_text = 1 AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', ''), 10) = ?", sms.phoneKey(s.phone)] : ['by_email = 1 AND LOWER(email) = ?', String(s.email).toLowerCase()];
+  await conn.query(`UPDATE alert_signups SET status = 'ended', ended_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id <> ? AND status = 'active' AND street_id = ?
+    AND COALESCE(house_number, '') = ? AND COALESCE(unit, '') = ? AND ${same[0]} AND (${channel === 'sms' ? 'by_email' : 'by_text'} = 0)`, [t.id, s.id, s.street_id, s.house_number || '', s.unit || '', same[1]]);
+  return SN.addressRow(conn, t.id, channel, channel === 'sms' ? s.phone : s.email);
 }
+const manageUrl = (req, t, a) => SN.manageLink(baseUrl(req), t.slug, t.id, a.id);
 
 publicRouter.post('/:slug/alerts/confirm', validate(z.object({ ref: z.string().max(80), code: z.string().trim().max(12) })), async (req, res) => {
   const t = await town(req);
@@ -635,15 +675,16 @@ publicRouter.post('/:slug/alerts/confirm', validate(z.object({ ref: z.string().m
     if (left <= 0) throw new AppError(429, 'Too many wrong codes. Press Send a new code.');
     throw bad(`That code is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.`);
   }
-  await tx(async (conn) => {
-    await activate(conn, t, s, 'sms');
+  const a = await tx(async (conn) => {
+    const row = await activate(conn, t, s, 'sms');
     await SN.confirmAddress(conn, t.id, 'sms', s.phone, 'code', 'signup_code');
+    return row;
   });
   // The welcome text says what was agreed and how to stop (carrier rules for recurring texts).
   const street = await one(pool, 'SELECT name FROM streets WHERE tenant_id = ? AND id = ?', [t.id, s.street_id]);
   await sms.send({ tenantId: t.id, to: s.phone, from: (await settingsOf(t.id)).from_number, tag: 'alert-welcome',
     body: `${t.name}: you will get alerts for ${street ? street.name : 'your street'} by text. How often depends on what happens. Msg and data rates may apply. Reply STOP to stop.` });
-  res.json({ ok: true, manage: `${baseUrl(req)}/alerts/${encodeURIComponent(t.slug)}/manage/${SN.manageToken(t.id, s.resident_id)}` });
+  res.json({ ok: true, manage: manageUrl(req, t, a) });
 });
 
 publicRouter.post('/:slug/alerts/resend', validate(z.object({ ref: z.string().max(80) })), async (req, res) => {
@@ -661,54 +702,87 @@ publicRouter.post('/:slug/alerts/email', validate(z.object({ token: z.string().m
   const tok = SN.readToken('email', req.body.token);
   const s = tok && tok.tenantId === t.id ? await one(pool, 'SELECT * FROM alert_signups WHERE tenant_id = ? AND id = ?', [t.id, tok.id]) : null;
   if (!s || !s.email || !tok.check(String(s.email).toLowerCase()) || s.status === 'ended') throw bad('This link does not work any more. Sign up again on the alerts page.');
-  if (!s.by_email) {
-    await tx(async (conn) => {
-      await activate(conn, t, s, 'email');
-      await SN.confirmAddress(conn, t.id, 'email', s.email, 'link', 'signup_link');
-    });
-  }
-  res.json({ ok: true, manage: `${baseUrl(req)}/alerts/${encodeURIComponent(t.slug)}/manage/${SN.manageToken(t.id, s.resident_id)}` });
+  // The link went to this email, so pressing it proves the email only: the manage link it gives is for the email alone.
+  const a = await tx(async (conn) => {
+    const row = s.by_email ? await SN.addressRow(conn, t.id, 'email', s.email) : await activate(conn, t, s, 'email');
+    if (!s.by_email) await SN.confirmAddress(conn, t.id, 'email', s.email, 'link', 'signup_link');
+    return row;
+  });
+  res.json({ ok: true, manage: manageUrl(req, t, a) });
 });
 
+/**
+ * The manage link: it belongs to one confirmed phone or email (an alert_addresses row), and reaches only the sign-ups
+ * confirmed through that same phone or email. Never a sign-up that came in through another phone or email, and never the
+ * resident record behind it.
+ */
 async function managed(req) {
   const t = await town(req);
-  const tok = SN.readToken('manage', req.params.token);
-  if (!tok || tok.tenantId !== t.id || !tok.check()) throw new AppError(404, 'This link does not work. Use the link in your latest alert, or sign up again.');
-  return { t, residentId: tok.id };
+  const tok = SN.readToken('manage-addr', req.params.token);
+  const gone = () => new AppError(404, 'This link does not work. Use the link in your latest alert, or sign up again.');
+  if (!tok || tok.tenantId !== t.id || !tok.check()) throw gone();
+  const a = await one(pool, 'SELECT * FROM alert_addresses WHERE tenant_id = ? AND id = ?', [t.id, tok.id]);
+  if (!a || !a.confirmed_at) throw gone();
+  return { t, a };
 }
-async function manageView(t, residentId) {
-  const list = await rows(pool, `SELECT s.id, st.name AS street, s.house_number, s.unit, s.topics, s.by_text, s.by_email, s.phone, s.email,
-      (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'sms' AND a.addr = RIGHT(REGEXP_REPLACE(COALESCE(s.phone, ''), '[^0-9]', ''), 10)) AS texts_stopped,
-      (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'email' AND a.addr = LOWER(s.email)) AS emails_stopped
-    FROM alert_signups s JOIN streets st ON st.tenant_id = s.tenant_id AND st.id = s.street_id WHERE s.tenant_id = ? AND s.resident_id = ? AND s.status = 'active' ORDER BY s.id`, [t.id, residentId]);
+/** SQL that picks the sign-ups confirmed through this address: [where, params]. */
+const throughAddress = (a) => (a.channel === 'sms'
+  ? ["s.by_text = 1 AND s.phone IS NOT NULL AND RIGHT(REGEXP_REPLACE(s.phone, '[^0-9]', ''), 10) = ?", [a.addr]]
+  : ['s.by_email = 1 AND LOWER(s.email) = ?', [a.addr]]);
+async function manageView(t, a) {
+  const [where, params] = throughAddress(a);
+  const list = await rows(pool, `SELECT s.id, st.name AS street, s.house_number, s.unit, s.topics
+    FROM alert_signups s JOIN streets st ON st.tenant_id = s.tenant_id AND st.id = s.street_id WHERE s.tenant_id = ? AND s.status = 'active' AND ${where} ORDER BY s.id`, [t.id, ...params]);
+  const state = a.stopped_at ? 'stopped' : 'on';
+  const hint = a.channel === 'sms' ? phoneHint(a.addr) : emailHint(a.addr);
   return {
-    municipality: t.name, topics: SN.TOPICS.map(([key, label]) => ({ key, label, always: key === 'water' })),
+    municipality: t.name, channel: a.channel, hint, topics: SN.TOPICS.map(([key, label]) => ({ key, label, always: key === 'water' })),
     signups: list.map((s) => ({ id: s.id, street: s.street, house_number: s.house_number, unit: s.unit, topics: String(s.topics || '').split(',').filter(Boolean),
-      texts: s.by_text ? (s.texts_stopped ? 'stopped' : 'on') : null, emails: s.by_email ? (s.emails_stopped ? 'stopped' : 'on') : null, phone_hint: s.by_text ? phoneHint(s.phone) : null, email_hint: s.by_email ? emailHint(s.email) : null })),
+      texts: a.channel === 'sms' ? state : null, emails: a.channel === 'email' ? state : null, phone_hint: a.channel === 'sms' ? hint : null, email_hint: a.channel === 'email' ? hint : null })),
   };
 }
+/**
+ * The sign-up, reached through this address, as one that has only this phone or email on it: an older sign-up that holds
+ * both a confirmed phone and a confirmed email (an import) is split in two first, so a change through one never touches
+ * the other. Returns the id, or null when the address does not reach it.
+ */
+async function ownRow(conn, t, a, signupId) {
+  const [where, params] = throughAddress(a);
+  const s = await one(conn, `SELECT s.* FROM alert_signups s WHERE s.tenant_id = ? AND s.id = ? AND s.status = 'active' AND ${where} FOR UPDATE`, [t.id, signupId, ...params]);
+  if (!s) return null;
+  const other = a.channel === 'sms' ? Number(s.by_email) : Number(s.by_text);
+  if (!other) return Number(s.id);
+  const [r] = await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, by_text, by_email, status, source, consent_note, created_by, created_at, confirmed_at)
+    SELECT tenant_id, resident_id, name, street_id, house_number, house_no, unit, ${a.channel === 'sms' ? 'phone, NULL, topics, 1, 0' : 'NULL, email, topics, 0, 1'}, status, source, consent_note, created_by, created_at, confirmed_at
+    FROM alert_signups WHERE tenant_id = ? AND id = ?`, [t.id, s.id]);
+  await conn.query(`UPDATE alert_signups SET ${a.channel === 'sms' ? 'by_text = 0, phone = NULL' : 'by_email = 0, email = NULL'} WHERE tenant_id = ? AND id = ?`, [t.id, s.id]);
+  return Number(r.insertId);
+}
 publicRouter.get('/:slug/alerts/manage/:token', async (req, res) => {
-  const { t, residentId } = await managed(req);
-  res.set('Cache-Control', 'no-store').json(await manageView(t, residentId));
+  const { t, a } = await managed(req);
+  res.set('Cache-Control', 'no-store').json(await manageView(t, a));
 });
 const manageBody = z.discriminatedUnion('action', [
   z.object({ action: z.literal('topics'), signup_id: z.coerce.number().int().positive(), topics: z.array(z.enum(SN.TOPIC_KEYS)).max(10) }),
   z.object({ action: z.literal('remove'), signup_id: z.coerce.number().int().positive() }),
-  z.object({ action: z.literal('stop'), channel: z.enum(['sms', 'email']) }),
+  z.object({ action: z.literal('stop'), channel: z.enum(['sms', 'email']).optional() }),
 ]);
 publicRouter.post('/:slug/alerts/manage/:token', validate(manageBody), async (req, res) => {
-  const { t, residentId } = await managed(req);
+  const { t, a } = await managed(req);
   const b = req.body;
   if (b.action === 'stop') {
-    const list = await rows(pool, `SELECT DISTINCT ${b.channel === 'sms' ? 'phone' : 'email'} AS v FROM alert_signups WHERE tenant_id = ? AND resident_id = ? AND status = 'active' AND ${b.channel === 'sms' ? 'by_text' : 'by_email'} = 1`, [t.id, residentId]);
-    for (const x of list) if (x.v) await SN.stopAddress(pool, t.id, b.channel, x.v, 'manage_link');
+    // The link stops only its own phone or email.
+    if (b.channel && b.channel !== a.channel) throw bad(a.channel === 'sms' ? 'This link is for texts to one phone. Use the link in an alert email to stop emails.' : 'This link is for emails to one address. Reply STOP to a text to stop texts.');
+    await SN.stopAddress(pool, t.id, a.channel, a.addr, 'manage_link');
   } else {
-    const s = await one(pool, "SELECT id FROM alert_signups WHERE tenant_id = ? AND resident_id = ? AND id = ? AND status = 'active'", [t.id, residentId, b.signup_id]);
-    if (!s) throw new AppError(404, 'That address is not on your alerts any more.');
-    if (b.action === 'topics') await pool.query('UPDATE alert_signups SET topics = ? WHERE tenant_id = ? AND id = ?', [[...new Set(['water', ...b.topics])].join(','), t.id, s.id]);
-    else await pool.query("UPDATE alert_signups SET status = 'ended', ended_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?", [t.id, s.id]);
+    await tx(async (conn) => {
+      const id = await ownRow(conn, t, a, b.signup_id);
+      if (!id) throw new AppError(404, 'That address is not on your alerts any more.');
+      if (b.action === 'topics') await conn.query('UPDATE alert_signups SET topics = ? WHERE tenant_id = ? AND id = ?', [[...new Set(['water', ...b.topics])].join(','), t.id, id]);
+      else await conn.query("UPDATE alert_signups SET status = 'ended', ended_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?", [t.id, id]);
+    });
   }
-  res.json(await manageView(t, residentId));
+  res.json(await manageView(t, await one(pool, 'SELECT * FROM alert_addresses WHERE tenant_id = ? AND id = ?', [t.id, a.id])));
 });
 
 publicRouter.get('/:slug/alerts/:code', async (req, res) => {

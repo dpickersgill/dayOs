@@ -37,6 +37,13 @@ module.exports = async function notices(conn, tenantId, helpers) {
   const managerId = users.get('manager') || null;
   const utc = (local) => quiet.utcOf(helpers.timezone, local);
 
+  // One crew member holds the water operator certification, so a boil water advisory can name who issued it.
+  const operatorId = users.get('crew1') || null;
+  if (operatorId) {
+    await conn.query(`INSERT INTO street_notice_settings (tenant_id, certified_operators) VALUES (?, ?)
+      ON DUPLICATE KEY UPDATE certified_operators = COALESCE(certified_operators, VALUES(certified_operators))`, [tenantId, String(operatorId)]);
+  }
+
   // ---------------------------------------------------------------- 300 sign-ups
   const [[have]] = await conn.query('SELECT COUNT(*) AS n FROM alert_signups WHERE tenant_id = ? AND consent_note = ?', [tenantId, NOTE]);
   if (Number(have.n) < 300) {
@@ -61,9 +68,9 @@ module.exports = async function notices(conn, tenantId, helpers) {
       }
       // A few signed up in the last week, so Today has a card.
       const daysAgo = i % 40 === 0 ? i % 6 : 30 + (i % 90);
-      await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, street_id, house_number, house_no, unit, phone, email, topics, by_text, by_email, status, source, consent_note, created_by, created_at, confirmed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'import', ?, ?, UTC_TIMESTAMP() - INTERVAL ? DAY, UTC_TIMESTAMP() - INTERVAL ? DAY)`,
-      [tenantId, residentId, streets.get(street), house, Number(house), i % 17 === 0 ? 'Apt 2' : null, phone, email, topics, phone ? 1 : 0, email ? 1 : 0, NOTE, managerId, daysAgo, daysAgo]);
+      await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, by_text, by_email, status, source, consent_note, created_by, created_at, confirmed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'import', ?, ?, UTC_TIMESTAMP() - INTERVAL ? DAY, UTC_TIMESTAMP() - INTERVAL ? DAY)`,
+      [tenantId, residentId, name, streets.get(street), house, Number(house), i % 17 === 0 ? 'Apt 2' : null, phone, email, topics, phone ? 1 : 0, email ? 1 : 0, NOTE, managerId, daysAgo, daysAgo]);
       made += 1;
     }
     // Two residents replied STOP at some point: they stay on the list, and are skipped.

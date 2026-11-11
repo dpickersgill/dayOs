@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { pool, one, rows } = require('../db');
 const { nowIn, utcFromLocal } = require('./util');
 const R = require('./residents');
+const PS = require('./publicsends');
 
 const DEFAULT_CATEGORIES = [
   // name, needs contact, show the after-hours number, map color
@@ -164,9 +165,12 @@ function roundPosition(lat, lng) {
   if (lat === null || lat === undefined || lng === null || lng === undefined) return null;
   const la = Number(lat); const ln = Number(lng);
   const step = 0.00045; // about 50 m of latitude
-  const lngStep = step / Math.max(0.2, Math.cos((la * Math.PI) / 180));
   const r6 = (n) => Math.round(n * 1e6) / 1e6;
-  return { lat: r6(Math.round(la / step) * step), lng: r6(Math.round(ln / lngStep) * lngStep) };
+  const roundLat = r6(Math.round(la / step) * step);
+  // The longitude step comes from the ROUNDED latitude: from the true one, the step itself would say where in the 50 m band
+  // the point is, and the published longitude could be worked back to the house (review fix, 2026.11.19).
+  const lngStep = step / Math.max(0.2, Math.cos((roundLat * Math.PI) / 180));
+  return { lat: roundLat, lng: r6(Math.round(ln / lngStep) * lngStep) };
 }
 
 // ---------------------------------------------------------------- the record
@@ -217,24 +221,23 @@ async function tellResident(tenantId, requestId, kind, { base } = {}) {
   const out = { sms: 'skipped', email: 'skipped' };
   try {
     const r = await requestOf(pool, tenantId, requestId);
-    if (!r || !r.resident_id || !MSG[kind]) return out;
-    const res = await one(pool, 'SELECT * FROM residents WHERE tenant_id = ? AND id = ?', [tenantId, r.resident_id]);
-    if (!res) return out;
+    // Messages go to the phone and email typed on this request (never to a resident record a public form matched).
+    if (!r || !(r.contact_phone || r.contact_email) || !MSG[kind]) return out;
     const t = await one(pool, 'SELECT name, slug, timezone FROM tenants WHERE id = ?', [tenantId]);
     const already = new Set((await rows(pool, 'SELECT channel FROM request_messages WHERE tenant_id = ? AND request_id = ? AND kind = ? AND ok = 1', [tenantId, requestId, kind])).map((m) => m.channel));
     const link = statusLink(base || require('../config').stripe.publicUrl || '', t.slug, r.status_token);
     const line = `${t.name}: ${MSG[kind](t.name, r)}`;
     const log = (channel, sent) => pool.query('INSERT INTO request_messages (tenant_id, request_id, kind, channel, ok, error, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [tenantId, requestId, kind, channel, sent.ok ? 1 : 0, sent.ok ? null : String(sent.error || '').slice(0, 200), nowIn(t.timezone)]);
-    if (Number(r.updates_by_text) && !already.has('sms') && await R.textsAllowed(pool, tenantId, res)) {
+    if (Number(r.updates_by_text) && !already.has('sms') && await R.phoneMayText(pool, tenantId, r.contact_phone) && (r.source !== 'web' || await PS.allow(tenantId, 'sms', r.contact_phone, `request-${kind}`))) {
       const body = `${line} See it: ${link} Reply STOP to stop texts.`;
-      const sent = await require('./sms').send({ tenantId, to: res.phone, body, from: await R.fromNumber(pool, tenantId), tag: `request-${kind}` }); // the municipality's own texting number when it has one
+      const sent = await require('./sms').send({ tenantId, to: r.contact_phone, body, from: await R.fromNumber(pool, tenantId), tag: `request-${kind}` }); // the municipality's own texting number when it has one
       await log('sms', sent);
       out.sms = sent.ok ? 'sent' : 'failed';
     }
-    if (Number(r.updates_by_email) && !already.has('email') && R.emailsAllowed(res)) {
+    if (Number(r.updates_by_email) && !already.has('email') && await R.emailMayGet(pool, tenantId, r.contact_email) && (r.source !== 'web' || await PS.allow(tenantId, 'email', r.contact_email, `request-${kind}`))) {
       const text = `${line}\n\nSee your report: ${link}\n\nYou get these emails because you asked for updates on this report. To stop them, open the link above and choose Stop updates.\n\n${t.name}`;
-      const sent = await require('./mailer').send({ tenantId, to: res.email, fromName: t.name, subject: `${t.name}: ${SUBJECT[kind]} (${r.reference})`, text, tag: 'resident-request' });
+      const sent = await require('./mailer').send({ tenantId, to: r.contact_email, fromName: t.name, subject: `${t.name}: ${SUBJECT[kind]} (${r.reference})`, text, tag: 'resident-request' });
       await log('email', sent);
       out.email = sent.ok ? 'sent' : 'failed';
     }
@@ -374,11 +377,9 @@ async function ledger(conn, tenantId, { street_id: streetId, category_id: catego
   const standards = await standardsOf(conn, tenantId);
   const ids = list.map((r) => r.id);
   const photos = ids.length ? await rows(conn, 'SELECT id, request_id, stage, sha256, uploaded_at FROM request_photos WHERE tenant_id = ? AND request_id IN (?) ORDER BY id', [tenantId, ids]) : [];
-  const residents = contacts && ids.length ? new Map((await rows(conn, 'SELECT id, name, phone, email, house_number FROM residents WHERE tenant_id = ? AND id IN (SELECT resident_id FROM requests WHERE tenant_id = ? AND id IN (?))', [tenantId, tenantId, ids])).map((x) => [Number(x.id), x])) : new Map();
   const data = list.map((r) => {
     const std = standardFor(standards, r.category_id, r.street_class);
     const t = timing(r, std, now, tz);
-    const res = contacts && r.resident_id ? residents.get(Number(r.resident_id)) : null;
     return {
       id: Number(r.id), reference: r.reference, category_id: Number(r.category_id), category: r.category, status: r.status, status_words: STATUS_WORDS[r.status],
       street: r.street_name, street_class: r.street_class || null, cross_street: r.cross_street, ...(contacts ? { house_number: r.house_number } : {}),
@@ -386,7 +387,7 @@ async function ledger(conn, tenantId, { street_id: streetId, category_id: catego
       referred_to: r.referred_to, work_order_id: r.work_order_id ? Number(r.work_order_id) : null,
       make_safe: t.make_safe, fix: t.fix,
       photos: photos.filter((p) => Number(p.request_id) === Number(r.id)).map((p) => ({ id: Number(p.id), stage: p.stage, sha256: p.sha256, at: p.uploaded_at })),
-      ...(contacts ? { contact: res ? { name: res.name, phone: res.phone, email: res.email } : null } : {}),
+      ...(contacts ? { contact: r.contact_name || r.contact_phone || r.contact_email ? { name: r.contact_name, phone: r.contact_phone, email: r.contact_email } : null } : {}),
     };
   });
   // Met target, per category: of the requests with a target and a finished clock, how many were within it.

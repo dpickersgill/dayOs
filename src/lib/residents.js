@@ -2,8 +2,9 @@
 
 // Residents (muni release 1): the people who report a problem, book a bulk pickup or sign up for street notices. A resident
 // is a contact kept apart from everything public: never on a public page, in a log, in AI or in a public-record export
-// (Right-to-Know) unless a manager picks "include contact details". Bulk pickup and street notices write through
-// upsertResident so one person is one row, however they reached the municipality.
+// (Right-to-Know) unless a manager picks "include contact details". Bulk pickup and requests write through upsertResident,
+// and street alerts through residentForConfirmed once a phone or email is confirmed. A public form never adds to or
+// changes a resident who is already on file: it keeps what was typed on its own row (the request, booking or sign-up).
 //
 // Consent follows the consent ledger's rules (lib/consent.js): every yes or no to texts or emails is its own row in
 // resident_consent, never edited, and residents.texts_ok / emails_ok is the quick answer that follows the latest row.
@@ -49,14 +50,19 @@ async function recordConsent(conn, tenantId, residentId, channel, yes, source = 
  *   fields: { name, phone, email, streetId, houseNumber, unit, textsOk, emailsOk }
  *   textsOk / emailsOk: true is a yes and false a no (each recorded in resident_consent); undefined or null leaves the
  *   resident's answer as it is (not ticking "text me" on a new report does not take back an earlier yes).
- *   opts (optional): { source: 'report_page' | 'staff' | 'bulk_pickup' | 'street_notices' | ..., userId }
+ *   opts (optional): { source: 'report_page' | 'staff' | 'bulk_pickup' | 'street_notices' | ..., userId, publicForm }
+ *   publicForm: true for a page anyone can fill in. An existing resident is then only found, never changed (see below).
  */
-async function upsertResident(conn, tenantId, { name, phone, email, streetId, houseNumber, unit, textsOk, emailsOk } = {}, { source = 'staff', userId = null } = {}) {
+async function upsertResident(conn, tenantId, { name, phone, email, streetId, houseNumber, unit, textsOk, emailsOk } = {}, { source = 'staff', userId = null, publicForm = false } = {}) {
   const nm = cleanText(name, 120);
   const ph = phoneKey(phone) ? cleanText(phone, 30) : null;
   const em = cleanEmail(email);
   if (!nm && !ph && !em) return null;
   const found = (ph && await byPhone(conn, tenantId, ph)) || (em && await byEmail(conn, tenantId, em)) || null;
+  // A public form proves nothing about who typed it: it may point a report or booking at the resident with that phone or
+  // email, but never changes that resident (no name, address, phone, email or yes/no is added or replaced). What the
+  // person typed stays on the report, booking or sign-up row itself, and messages go to that.
+  if (found && publicForm) return Number(found.id);
   let id;
   if (found) {
     id = Number(found.id);
@@ -98,6 +104,21 @@ async function stoppedByText(conn, tenantId, phone) {
   return Boolean(alert);
 }
 
+/**
+ * Why this number cannot be a municipality's own texting number, or null when it can. Only the platform operator sets it
+ * (platform console, the tenant's page). Refused: the shared Verdynt/OS numbers (TWILIO_FROM and the messaging service's
+ * senders, TWILIO_SENDERS), any mountain's Text HELP number, and a number another tenant already has: a number belongs
+ * to one municipality, so a STOP to it is that municipality's alone.
+ */
+async function ownNumberProblem(conn, tenantId, number) {
+  const n = SMS.e164(String(number || '').replace(/[^\d+]/g, ''));
+  if (!n) return 'The texting number must be a full US or Canadian phone number, like +16105550100.';
+  if (SMS.sharedNumbers().includes(n)) return 'That is the shared Verdynt/OS number, which every municipality without its own number texts from. Give this municipality a number of its own, or leave it empty to keep the shared one.';
+  if (await one(conn, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ?', [n])) return 'That number is a Text HELP number for a ski patrol. Pick another number.';
+  if (await one(conn, 'SELECT tenant_id FROM street_notice_settings WHERE from_number = ? AND tenant_id <> ?', [n, tenantId])) return 'Another municipality already texts from that number. Each texting number belongs to one municipality.';
+  return null;
+}
+
 /** The municipality's own texting number (Street notices, Settings), as +1..., or null when it texts from the shared number. */
 async function fromNumber(conn, tenantId) {
   const s = await one(conn, 'SELECT from_number FROM street_notice_settings WHERE tenant_id = ?', [tenantId]);
@@ -136,6 +157,43 @@ async function textsAllowed(conn, tenantId, resident) {
 const emailsAllowed = (resident) => Boolean(resident && Number(resident.emails_ok) && cleanEmail(resident.email));
 
 /**
+ * May this phone get the texts a person asked for on a report or booking (the yes is on that row)? Not when the phone
+ * texted STOP here, its latest answer on any resident with that number here is no, or a customer record here said no.
+ */
+async function phoneMayText(conn, tenantId, phone) {
+  const key = phoneKey(phone);
+  if (!key) return false;
+  if (await SMS.phoneSaidNo(tenantId, key)) return false;
+  if (await stoppedByText(conn, tenantId, key)) return false;
+  const no = await one(conn, `SELECT 1 AS x FROM residents r WHERE r.tenant_id = ? AND r.phone IS NOT NULL AND REGEXP_REPLACE(r.phone, '[^0-9]', '') IN (?, ?)
+    AND (SELECT c.status FROM resident_consent c WHERE c.tenant_id = r.tenant_id AND c.resident_id = r.id AND c.channel = 'sms' ORDER BY c.id DESC LIMIT 1) = 'opted_out' LIMIT 1`, [tenantId, key, `1${key}`]);
+  return !no;
+}
+/** May this email get the emails a person asked for on a report or booking? Not when its latest answer on a resident here is no. */
+async function emailMayGet(conn, tenantId, email) {
+  const e = cleanEmail(email);
+  if (!e) return false;
+  const no = await one(conn, `SELECT 1 AS x FROM residents r WHERE r.tenant_id = ? AND r.email = ?
+    AND (SELECT c.status FROM resident_consent c WHERE c.tenant_id = r.tenant_id AND c.resident_id = r.id AND c.channel = 'email' ORDER BY c.id DESC LIMIT 1) = 'opted_out' LIMIT 1`, [tenantId, e]);
+  return !no;
+}
+
+/**
+ * A resident for an alert sign-up whose phone (channel 'sms') or email was just confirmed by its code or link: the
+ * resident here with that same phone or email, or a new one with only what was confirmed. Never changes a resident who
+ * is already there. Returns the id.
+ */
+async function residentForConfirmed(conn, tenantId, channel, { name, phone, email, streetId, houseNumber, unit } = {}) {
+  const found = channel === 'sms' ? await byPhone(conn, tenantId, phone) : await byEmail(conn, tenantId, email);
+  if (found) return Number(found.id);
+  const ph = channel === 'sms' && phoneKey(phone) ? cleanText(phone, 30) : null;
+  const em = channel === 'email' ? cleanEmail(email) : null;
+  const [r] = await conn.query('INSERT INTO residents (tenant_id, name, phone, email, street_id, house_number, unit) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [tenantId, cleanText(name, 120), ph, em, streetId || null, streetId ? cleanText(houseNumber, 20) : null, streetId ? cleanText(unit, 20) : null]);
+  return Number(r.insertId);
+}
+
+/**
  * A STOP or START texted to one of our numbers (routes/twilioinbound.js), the one path for requests, bulk pickup and
  * street notices. STOP turns texts off; START turns them back on only where the last answer was a STOP by text.
  *   tenantIds: the municipalities whose own texting number the reply came to; empty or missing means the shared number,
@@ -167,6 +225,8 @@ async function applyTextReply(conn, phone, intent, { tenantIds = null } = {}) {
 async function tenantsOfNumber(conn, number) {
   const key = phoneKey(number);
   if (!key) return [];
+  // A shared number is never one municipality's own, whatever a settings row says.
+  if (SMS.sharedNumbers().includes(`+1${key}`)) return [];
   return (await rows(conn, 'SELECT tenant_id FROM street_notice_settings WHERE from_number = ?', [`+1${key}`])).map((r) => Number(r.tenant_id));
 }
 
@@ -175,4 +235,4 @@ async function consentHistory(conn, tenantId, residentId) {
   return rows(conn, 'SELECT channel, status, source, created_at AS at FROM resident_consent WHERE tenant_id = ? AND resident_id = ? ORDER BY id DESC LIMIT 50', [tenantId, residentId]);
 }
 
-module.exports = { upsertResident, recordConsent, stoppedByText, textsAllowed, emailsAllowed, applyTextReply, tenantsOfNumber, fromNumber, textingNumber, sayNumber, textsOffWords, textsOffNotice, consentHistory, byPhone, byEmail, phoneKey, cleanEmail, WORDING, SOURCES };
+module.exports = { ownNumberProblem, upsertResident, residentForConfirmed, phoneMayText, emailMayGet, recordConsent, stoppedByText, textsAllowed, emailsAllowed, applyTextReply, tenantsOfNumber, fromNumber, textingNumber, sayNumber, textsOffWords, textsOffNotice, consentHistory, byPhone, byEmail, phoneKey, cleanEmail, WORDING, SOURCES };

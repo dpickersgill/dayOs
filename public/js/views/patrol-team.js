@@ -257,7 +257,7 @@ function stepCheckDialog(e, again, canLeadHere, steps) {
     flagged && !canLeadHere ? h('p', { class: 'warn-note' }, `This item is flagged ${label(e.status).toLowerCase()}. A passing check is logged, but someone who manages equipment clears it for use.`) : null,
     e.kind === 'aed' && Number(e.needs_download) ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'downloaded' }), ' Data downloaded for the medical director and new pads fitted') : null,
     sheet.el,
-    h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true })),
+    sheet.hasPassItems ? h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true })) : null,
     field('Notes', notes),
     h('label', { class: 'check' }, outOf, ' Take it out of service')),
   async (fd) => {

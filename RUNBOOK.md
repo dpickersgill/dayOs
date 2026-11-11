@@ -49,7 +49,7 @@ Each page reads its data from `/api/v1/public/<web name>/<page>` (`report`, `ope
 
 ## Texts to residents: one number, one STOP rule
 
-- A municipality texts residents from one number: its own (Street notices, Settings, Texting number, set up as in "Street alert texts" below) or, without one, the shared Verdynt/OS number (`TWILIO_FROM`). Request updates, bulk pickup messages and street alerts all use it.
+- A municipality texts residents from one number: its own (set by the platform operator in the console, set up as in "Street alert texts" below) or, without one, the shared Verdynt/OS number (`TWILIO_FROM`). Request updates, bulk pickup messages and street alerts all use it.
 - A resident who texts STOP gets no more texts from the municipality, of any kind. Only a START texted back turns them on again. Staff cannot turn them back on, and ticking "text me" on the report page, a bulk pickup booking or the alert sign-up does not either. The page says: "This phone has texts turned off. Text START to <number> to turn them back on."
 - A STOP to a municipality's own number counts for that municipality only. A STOP to the shared number counts for every ski area and every municipality that texts from the shared number, because the phone company then blocks that number for all of them.
 - Both kinds of reply arrive at `POST /api/v1/twilio/sms` (the "A message comes in" webhook, see Text HELP set-up). Each yes and no is kept: `resident_consent` for the resident, `alert_consent_events` for the alert list.
@@ -92,7 +92,9 @@ Work orders are public records in Pennsylvania. Work orders, Download spreadshee
 Street notices, alert sign-up codes and welcome texts go through `src/lib/sms.js` on the one Twilio account that sends
 every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number they come from:
 
-- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`). Nothing to set up per
+- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`; with a Messaging Service,
+  list its sender numbers in `TWILIO_SENDERS`, comma separated, so no municipality can be given one of them and a STOP
+  to any of them counts as a STOP to the shared number). Nothing to set up per
   municipality. Its STOP and START replies already reach `POST /api/v1/twilio/sms` (the "A message comes in" webhook,
   see Text HELP set-up and FEATURES.md): a STOP is written to every customer record and, for every municipality that
   texts from the shared number, to each resident with that phone and its alert list (`resident_consent`,
@@ -104,8 +106,10 @@ every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number 
   such as "Riverbend Borough: Water is off on Dayton Street for a water main repair. Details: https://<host>/alerts/<slug>/AB3CDE Reply STOP to stop texts."
   Opt-in: residents sign up on `/alerts/<slug>`, confirm with a texted code and get a welcome text saying how to stop.
   Set the number's (or its Messaging Service's) "A message comes in" webhook to `https://<PUBLIC_URL host>/api/v1/twilio/sms`,
-  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then a
-  manager enters the number under Street notices, Settings, Texting number; the screen shows the webhook address too.
+  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then the
+  platform operator enters it in the console: the municipality's page, Texting number (`PUT /platform/tenants/:id/texting-number`,
+  recorded in its history). Managers see it read-only in Street notices, Settings. Refused: `TWILIO_FROM`, any
+  `TWILIO_SENDERS` number, any Text HELP number, and a number another tenant already has (unique per number).
   From then on every text to a resident (alerts, request updates, bulk pickup messages) comes from it, and a STOP or
   START texted to it counts for this municipality only. Clear it to go back to the shared number.
 

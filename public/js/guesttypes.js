@@ -1,6 +1,7 @@
 // The mountain's guest types (Adult, Youth, Child, Senior, Military, or its own), loaded once per page and kept, for
 // the counter, price forms, receipts and slips. typeName() falls back to a tidy form of the code until they load.
 import { get } from './api.js';
+import { isMuni } from './ui.js';
 
 let cache = null;
 let pending = null;
@@ -8,6 +9,7 @@ const tidy = (code) => String(code || '').replace(/_/g, ' ').replace(/^./, (c) =
 
 /** All types in order, hidden ones included (each has hidden: true|false). */
 export async function loadTypes(fresh = false) {
+  if (isMuni()) return []; // a municipality sells no tickets: no guest types, and the ski API would refuse it
   if (cache && !fresh) return cache;
   if (!pending || fresh) pending = get('/guest-types').then((r) => { cache = r.types; return cache; }).finally(() => { pending = null; });
   return pending;

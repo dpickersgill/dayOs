@@ -128,7 +128,7 @@ async function runHours(conn, tenantId, target) {
 
 /** Run hours as a spreadsheet: Month, then each pump, then Total. */
 function runHoursCsv(data) {
-  const esc = (v) => { const x = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : (/^[=+\-@]/.test(x) ? `'${x}` : x); };
+  const esc = (v) => { const x = require('./csv').defuse(v === null || v === undefined ? '' : String(v)); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
   return [['Month', ...data.pumps.map((p) => `${p.label} (hours run)`), 'Total hours run'].map(esc).join(','),
     ...data.months.map((m) => [m.month, ...data.pumps.map((p) => m.hours[p.key]), m.total].map(esc).join(','))].join('\n');
 }

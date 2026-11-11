@@ -120,6 +120,10 @@ const REGISTRY = [
   // name on them, and their consent history stays so the municipality can show they said no. Bulk pickup bookings point
   // at the row, so it is blanked rather than deleted, and the bookings keep only the street and the day.
   { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', email: null, phone: null, house_number: null, unit: null, texts_ok: 0, emails_ok: 0 } } },
+  // A report or booking keeps the name, phone and email typed on it (2026.11.19 review fix: a public form never rewrites a
+  // resident). Erasing blanks them and stops its messages; the request or booking stays, with only the street and the day.
+  { table: 'requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: null, contact_phone: null, contact_email: null, updates_by_text: 0, updates_by_email: 0 } } },
+  { table: 'bulk_bookings', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: null, contact_phone: null, contact_email: null, texts_ok: 0, emails_ok: 0 } } },
   // Street alerts (muni release 1): the addresses a resident (residents, above) signed up for alerts at, and the alerts sent.
   // A phone or email that said stop stays stopped.
   { table: 'alert_signups', by: { email: ['email'], phone: ['phone'] }, erase: 'delete' },
@@ -151,12 +155,9 @@ const NOT_GUESTS = {
   mountain_places: 'a sign, tower or junction on the mountain, never a guest',
   // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
   patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
-  // muni release 1: a resident request keeps its resident in residents (above); its own columns are yes or no flags
-  // (updates by text, by email). request_settings holds the municipality's office and after-hours numbers.
-  requests: 'a resident request: the resident is in residents; its email and text columns are yes or no flags', request_settings: 'a municipality setting (its office and after-hours numbers)',
-  // muni release 1: a bulk pickup booking holds no contact of its own: its texts_ok and emails_ok are yes/no flags, and the
-  // resident's name, phone and email are in residents (above, in REGISTRY), which an erase blanks.
-  bulk_bookings: 'a municipality\u2019s bulk pickup stop; the resident\u2019s contact is in residents',
+  // muni release 1: request_settings holds the municipality's office and after-hours numbers. (requests and bulk_bookings
+  // keep the contact typed on them and are in REGISTRY above.)
+  request_settings: 'a municipality setting (its office and after-hours numbers)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

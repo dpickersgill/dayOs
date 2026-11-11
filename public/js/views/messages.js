@@ -27,7 +27,7 @@ async function list(box) {
         { head: 'Reached', num: true, cell: (c) => (c.status === 'sent' ? `${c.sent} of ${c.total}` : '') },
         { head: 'When', cell: (c) => (c.sent_at ? fmtDateTime(c.sent_at) : '') },
         { head: '', actions: true, cell: (c) => button('Open', () => (c.status === 'draft' ? editor(c.id, status, load) : detail(c.id)), { small: true }) },
-      ], data) : empty('No messages yet. Write one to tell customers who agreed to hear from you about opening day, new snow or a pass sale.'));
+      ], data) : empty(isMuni() ? 'No messages yet. Write one to tell people who agreed to hear from you about a meeting, a schedule change or a new service.' : 'No messages yet. Write one to tell customers who agreed to hear from you about opening day, new snow or a pass sale.'));
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();

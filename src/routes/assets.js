@@ -830,7 +830,7 @@ router.get('/lifecycle', manager, async (req, res) => {
   if (req.query.format === 'csv') {
     const cols = ['tag', 'name', 'category', 'status', 'hours', 'miles', 'purchased_on', 'purchase_cents', 'book_value_cents', 'age_years', 'labor', 'parts', 'vendor', 'fuel', 'maintenance_12', 'total', 'cost_per_hour_cents', 'cost_per_mile_cents', 'replace'];
     // Text that a spreadsheet would read as a formula (=, +, -, @) is kept as text.
-    const esc = (v) => { let x = v === null || v === undefined ? '' : String(v); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(x)) x = `'${x}`; return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+    const esc = (v) => { const x = require('../lib/csv').defuse(v === null || v === undefined ? '' : String(v)); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
     await audit(pool, req, 'export', 'ops_assets', null, { rows: data.length });
     res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="asset-costs.csv"').send([cols.join(','), ...data.map((d) => cols.map((k) => esc(d[k])).join(','))].join('\n'));
     return;

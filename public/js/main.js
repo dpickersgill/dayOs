@@ -188,15 +188,15 @@ function showSignIn(message) {
   const remember = term ? null : h('input', { type: 'checkbox', name: 'remember', checked: Boolean(remembered && readOwn()) });
   const own = term ? null : h('input', { type: 'checkbox', name: 'own_device', checked: readOwn() });
   const rememberRow = remember ? h('div', { class: 'stack tight', 'data-remember': '', hidden: !readOwn() }, h('label', { class: 'check' }, remember, ' Remember me on this device'),
-    h('p', { class: 'hint signin-hint' }, 'Keeps your mountain and username here, and keeps you signed in when you open a new tab. Never your password. Not used for logins that open patient records.')) : null;
+    h('p', { class: 'hint signin-hint' }, 'Keeps your organization and username here, and keeps you signed in when you open a new tab. Never your password. Not used for logins that open patient records.')) : null;
   if (own) own.addEventListener('change', () => { ownDevice = own.checked; saveOwn(own.checked); rememberRow.hidden = !own.checked; if (!own.checked) remember.checked = false; });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
-  // The remembered mountain is said plainly, with a way to change it: signing in to the wrong mountain looks exactly like a
-  // wrong password.
-  const slugField = field('Mountain', slug, 'The short name you were given, such as spring-mountain');
+  // The remembered organization is said plainly, with a way to change it: signing in to the wrong one looks exactly like a
+  // wrong password. The page does not know yet whether it is a ski area or a municipality, so the words fit both.
+  const slugField = field('Organization', slug, 'The short name you were given, such as spring-mountain or riverbend-borough');
   const note = h('div', { 'aria-live': 'polite', 'data-mountain-note': '' });
-  const change = h('button', { type: 'button', class: 'btn link', 'aria-label': `Change the mountain (now ${known})` }, 'Change');
-  const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Mountain: ', h('strong', null, known), '.', change) : null;
+  const change = h('button', { type: 'button', class: 'btn link', 'aria-label': `Change the organization (now ${known})` }, 'Change');
+  const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Organization: ', h('strong', null, known), '.', change) : null;
   if (shown) slugField.hidden = true;
   change.addEventListener('click', () => { shown.remove(); slugField.hidden = false; slug.focus(); slug.select(); });
   const form = h('form', { novalidate: true, 'data-step': 'signin' },
@@ -258,8 +258,8 @@ function showSignIn(message) {
   const pkBlock = pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, pkFirst ? 'You used a passkey here before: one touch signs you in.' : 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null;
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
-      h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Run the mountain from one screen.'),
-        h('p', null, 'Tickets, lifts, rentals, lessons, patrol and staff schedules for your mountain.')), ridge()),
+      h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Run the whole operation from one screen.'),
+        h('p', null, 'The daily work, the crews and the records, in one place.')), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, pkFirst ? pkBlock : null, form,
       pkFirst ? null : pkBlock,
       emailRow,

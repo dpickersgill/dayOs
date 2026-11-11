@@ -156,10 +156,10 @@ module.exports = async function requests(conn, T, { daysAgo, timezone, userIds, 
       woId = w.insertId;
     }
     const status = outcome === 'closed_no_action' ? 'closed_no_action' : outcome;
-    const [r] = await conn.query(`INSERT INTO requests (tenant_id, reference, status_token, category_id, street_id, house_number, lat, lng, accuracy_m, description, source, resident_id, updates_by_text,
+    const [r] = await conn.query(`INSERT INTO requests (tenant_id, reference, status_token, category_id, street_id, house_number, lat, lng, accuracy_m, description, source, resident_id, contact_name, contact_phone, updates_by_text,
         reported_at, status, priority, referred_to, referred_at, duplicate_of, closed_reason, work_order_id, assigned_at, made_safe_at, made_safe_note, fixed_at, closed_at, public_note, request_key, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [T, await Q.newReference(conn, T), Q.newToken(), cat.id, street.id, house, pos ? pos.lat : null, pos ? pos.lng : null, pos ? pos.acc : null, words, source, residentId, who && who.texts ? 1 : 0,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [T, await Q.newReference(conn, T), Q.newToken(), cat.id, street.id, house, pos ? pos.lat : null, pos ? pos.lng : null, pos ? pos.acc : null, words, source, residentId, who ? who.name : null, who ? who.phone : null, who && who.texts ? 1 : 0,
       reported, status, outcome === 'referred' ? 'PennDOT' : null, outcome === 'referred' ? closedAt : null, original || null,
       outcome === 'closed_no_action' ? 'On private property: the owner was told' : null, woId, assigned, madeSafe, madeSafe ? pick(['Cones and a sign', 'Barricade placed', 'Coned off']) : null, fixedAt, closedAt,
       outcome === 'fixed' && rand() < 0.4 ? 'Thanks for letting us know.' : null, key, source === 'web' ? null : desk]);

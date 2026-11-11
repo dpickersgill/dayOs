@@ -93,7 +93,8 @@ async function editor(id) {
   const long = h('textarea', { name: 'body', rows: 6, maxlength: 4000 }, n.body || '');
   const counter = h('small', { class: 'muted' });
   const operator = select([['', 'Choose the operator'], ...setup.operators.map((o) => [String(o.id), o.name])], n.issued_by_user_id ? String(n.issued_by_user_id) : '', { name: 'issued_by_user_id' });
-  const operatorBox = h('div', { class: 'stack tight' }, h('p', { class: 'callout' }, setup.operator_rule), field('Issued by (certified operator)', operator, 'The app records who issued it. People decide; the app only sends what you write.'));
+  const operatorBox = h('div', { class: 'stack tight' }, h('p', { class: 'callout' }, setup.operator_rule), field('Issued by (certified operator)', operator, 'The app records who issued it. People decide; the app only sends what you write.'),
+    setup.operators.length ? null : h('p', { class: 'muted' }, 'No certified operators are listed yet. A manager adds them in Street notices, Settings, Certified operators.'));
   const reach = h('p', { class: 'muted', 'aria-live': 'polite' });
   const fill = button('Fill in streets and times', () => {
     const streets = [...areas.children].map((r) => r.words()).filter(Boolean).join(', ');
@@ -281,17 +282,22 @@ function importList() {
 async function settings(box) {
   const s = await get('/street-notices/settings');
   const boxes = s.crew.map((c) => ({ c, el: h('input', { type: 'checkbox', id: `crew-${c.id}`, checked: s.crew_senders.includes(c.id) }) }));
-  const from = input({ name: 'from_number', value: s.from_number || '', maxlength: 30, placeholder: s.default_from || '+16105550100' });
+  const ops = s.logins.map((c) => ({ c, el: h('input', { type: 'checkbox', id: `op-${c.id}`, checked: s.certified_operators.includes(c.id) }) }));
   const save = button('Save', async () => {
-    await put('/street-notices/settings', { crew_senders: boxes.filter((b) => b.el.checked).map((b) => b.c.id), from_number: from.value.trim() || null });
+    await put('/street-notices/settings', { crew_senders: boxes.filter((b) => b.el.checked).map((b) => b.c.id), certified_operators: ops.filter((b) => b.el.checked).map((b) => b.c.id) });
     toast('Saved');
   }, { kind: 'primary' });
   box.append(h('div', { class: 'stack' },
     h('h2', null, 'Crew leads who may send'),
     h('p', { class: 'muted' }, 'Managers always can. Pick Crew logins who may write and send notices too, for a break after hours.'),
     boxes.length ? h('div', { class: 'stack tight' }, ...boxes.map((b) => h('label', { class: 'check', for: `crew-${b.c.id}` }, b.el, ` ${b.c.name}`))) : h('p', { class: 'muted' }, 'No Crew logins yet.'),
+    h('h2', null, 'Certified operators'),
+    h('p', { class: 'muted' }, 'The people who hold a water operator certification. Only they can be named as issuing a boil water advisory. Your records of their certification stay with you.'),
+    ops.length ? h('div', { class: 'stack tight' }, ...ops.map((b) => h('label', { class: 'check', for: `op-${b.c.id}` }, b.el, ` ${b.c.name}`))) : h('p', { class: 'muted' }, 'No logins yet.'),
+    h('div', { class: 'row' }, save),
     h('h2', null, 'Texting number'),
-    field('Your own number (optional)', from, `Empty: texts come from the shared Verdynt/OS number${s.default_from ? ` (${s.default_from})` : ''}. A number of your own is set up with Verdynt/OS support first. Every text to residents then comes from it: alerts, request updates and bulk pickup messages.`),
-    h('p', { class: 'muted small' }, `For whoever sets up the number in Twilio: replies such as STOP go to ${s.inbound_url}`),
-    h('div', { class: 'row' }, save)));
+    s.from_number
+      ? h('p', null, `Texts to residents come from your own number, ${s.default_from}: alerts, request updates and bulk pickup messages.`)
+      : h('p', null, `Texts to residents come from the shared Verdynt/OS number${s.default_from ? ` (${s.default_from})` : ''}.`),
+    h('p', { class: 'muted' }, s.own_number_words)));
 }

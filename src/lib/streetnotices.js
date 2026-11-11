@@ -211,12 +211,15 @@ function readToken(kind, token) {
   if (!m) return null;
   return { tenantId: Number(m[1]), id: Number(m[2]), check: (extra = '') => same(m[3], sign(kind, `${m[1]}.${m[2]}.${extra}`)) };
 }
-const manageToken = (tenantId, residentId) => tokenFor('manage', tenantId, residentId);
+// A manage link belongs to one confirmed phone or email (an alert_addresses row), never to a resident: it shows and
+// changes only the sign-ups confirmed through that same phone or email. (Links made for a resident before 2026.11.19 used
+// the kind 'manage' and no longer open anything.)
+const manageToken = (tenantId, addressId) => tokenFor('manage-addr', tenantId, addressId);
 const signupRef = (tenantId, signupId) => tokenFor('signup', tenantId, signupId);
 const emailToken = (tenantId, signupId, email) => tokenFor('email', tenantId, signupId, String(email || '').toLowerCase());
 
 const publicLink = (base, slug, code) => `${base}/alerts/${encodeURIComponent(slug)}/${code}`;
-const manageLink = (base, slug, tenantId, residentId) => `${base}/alerts/${encodeURIComponent(slug)}/manage/${manageToken(tenantId, residentId)}`;
+const manageLink = (base, slug, tenantId, addressId) => `${base}/alerts/${encodeURIComponent(slug)}/manage/${manageToken(tenantId, addressId)}`;
 
 // ---------------------------------------------------------------- who a notice reaches
 /** Phones (10-digit keys) whose latest answer on a customer record here is "no" (the same rule as sms.phoneSaidNo). */
@@ -254,7 +257,7 @@ async function addressesOf(tenantId, pairs) {
 async function audienceOf(tenantId, type, areas) {
   const [where, vals] = areaSql(areas);
   const found = await rows(pool, `SELECT s.id, s.resident_id, s.phone, s.email, s.by_text, s.by_email, s.house_no FROM alert_signups s
-    WHERE s.tenant_id = ? AND s.status = 'active' AND FIND_IN_SET(?, s.topics) > 0 AND ${where} ORDER BY s.id`, [tenantId, TYPE[type].topic, ...vals]);
+    WHERE s.tenant_id = ? AND s.status = 'active' AND s.resident_id IS NOT NULL AND FIND_IN_SET(?, s.topics) > 0 AND ${where} ORDER BY s.id`, [tenantId, TYPE[type].topic, ...vals]);
   const wanted = [];
   for (const s of found) {
     if (s.by_text && sms.phoneKey(s.phone)) wanted.push({ s, channel: 'sms', key: sms.phoneKey(s.phone), to: phoneAddr(s.phone) });
@@ -363,14 +366,14 @@ function smsBody(t, u) {
   return `${t.name}: ${lead}${u.sms_text}${base ? `\nDetails: ${publicLink(base, t.slug, u.code)}` : ''}\nReply STOP to stop texts.`;
 }
 /** The email: subject, plain text and html, with the notice's page and a manage link (List-Unsubscribe too). */
-function emailOf(t, u, residentId) {
+function emailOf(t, u, addressId) {
   const base = baseOf(u);
   const type = TYPE[u.type];
   const subject = `${u.kind === 'update' ? 'Update: ' : u.kind === 'ended' ? 'Ended: ' : ''}${u.title}`.slice(0, 200);
   const words = String(u.body || u.sms_text);
   const where = areasWords(u.areas);
   const link = base ? publicLink(base, t.slug, u.code) : null;
-  const manage = base ? manageLink(base, t.slug, t.id, residentId) : null;
+  const manage = base && addressId ? manageLink(base, t.slug, t.id, addressId) : null;
   const lines = [words, `Streets: ${where}`, link ? `Updates: ${link}` : null].filter(Boolean);
   const foot = `You get this because you signed up for ${t.name} alerts.${manage ? ` To change or stop them: ${manage}` : ''}`;
   const text = `${lines.join('\n\n')}\n\n--\n${foot}`;
@@ -403,7 +406,8 @@ async function deliverOne(d) {
       const r = await sms.send({ tenantId: t.id, to: d.to_addr, body: smsBody(t, u), from: t.from_number || null, tag: 'street-notice' });
       status = r.ok ? 'sent' : 'failed'; error = r.ok ? null : r.error; providerId = r.id || null;
     } else {
-      const m = emailOf(t, u, Number(d.resident_id));
+      const a = await one(pool, "SELECT id FROM alert_addresses WHERE tenant_id = ? AND channel = 'email' AND addr = ?", [t.id, addrKey('email', d.to_addr)]);
+      const m = emailOf(t, u, a ? Number(a.id) : null);
       const r = await mailer.send({ tenantId: t.id, to: d.to_addr, fromName: t.name, replyTo: t.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: 'street-notice',
         headers: m.manage ? [{ Name: 'List-Unsubscribe', Value: `<${m.manage}>` }] : undefined });
       status = r.ok ? 'sent' : 'failed'; error = r.ok ? null : r.error; providerId = r.id || null;

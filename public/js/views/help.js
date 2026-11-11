@@ -10,6 +10,21 @@ const roleOk = (who) => who === null || who === undefined || can(...who);
 // The municipal edition (muni release 1): a section or article for one kind of tenant has orgs. A municipality sees only
 // the sections that apply to it; a ski area never sees a municipal one.
 const MUNI_SECTIONS = ['start', 'dashboard', 'inbox', 'myshifts', 'settings', 'documents', 'messages', 'workforce', 'assets'];
+// The shared articles were written for ski areas. A municipality reads them in its own words: its own kind of equipment,
+// and "municipality" where they say "mountain" (Settings, Municipality details, is the same screen).
+const MUNI_WORDS = [
+  [/lift part, snow gun and building system/g, 'pump, valve, truck and building system'],
+  [/fleet, lift parts, snowmaking, buildings and equipment/g, 'fleet, pumps and stations, buildings and equipment'],
+  [/\b(?:Mountain|mountain) time\b/g, 'local time'],
+  [/\bmountain(?=['\u2019]s\b)/g, 'municipality'], [/\bMountain(?=['\u2019]s\b)/g, 'Municipality'],
+  [/\bmountains\b/g, 'municipalities'], [/\bMountains\b/g, 'Municipalities'],
+  [/\bmountain\b/g, 'municipality'], [/\bMountain\b/g, 'Municipality'],
+];
+/** Help words for the signed-in organization: unchanged for a ski area, municipal words for a municipality. */
+export function says(text) {
+  if (!isMuni() || typeof text !== 'string') return text;
+  return MUNI_WORDS.reduce((t, [re, to]) => t.replace(re, to), text);
+}
 const orgOk = (x) => (x.orgs ? x.orgs.includes(isMuni() ? 'municipality' : 'mountain') : !isMuni() || MUNI_SECTIONS.includes(x.key || x.app));
 
 const sectionOf = (key) => SECTIONS.find((s) => s.key === key);
@@ -45,7 +60,7 @@ function backToApp(key) {
   const was = backTo();
   return was && was.key === key ? back(was.hash, `Back to ${was.name}`) : null;
 }
-const articleLink = (a, withSection) => h('li', null, h('a', { href: `#/help/${a.id}` }, a.title), withSection ? h('small', { class: 'muted' }, ` ${sectionOf(a.app).label}`) : null);
+const articleLink = (a, withSection) => h('li', null, h('a', { href: `#/help/${a.id}` }, says(a.title)), withSection ? h('small', { class: 'muted' }, ` ${sectionOf(a.app).label}`) : null);
 
 function home(root) {
   const q = input({ type: 'search', placeholder: 'Search help, for example "refund" or "scan a receipt"', 'aria-label': 'Search help', autocomplete: 'off' });
@@ -53,7 +68,7 @@ function home(root) {
   const grid = h('div', { class: 'help-grid' }, SECTIONS.filter(sectionOpen).map((s) => {
     const list = visible().filter((a) => a.app === s.key);
     if (!list.length) return null;
-    return h('section', { class: 'help-card' }, h('h2', null, h('a', { href: `#/help/for-${s.key}` }, s.label)), h('p', { class: 'muted' }, s.blurb),
+    return h('section', { class: 'help-card' }, h('h2', null, h('a', { href: `#/help/for-${s.key}` }, s.label)), h('p', { class: 'muted' }, says(s.blurb)),
       h('ul', null, list.slice(0, 4).map((a) => articleLink(a)), list.length > 4 ? h('li', null, h('a', { href: `#/help/for-${s.key}` }, `All ${list.length} articles`)) : null));
   }));
   const draw = () => {
@@ -156,7 +171,7 @@ function section(root, key) {
       rest.length ? h('ul', { class: 'help-results' }, rest.map((a) => articleLink(a))) : null, stuck());
     return;
   }
-  root.append(links, h('div', { class: 'page-head' }, h('div', null, h('h1', null, s.label), h('p', { class: 'muted' }, s.blurb))),
+  root.append(links, h('div', { class: 'page-head' }, h('div', null, h('h1', null, s.label), h('p', { class: 'muted' }, says(s.blurb)))),
     list.length ? h('ul', { class: 'help-results' }, list.map((a) => articleLink(a))) : empty('No articles here yet.'), stuck());
 }
 
@@ -170,10 +185,10 @@ function article(root, id) {
   const part = a.app === 'patrol' && was && was.key === 'patrol' && PATROL_PARTS[was.part] && PATROL_PARTS[was.part][2].includes(a.id) ? was.part : null;
   root.append(part ? back(`#/help/for-patrol?part=${part}`, `${s.label}: ${PATROL_PARTS[part][0]}`) : back(`#/help/for-${a.app}`, s.label),
     h('article', { class: 'help-article' },
-      h('h1', null, a.title),
-      h('p', { class: 'help-intro' }, a.intro),
-      a.steps && a.steps.length ? h('ol', null, a.steps.map((t) => h('li', null, t))) : null,
-      a.tips && a.tips.length ? h('div', { class: 'help-tips' }, h('h2', null, 'Good to know'), h('ul', null, a.tips.map((t) => h('li', null, t)))) : null,
+      h('h1', null, says(a.title)),
+      h('p', { class: 'help-intro' }, says(a.intro)),
+      a.steps && a.steps.length ? h('ol', null, a.steps.map((t) => h('li', null, says(t)))) : null,
+      a.tips && a.tips.length ? h('div', { class: 'help-tips' }, h('h2', null, 'Good to know'), h('ul', null, a.tips.map((t) => h('li', null, says(t))))) : null,
       related.length ? h('div', { class: 'help-related' }, h('h2', null, 'Related'), h('ul', null, related.map((r) => articleLink(r)))) : null,
       a.app !== 'start' && appOn(a.app, s) ? h('p', null, h('a', { class: 'btn small', href: `#/${a.app}` }, `Open ${s.label}`)) : null),
     stuck());

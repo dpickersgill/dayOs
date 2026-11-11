@@ -173,8 +173,8 @@ router.get('/options', anyone, async (req, res) => {
 
 // ---------------------------------------------------------------- the collection day
 const STOP_ORDER = 'ORDER BY s.name, CAST(b.house_number AS UNSIGNED), b.house_number, b.unit, b.id';
-const FULL = `SELECT b.*, s.name AS street, r.name, r.phone, r.email FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
-  LEFT JOIN residents r ON r.tenant_id = b.tenant_id AND r.id = b.resident_id`;
+// The name, phone and email are the ones given for this booking (never rewritten from a resident record).
+const FULL = `SELECT b.*, s.name AS street, b.contact_name AS name, b.contact_phone AS phone, b.contact_email AS email FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id`;
 
 router.get('/day', anyone, async (req, res) => {
   const t = await townOf(req.auth.tenantId);
@@ -216,8 +216,8 @@ router.get('/bookings', anyone, async (req, res) => {
     const parts = ['b.reference = ?', "CONCAT(b.house_number, ' ', s.name) LIKE ?", 's.name LIKE ?'];
     params.push(q.toUpperCase(), like, like);
     if (isOffice(req)) {
-      parts.push('r.name LIKE ?', 'r.email LIKE ?'); params.push(like, like);
-      if (digits.length >= 4) { parts.push("REGEXP_REPLACE(r.phone, '[^0-9]', '') LIKE ?"); params.push(`%${digits}%`); }
+      parts.push('b.contact_name LIKE ?', 'b.contact_email LIKE ?'); params.push(like, like);
+      if (digits.length >= 4) { parts.push("REGEXP_REPLACE(b.contact_phone, '[^0-9]', '') LIKE ?"); params.push(`%${digits}%`); }
     }
     where.push(`(${parts.join(' OR ')})`);
   }
@@ -306,7 +306,7 @@ router.post('/bookings', office, validate(z.object({
     }
     const residentId = await upsertResident(conn, t.id, { name: b.name, phone, email, streetId: b.street_id, houseNumber: b.house_number, unit: b.unit || null, textsOk: b.texts_ok ? true : undefined, emailsOk: b.emails_ok ? true : undefined }, { source: 'bulk_pickup', userId: req.auth.userId });
     const out = await B.insertBooking(conn, t.id, { collection_date: b.collection_date, street_id: b.street_id, house_number: b.house_number, unit: b.unit, resident_id: residentId, items_note: b.items_note,
-      source: 'staff', status: 'booked', ...pay, total_cents: q.total, texts_ok: b.texts_ok, emails_ok: b.emails_ok, credit_from_id: creditFrom, created_by: req.auth.userId }, q.lines);
+      contact_name: b.name, contact_phone: phone, contact_email: email, source: 'staff', status: 'booked', ...pay, total_cents: q.total, texts_ok: b.texts_ok, emails_ok: b.emails_ok, credit_from_id: creditFrom, created_by: req.auth.userId }, q.lines);
     if (creditFrom) await conn.query('UPDATE bulk_bookings SET credit_used_by_id = ? WHERE tenant_id = ? AND id = ?', [out.id, t.id, creditFrom]);
     await audit(conn, req, 'bulk_book', 'bulk_bookings', out.id, { reference: out.reference, collection_date: b.collection_date, total_cents: q.total, pay: b.pay, ...(why ? { override: why.slice(0, 120) } : {}) });
     return { ...out, total: q.total };
@@ -325,8 +325,7 @@ router.post('/bookings/:id/send-link', office, validate(z.object({ by: z.enum(['
   if (!(b.pay_method === 'card' && b.pay_status === 'due' && b.status === 'booked')) throw conflict('Only a booking waiting for a card payment has a payment link');
   const sent = await B.tell(req.auth.tenantId, b.id, 'pay_link', baseUrl(req), { receipt: true, only: req.body.by });
   if (!sent.length) {
-    const r = b.resident_id ? await one(pool, 'SELECT phone FROM residents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, b.resident_id]) : null;
-    const off = req.body.by === 'text' && r && r.phone ? await RES.textsOffNotice(pool, req.auth.tenantId, r.phone) : null;
+    const off = req.body.by === 'text' && b.contact_phone ? await RES.textsOffNotice(pool, req.auth.tenantId, b.contact_phone) : null;
     throw conflict(req.body.by === 'text' ? (off ? `${off} Read them the link instead.` : 'The text could not be sent. They may not have agreed to texts. Read them the link instead.') : 'The email could not be sent. Check the address, or read them the link instead.');
   }
   await audit(pool, req, 'bulk_send_link', 'bulk_bookings', b.id, { by: req.body.by });
@@ -582,6 +581,8 @@ publicRouter.post('/:slug/bulk-pickup/bookings', validate(z.object({
   if (b.website) return res.status(202).json({ ok: true });
   if (await require('../lib/billing').publicBlocked(t.id, req.method)) throw conflict(`Online booking is not available right now. Please call${t.phone ? ` ${t.phone}` : ''}.`);
   const { phone, email } = contactOf(b);
+  // At most 3 new bookings an hour giving the same phone or email (lib/publicsends.js).
+  await require('../lib/publicsends').submitAllowed(t.id, { phone, email }, 'bookings');
   const ready = await B.cardReady(t.id);
   const made = await tx(async (conn) => {
     await B.lockDay(conn, t.id);
@@ -602,9 +603,10 @@ publicRouter.post('/:slug/bulk-pickup/bookings', validate(z.object({
       // With the municipality's Stripe account not ready, the booking is still taken: they pay at the office.
       pay = ready ? { pay_method: 'card', pay_status: 'due', status: 'awaiting_payment' } : { pay_method: 'office', pay_status: 'due', status: 'booked' };
     }
-    const residentId = await upsertResident(conn, t.id, { name: b.name, phone, email, streetId: b.street_id, houseNumber: b.house_number, unit: b.unit || null, textsOk: b.texts_ok ? true : undefined, emailsOk: b.emails_ok ? true : undefined }, { source: 'bulk_pickup' });
+    // A public form never changes the resident on file; what was typed stays on the booking (lib/residents.js).
+    const residentId = await upsertResident(conn, t.id, { name: b.name, phone, email, streetId: b.street_id, houseNumber: b.house_number, unit: b.unit || null, textsOk: b.texts_ok ? true : undefined, emailsOk: b.emails_ok ? true : undefined }, { source: 'bulk_pickup', publicForm: true });
     const out = await B.insertBooking(conn, t.id, { collection_date: b.collection_date, street_id: b.street_id, house_number: b.house_number, unit: b.unit, resident_id: residentId, items_note: b.items_note,
-      source: 'online', ...pay, total_cents: q.total, texts_ok: b.texts_ok, emails_ok: b.emails_ok }, q.lines);
+      contact_name: b.name, contact_phone: phone, contact_email: email, source: 'online', ...pay, total_cents: q.total, texts_ok: b.texts_ok, emails_ok: b.emails_ok }, q.lines);
     await audit(conn, { auth: { tenantId: t.id, userId: null }, ip: req.ip }, 'bulk_book_online', 'bulk_bookings', out.id, { reference: out.reference, collection_date: b.collection_date, total_cents: q.total, pay_method: pay.pay_method });
     return { ...out, ...pay, total: q.total, office_name: s.office_name };
   });
@@ -625,8 +627,8 @@ publicRouter.post('/:slug/bulk-pickup/bookings', validate(z.object({
 /** The resident's own booking, by its secret link: nothing about anyone else. */
 async function residentView(t, tok) {
   if (!/^[a-f0-9]{32}$/.test(String(tok))) return null;
-  const b = await one(pool, `SELECT b.*, s.name AS street, r.name, r.phone AS r_phone FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
-    LEFT JOIN residents r ON r.tenant_id = b.tenant_id AND r.id = b.resident_id WHERE b.tenant_id = ? AND b.view_token = ?`, [t.id, String(tok)]);
+  const b = await one(pool, `SELECT b.*, s.name AS street, b.contact_name AS name, b.contact_phone AS r_phone FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
+    WHERE b.tenant_id = ? AND b.view_token = ?`, [t.id, String(tok)]);
   if (!b) return null;
   const s = await B.settingsOf(t.id);
   const cutoff = B.cutoffOf(s, String(b.collection_date).slice(0, 10));

@@ -9,7 +9,7 @@
           "kind": "new",
           "app": null,
           "who": "platform",
-          "text": "Municipal edition: a tenant is now a ski area or a municipality, picked when you add it in the console and never changed. A municipality gets the Public Works plan (Assets and fleet with Work orders and Programs, Staff and schedule, Documents, Inbox and Resident requests) and the add-ons Water, Sewer, Stormwater, Trash and recycling and Buildings, with four roles: owner, manager, Crew and Front desk. Ski areas are not offered any municipal app, plan or page, and a municipality is not offered the ski ones. Every text to a resident follows one rule: STOP turns texts off for that phone, and only START turns them back on. The demo borough is db/demo-municipal.js. Ski areas see one change, for mountains with Assets and fleet: condition, criticality and risk on assets and map items, photos, and more kinds of checklist items. Nothing else changed for them."
+          "text": "Municipal edition: a tenant is now a ski area or a municipality, picked when you add it in the console and never changed. A municipality gets the Public Works plan (Assets and fleet with Work orders and Programs, Staff and schedule, Documents, Inbox and Resident requests) and the add-ons Water, Sewer, Stormwater, Trash and recycling and Buildings, with four roles: owner, manager, Crew and Front desk. Ski areas are not offered any municipal app, plan or page, and a municipality is not offered the ski ones. Every text to a resident follows one rule: STOP turns texts off for that phone, and only START turns them back on. The demo borough is db/demo-municipal.js. Ski areas see one change, for mountains with Assets and fleet: condition, criticality and risk on assets and map items, photos, and more kinds of checklist items. Nothing else changed for them. A municipality's own texting number is set only in the console, on its page: the shared numbers, a Text HELP number and a number another tenant has are refused."
         },
         {
           "kind": "improved",
@@ -22,21 +22,21 @@
           "kind": "new",
           "app": "requests",
           "who": ["staff", "counter"],
-          "text": "Requests: residents report a pothole, a street light or a water leak on your report page, or you take it by phone or at the counter. Each request keeps when you were told, when it was made safe and when it was fixed, with photos, against the response standard you set. The Ledger is that repair record by street, dates or category. Its download, and the Work orders spreadsheet, leave out residents' names, phones, emails and house numbers unless a manager includes them, which is logged.",
+          "text": "Requests: residents report a pothole, a street light or a water leak on your report page, or you take it by phone or at the counter. Each request keeps when you were told, when it was made safe and when it was fixed, with photos, against the response standard you set. The Ledger is that repair record by street, dates or category. Its download, and the Work orders spreadsheet, leave out residents' names, phones, emails and house numbers unless a manager includes them, which is logged. Each request keeps the name, phone and email typed on it; a report never changes a resident already on file. The report page takes at most 3 reports an hour with the same phone or email, and status texts and emails to one phone or email stop at 6 a day.",
           "help": "muni-requests"
         },
         {
           "kind": "new",
           "app": "requests",
           "who": ["staff", "counter"],
-          "text": "Street notices: text and email every resident who signed up for alerts on the streets you pick, for a water main break, a boil water advisory, sewer work, a street closure, paving or a trash day change. Residents sign up themselves on your alerts page and confirm their phone with a code. Send updates and end the notice when the work is done. A boil water advisory goes out only when your certified operator has issued it; the app records who did.",
+          "text": "Street notices: text and email every resident who signed up for alerts on the streets you pick, for a water main break, a boil water advisory, sewer work, a street closure, paving or a trash day change. Residents sign up themselves on your alerts page and confirm their phone with a code. Send updates and end the notice when the work is done. A boil water advisory goes out only when your certified operator has issued it; the app records who did. Only the certified operators a manager lists in Street notices, Settings can be named. Each manage link is for one phone or one email and shows only the addresses signed up with it. Your texting number is shown in Settings; Verdynt sets up a number of your own.",
           "help": "street-notices"
         },
         {
           "kind": "new",
           "app": "solidwaste",
           "who": ["counter", "staff"],
-          "text": "Bulk pickup: residents book a pickup of large items on your page, pick a collection day and pay by card into your own Stripe account, with stickers or at the office. The front desk books callers. On collection day the crew works the stop list on a phone and taps Picked up, Not out (with a photo) or Not accepted. A manager decides a not-out stop: no refund, a refund or a credit.",
+          "text": "Bulk pickup: residents book a pickup of large items on your page, pick a collection day and pay by card into your own Stripe account, with stickers or at the office. The front desk books callers. On collection day the crew works the stop list on a phone and taps Picked up, Not out (with a photo) or Not accepted. A manager decides a not-out stop: no refund, a refund or a credit. The booking page takes at most 3 bookings an hour with the same phone or email, and every text says who sent it and how to stop.",
           "help": "bulk-staff"
         },
         {

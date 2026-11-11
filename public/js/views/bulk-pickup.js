@@ -6,7 +6,7 @@
 //   Settings         collection days, cutoff, stops a day, item sizes and prices, payment options, rules, holidays (managers).
 //   Report           bookings, items, money and the not-out rate by month, and the spreadsheet (managers).
 import { get, post, put, del, download, sendBytes, fetchBlob } from '../api.js';
-import { h, clear, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtDateTime, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs } from '../ui.js';
+import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtDateTime, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs } from '../ui.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const office = () => can('counter');
@@ -45,7 +45,8 @@ async function dayTab(panel) {
     const views = h('div', { class: 'seg', role: 'group', 'aria-label': 'View' },
       ...[['phone', 'Phone view'], ['list', 'Print view']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(mode === k), onclick: () => { mode = k; load(); } }, t)));
     const o = d.outcomes;
-    clear(body).append(
+    // appendAll leaves out the parts that do not apply (a plain append would write them as "null").
+    appendAll(clear(body),
       h('div', { class: 'week-bar' },
         h('div', { class: 'row' }, pick, other),
         h('div', { class: 'week-actions' }, views, mode === 'list' ? button('Print', () => window.print()) : null)),

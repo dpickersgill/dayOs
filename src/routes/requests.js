@@ -349,9 +349,9 @@ router.post('/', validate(createFields), async (req, res) => {
     if (cat.needs_contact && !residentId) throw bad(`${cat.name} needs the resident's phone or email, so the crew can reach them`);
     const ref = await Q.newReference(conn, t);
     const [r] = await conn.query(`INSERT INTO requests (tenant_id, reference, status_token, category_id, street_id, house_number, cross_street, lat, lng, accuracy_m, description, source, resident_id,
-        updates_by_text, updates_by_email, reported_at, priority, request_key, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        contact_name, contact_phone, contact_email, updates_by_text, updates_by_email, reported_at, priority, request_key, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [t, ref, Q.newToken(), cat.id, street ? street.id : null, b.house_number || null, b.cross_street || null, b.lat ?? null, b.lng ?? null, b.accuracy == null ? null : Math.round(b.accuracy),
-      b.description || null, b.source, residentId, c.texts_ok && c.phone ? 1 : 0, c.emails_ok && c.email ? 1 : 0, reportedAt, b.priority,
+      b.description || null, b.source, residentId, c.name || null, c.phone || null, c.email || null, c.texts_ok && c.phone ? 1 : 0, c.emails_ok && c.email ? 1 : 0, reportedAt, b.priority,
       b.client_ref ? crypto.createHash('md5').update(`staff:${b.client_ref}`).digest('hex') : null, req.auth.userId]);
     await Q.event(conn, t, r.insertId, now, `Taken by staff (${Q.SOURCE_WORDS[b.source].toLowerCase()}).${b.reported_at ? ` Told at ${reportedAt}: ${b.reported_reason}.` : ''}`, req.auth.userId);
     await audit(conn, req, 'create', 'requests', r.insertId, { source: b.source, reference: ref, ...(b.reported_at ? { reported_at: reportedAt, reason: b.reported_reason } : {}) });
@@ -381,15 +381,16 @@ router.get('/:id', async (req, res) => {
     rows(pool, 'SELECT id, reference, status FROM requests WHERE tenant_id = ? AND duplicate_of = ? ORDER BY id', [t, r.id]),
     r.work_order_id ? one(pool, "SELECT w.id, w.title, w.status, w.completed_at, w.resolution, TRIM(CONCAT(p.first_name, ' ', p.last_name)) AS assignee FROM work_orders w LEFT JOIN staff s ON s.tenant_id = w.tenant_id AND s.id = w.assigned_staff_id LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE w.tenant_id = ? AND w.id = ?", [t, r.work_order_id]) : null,
     r.duplicate_of ? one(pool, 'SELECT id, reference, status FROM requests WHERE tenant_id = ? AND id = ?', [t, r.duplicate_of]) : null,
-    r.resident_id && seesContact(req) ? one(pool, 'SELECT name, phone, email, texts_ok, emails_ok FROM residents WHERE tenant_id = ? AND id = ?', [t, r.resident_id]) : null,
+    seesContact(req) && (r.contact_name || r.contact_phone || r.contact_email) ? { name: r.contact_name, phone: r.contact_phone, email: r.contact_email } : null,
   ]);
   const view = rowOf(r, std, nowIn(zone), zone);
   res.json({
     ...view, house_number: r.house_number, cross_street: r.cross_street, accuracy_m: r.accuracy_m, description: r.description, public_note: r.public_note,
     source_words: Q.SOURCE_WORDS[r.source], referred_to: r.referred_to, referred_at: r.referred_at, closed_reason: r.closed_reason, made_safe_note: r.made_safe_note, assigned_at: r.assigned_at,
     street_class: r.street_class || null, standard: std,
-    has_resident: Boolean(r.resident_id), updates_by_text: Boolean(r.updates_by_text), updates_by_email: Boolean(r.updates_by_email),
-    contact: resident ? { name: resident.name, phone: resident.phone, email: resident.email, texts_ok: Boolean(resident.texts_ok), emails_ok: Boolean(resident.emails_ok) } : null,
+    has_resident: Boolean(r.resident_id || r.contact_phone || r.contact_email || r.contact_name), updates_by_text: Boolean(r.updates_by_text), updates_by_email: Boolean(r.updates_by_email),
+    // The contact the request was made with (what the person typed), not whatever the resident record says now.
+    contact: resident ? { name: resident.name, phone: resident.phone, email: resident.email, texts_ok: Boolean(r.updates_by_text), emails_ok: Boolean(r.updates_by_email) } : null,
     photos: photos.map((p) => ({ ...p, id: Number(p.id), by_resident: Boolean(p.by_resident), uploaded_by: p.by_resident ? 'Resident' : p.uploaded_by })),
     events, messages: messages.map((m) => ({ ...m, ok: Boolean(m.ok) })), duplicates: dups, duplicate_of: original, work_order: wo,
     status_link: Q.statusLink(baseUrl(req), (await one(pool, 'SELECT slug FROM tenants WHERE id = ?', [t])).slug, r.status_token),
@@ -681,17 +682,20 @@ publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
       const same = await one(conn, 'SELECT id, reference, status_token FROM requests WHERE tenant_id = ? AND request_key = ?', [t.id, b.rid]);
       if (same) return { id: Number(same.id), reference: same.reference, token: same.status_token, repeat: true };
     }
+    // At most 3 new reports an hour giving the same phone or email (lib/publicsends.js).
+    if (b.phone || b.email) await require('../lib/publicsends').submitAllowed(t.id, { phone: b.phone, email: b.email }, 'reports');
     const cat = await categoryOf(conn, t.id, b.category_id);
     const street = b.street_id ? await streetOf(conn, t.id, b.street_id, { activeOnly: true }) : null;
     if (cat.needs_contact && !b.phone && !b.email) throw bad(`For ${cat.name.toLowerCase()}, give a phone number or email so the crew can reach you`);
-    const residentId = (b.name || b.phone || b.email) ? await RES.upsertResident(conn, t.id, { name: b.name, phone: b.phone || null, email: b.email || null, streetId: street ? street.id : null, houseNumber: b.house_number, textsOk: b.texts_ok ? true : undefined, emailsOk: b.emails_ok ? true : undefined }, { source: 'report_page' }) : null;
+    const residentId = (b.name || b.phone || b.email) ? await RES.upsertResident(conn, t.id, { name: b.name, phone: b.phone || null, email: b.email || null, streetId: street ? street.id : null, houseNumber: b.house_number, textsOk: b.texts_ok ? true : undefined, emailsOk: b.emails_ok ? true : undefined }, { source: 'report_page', publicForm: true }) : null;
     const ref = await Q.newReference(conn, t.id);
     const token = Q.newToken();
     const sender = crypto.createHmac('sha256', config.linkSecret).update(`${t.id}|${req.ip}`).digest('hex').slice(0, 16);
+    // What the person typed stays on the report itself; the resident on file (if any) is never changed by it.
     const [r] = await conn.query(`INSERT INTO requests (tenant_id, reference, status_token, category_id, street_id, house_number, cross_street, lat, lng, accuracy_m, description, source, resident_id,
-        updates_by_text, updates_by_email, reported_at, request_key, sender_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'web', ?, ?, ?, ?, ?, ?)`,
+        contact_name, contact_phone, contact_email, updates_by_text, updates_by_email, reported_at, request_key, sender_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [t.id, ref, token, cat.id, street ? street.id : null, b.house_number || null, b.cross_street || null, b.lat ?? null, b.lng ?? null, b.accuracy == null ? null : Math.round(b.accuracy),
-      b.description || null, residentId, b.texts_ok && b.phone ? 1 : 0, b.emails_ok && b.email ? 1 : 0, now, b.rid || null, sender]);
+      b.description || null, residentId, b.name || null, b.phone || null, b.email || null, b.texts_ok && b.phone ? 1 : 0, b.emails_ok && b.email ? 1 : 0, now, b.rid || null, sender]);
     await Q.event(conn, t.id, r.insertId, now, `Reported on the report page${b.lat != null ? `, with the phone's location (within about ${b.accuracy == null ? '?' : Math.round(b.accuracy)} m)` : ''}.`);
     // The record of when the municipality was told: written to the audit log too, with no one signed in.
     await audit(conn, { auth: { tenantId: t.id, userId: null }, ip: req.ip }, 'create', 'requests', r.insertId, { source: 'web', reference: ref, reported_at: now });
@@ -763,12 +767,9 @@ publicRouter.post('/:slug/report/:token/stop', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   await within('stop', r.status_token);
   await tx(async (conn) => {
+    // Updates on this report stop. Whoever holds the status link made this report, which proves nothing about the resident
+    // on file with that phone or email, so the resident's own answers are not changed (a STOP by text still stops everything).
     await conn.query('UPDATE requests SET updates_by_text = 0, updates_by_email = 0 WHERE tenant_id = ? AND id = ?', [t.id, r.id]);
-    if (r.resident_id) {
-      const res0 = await one(conn, 'SELECT texts_ok, emails_ok FROM residents WHERE tenant_id = ? AND id = ?', [t.id, r.resident_id]);
-      if (res0 && Number(res0.texts_ok)) await RES.recordConsent(conn, t.id, r.resident_id, 'sms', false, 'status_page');
-      if (res0 && Number(res0.emails_ok)) await RES.recordConsent(conn, t.id, r.resident_id, 'email', false, 'status_page');
-    }
     await Q.event(conn, t.id, r.id, nowIn(t.timezone), 'The resident stopped updates by text and email.');
   });
   res.json({ ok: true });

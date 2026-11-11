@@ -62,6 +62,7 @@ async function runAll() {
   const [ml] = await pool.query('DELETE FROM message_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
   const [al] = await pool.query('DELETE FROM assistant_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 50000', [LOG_DAYS]);
   out.message_log = ml.affectedRows; out.assistant_log = al.affectedRows;
+  out.public_sends = await require('./publicsends').purge(); // per-phone and per-email counts for the public pages: 2 days
   out.street_alerts = await require('./streetnotices').purge(LOG_DAYS); // street alerts: addresses on old sends, sign-ups never confirmed
   out.snapshots = await require('./snapshots').purge(); // forecast data, kept 3 years
   out.demos = await require('./sandbox').purgeExpired();

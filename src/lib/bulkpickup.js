@@ -143,10 +143,11 @@ async function insertBooking(conn, tenantId, b, lines) {
   for (let attempt = 0; ; attempt += 1) {
     const ref = reference(); const tok = token();
     try {
-      const [r] = await conn.query(`INSERT INTO bulk_bookings (tenant_id, reference, view_token, collection_date, street_id, house_number, unit, resident_id, items_note, source, status,
+      const [r] = await conn.query(`INSERT INTO bulk_bookings (tenant_id, reference, view_token, collection_date, street_id, house_number, unit, resident_id, contact_name, contact_phone, contact_email, items_note, source, status,
           pay_method, pay_status, total_cents, paid_cents, paid_at, held_until, texts_ok, emails_ok, credit_from_id, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(?, UTC_TIMESTAMP(), NULL), IF(? = 'awaiting_payment', UTC_TIMESTAMP() + INTERVAL ${HOLD_MINUTES} MINUTE, NULL), ?, ?, ?, ?)`,
-      [tenantId, ref, tok, b.collection_date, b.street_id, b.house_number, b.unit || null, b.resident_id, b.items_note || null, b.source, b.status,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(?, UTC_TIMESTAMP(), NULL), IF(? = 'awaiting_payment', UTC_TIMESTAMP() + INTERVAL ${HOLD_MINUTES} MINUTE, NULL), ?, ?, ?, ?)`,
+      [tenantId, ref, tok, b.collection_date, b.street_id, b.house_number, b.unit || null, b.resident_id, b.contact_name ? String(b.contact_name).slice(0, 120) : null,
+        b.contact_phone ? String(b.contact_phone).slice(0, 30) : null, b.contact_email ? String(b.contact_email).slice(0, 190) : null, b.items_note || null, b.source, b.status,
         b.pay_method, b.pay_status, b.total_cents, b.paid_cents || 0, b.paid_cents ? 1 : 0, b.status, b.texts_ok ? 1 : 0, b.emails_ok ? 1 : 0, b.credit_from_id || null, b.created_by || null]);
       for (const l of lines) {
         await conn.query('INSERT INTO bulk_booking_items (tenant_id, booking_id, size_id, name, unit_cents, quantity) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, r.insertId, l.size_id, l.name, l.unit_cents, l.quantity]);
@@ -179,16 +180,17 @@ async function cardReady(tenantId) {
  * receipt: an email confirmation or payment link goes to the email they gave even without a yes to reminders.
  */
 async function channelsFor(b, { receipt = false } = {}) {
-  const sms = require('./sms'); const mailer = require('./mailer');
+  const sms = require('./sms'); const mailer = require('./mailer'); const R = require('./residents');
   const out = [];
   const key = sms.phoneKey(b.phone);
-  if (b.texts_ok && key && sms.enabled() && await require('./residents').textsAllowed(pool, b.tenant_id, { texts_ok: b.r_texts_ok, phone: b.phone })) out.push('text');
-  if (b.email && mailer.enabled() && (receipt || (b.emails_ok && b.r_emails_ok))) out.push('email');
+  if (b.texts_ok && key && sms.enabled() && await R.phoneMayText(pool, b.tenant_id, b.phone)) out.push('text');
+  if (b.email && mailer.enabled() && (receipt || (b.emails_ok && await R.emailMayGet(pool, b.tenant_id, b.email)))) out.push('email');
   return out;
 }
 
-const FULL = `SELECT b.*, s.name AS street, r.name, r.phone, r.email, r.texts_ok AS r_texts_ok, r.emails_ok AS r_emails_ok, t.name AS town, t.slug, t.phone AS town_phone, t.timezone
-  FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id LEFT JOIN residents r ON r.tenant_id = b.tenant_id AND r.id = b.resident_id
+// The name, phone and email given for this booking (never a resident record a public form matched).
+const FULL = `SELECT b.*, s.name AS street, b.contact_name AS name, b.contact_phone AS phone, b.contact_email AS email, t.name AS town, t.slug, t.phone AS town_phone, t.timezone
+  FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
   JOIN tenants t ON t.id = b.tenant_id`;
 const fullOf = (db, tenantId, id) => one(db, `${FULL} WHERE b.tenant_id = ? AND b.id = ?`, [tenantId, id]);
 
@@ -225,15 +227,19 @@ function words(kind, b, items, s, base) {
 async function tell(tenantId, bookingId, kind, base, { receipt = false, only = null } = {}) {
   try {
     const b = await fullOf(pool, tenantId, bookingId);
-    if (!b || !b.resident_id) return [];
+    if (!b || !(b.phone || b.email)) return [];
+    const PS = require('./publicsends');
     const s = await settingsOf(tenantId);
     const items = await itemsOf(pool, tenantId, [b.id]);
     const w = words(kind, b, items, s, base);
     const sent = [];
     for (const ch of await channelsFor(b, { receipt })) {
       if (only && ch !== only) continue;
+      // A booking made on the public page: at most 6 texts and 6 emails a day to one phone or email (lib/publicsends.js).
+      if (b.source === 'online' && !(await PS.allow(tenantId, ch === 'text' ? 'sms' : 'email', ch === 'text' ? b.phone : b.email, `bulk-${kind}`))) continue;
       if (ch === 'text') {
-        const r = await require('./sms').send({ tenantId, to: b.phone, body: w.text, from: await require('./residents').fromNumber(pool, tenantId), tag: `bulk-${kind}` }); // the municipality's own texting number when it has one
+        // Every text says who sent it (the town's name leads) and how to stop.
+        const r = await require('./sms').send({ tenantId, to: b.phone, body: `${w.text} Reply STOP to stop texts.`, from: await require('./residents').fromNumber(pool, tenantId), tag: `bulk-${kind}` }); // the municipality's own texting number when it has one
         if (r.ok) sent.push('text');
       } else {
         const r = await require('./mailer').send({ tenantId, to: b.email, fromName: b.town, subject: w.subject, text: w.text, tag: `bulk-${kind}` });

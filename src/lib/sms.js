@@ -3,6 +3,8 @@
 // Sends text messages through Twilio's REST API (no SDK). Nothing is sent unless all three settings exist.
 //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN   from the Twilio console
 //   TWILIO_FROM                             a Twilio number (+1...) or messaging service id (MG...)
+//   TWILIO_SENDERS                          the numbers a messaging service (TWILIO_FROM = MG...) sends from, comma separated:
+//                                           the shared numbers, which no municipality can take as its own
 //   TWILIO_API_BASE                         only for automated tests
 // A mountain's Text HELP number (Patrol settings) uses the same account; texts on that line go from it (lib/helpline.js).
 const env = process.env;
@@ -88,6 +90,18 @@ function phoneKey(phone) {
   return k.length === 10 ? k : null;
 }
 
+/**
+ * The shared Verdynt/OS numbers, as +1XXXXXXXXXX: TWILIO_FROM when it is a number, and every sender of the messaging
+ * service listed in TWILIO_SENDERS. Texts from these reach every mountain's customers and every municipality without a
+ * number of its own, so a STOP to one of them counts for all of those.
+ */
+function sharedNumbers() {
+  const out = new Set();
+  if (env.TWILIO_FROM && !/^MG/.test(env.TWILIO_FROM) && e164(env.TWILIO_FROM)) out.add(e164(env.TWILIO_FROM));
+  for (const n of String(env.TWILIO_SENDERS || '').split(',')) if (e164(n)) out.add(e164(n));
+  return [...out];
+}
+
 /** Is the latest text answer for this phone, on any customer record at the mountain, "no"? */
 async function phoneSaidNo(tenantId, key) {
   const { one } = require('../db');
@@ -122,4 +136,4 @@ async function sendHeld() {
   return out;
 }
 
-module.exports = { send, enabled, e164, phoneKey, phoneSaidNo, sendHeld };
+module.exports = { send, enabled, e164, phoneKey, phoneSaidNo, sendHeld, sharedNumbers };

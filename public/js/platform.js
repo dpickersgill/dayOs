@@ -241,6 +241,7 @@ async function manage(id) {
     h('h3', null, 'Apps'), h('p', { class: 'hint' }, 'Changes apply within a few seconds. Turning an app off hides it and refuses its requests; its data is kept.'), list,
     h('h3', null, 'Storage'), h('p', null, `${t.storage_used_mb} MB used of ${t.storage_cap_mb} MB for document files.`),
     h('h3', null, 'Assistant'), assistantPanel(t, () => { dlg.close(); home(); manage(id); }),
+    t.org_type === 'municipality' ? h('h3', null, 'Texting number') : null, t.org_type === 'municipality' ? textingPanel(t, () => { dlg.close(); home(); manage(id); }) : null,
     h('h3', null, 'Owner and manager logins'), people,
     t.history.length ? h('div', { class: 'stack tight' }, h('h3', null, 'Recent changes'), ...t.history.slice(0, 8).map((x) => h('p', { class: 'small muted' }, `${String(x.at).replace('T', ' ').slice(0, 16)}  ${x.action}  ${x.detail || ''}`))) : null), { wide: true });
 }
@@ -819,6 +820,19 @@ async function sharingList() {
     { head: 'On', cell: (m) => day(m.agreed_at) },
     { head: 'Terms', cell: (m) => (m.current_terms ? `Version ${m.agreement_version}` : `Old version ${m.agreement_version || ''}`) },
   ], data) : empty('No mountain has chosen to share yet. The patrol director turns it on in Patrol, Cases, Injury network.'), { wide: true });
+}
+
+// A municipality's own texting number: only set here. Its texts to residents (alerts, request updates, bulk pickup) then
+// come from it, and a STOP to it counts at this municipality only. The shared numbers and a number another tenant has are refused.
+function textingPanel(t, done) {
+  const change = button(t.texting_number ? 'Change the number' : 'Set its own number', () => {
+    const num = input({ name: 'from_number', value: t.texting_number || '', maxlength: 30, placeholder: '+16105550100' });
+    formDialog('Texting number', h('div', { class: 'stack' }, field('Its own Twilio number', num, 'Buy it in Twilio first and point "A message comes in" at /api/v1/twilio/sms. Leave empty to use the shared number.')), async () => {
+      await call('PUT', `/tenants/${t.id}/texting-number`, { from_number: num.value.trim() || null });
+      toast('Saved.'); done();
+    });
+  }, { small: true });
+  return h('div', { class: 'stack tight' }, h('p', null, t.texting_number ? `Its own number: ${t.texting_number}.` : 'The shared Verdynt/OS number.'), h('div', { class: 'row' }, change));
 }
 
 // The assistant for one mountain: this month's questions and cost against its cap, and the ones worth a look.

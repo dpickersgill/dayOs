@@ -31,6 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const skip = () => !JSDOM && { skip: 'jsdom is not installed' };
 let server; let base; let mods; let tmp;
 let inflight = 0;
+const asked = []; // every API address a screen asked for
 const who = {}; // username -> { token, me }
 
 async function settle() {
@@ -58,6 +59,9 @@ const clean = (root, what) => {
   const text = root.textContent;
   assert.ok(text.trim().length > 40, `${what}: the screen has something on it`);
   for (const bad of ['undefined', '[object', 'NaN', 'Invalid Date']) assert.ok(!text.includes(bad), `${what}: page text contains "${bad}": ${text.slice(Math.max(0, text.indexOf(bad) - 80), text.indexOf(bad) + 40)}`);
+  // A part that does not apply, appended as null, shows as the word "null" (review fix: "nullnull" over the stop counts).
+  const walker = document.createTreeWalker(root, 4);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) assert.notEqual(n.nodeValue, 'null', `${what}: a "null" on the page, before: ${(n.previousSibling && n.previousSibling.textContent || '').slice(0, 60)}`);
 };
 const tabs = (root) => [...root.querySelectorAll('[role="tab"]')];
 
@@ -71,7 +75,7 @@ test.before(async (t) => {
   for (const k of ['document', 'Node', 'HTMLElement', 'sessionStorage', 'localStorage', 'location', 'history', 'Event', 'FormData', 'CSS']) if (w[k]) Object.defineProperty(globalThis, k, { value: w[k], configurable: true, writable: true });
   Object.defineProperty(globalThis, 'window', { value: w, configurable: true, writable: true });
   const realFetch = globalThis.fetch;
-  globalThis.fetch = async (...a) => { inflight += 1; try { return await realFetch(...a); } finally { inflight -= 1; } };
+  globalThis.fetch = async (...a) => { asked.push(String(a[0] && a[0].url ? a[0].url : a[0])); inflight += 1; try { return await realFetch(...a); } finally { inflight -= 1; } };
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'so-muni-'));
   fs.cpSync(path.join(__dirname, '..', 'public', 'js'), path.join(tmp, 'js'), { recursive: true });
   fs.cpSync(path.join(__dirname, '..', 'public', 'vendor', 'qrcode'), path.join(tmp, 'vendor', 'qrcode'), { recursive: true });
@@ -149,4 +153,43 @@ test('Work orders: the crew sees the house number of a job from a request, and t
   assert.equal([...root.querySelectorAll('label')].some((l) => /Include contact details/.test(l.textContent)), false, 'only a manager is offered contact details');
   const mgr = await show('owner', 'works', '#/works');
   assert.ok([...mgr.querySelectorAll('label')].some((l) => /Include contact details \(logged\)/.test(l.textContent)));
+});
+
+// ---------------------------------------------------------------- review fixes (2026.11.19)
+test('Bulk pickup, Collection day: no "null" above the counts on a day with no pickups', skip(), async () => {
+  const root = await show('owner', 'bulk-pickup', '#/bulk');
+  clean(root, 'bulk pickup, collection day');
+  assert.ok(!root.textContent.includes('nullnull'));
+});
+
+test('municipal screens never call the ski APIs (/skischool, /guest-types) that would refuse them', skip(), async () => {
+  asked.length = 0;
+  for (const [file, hash, params] of [['myshifts', '#/myshifts', []], ['workforce', '#/workforce', []], ['settings', '#/settings/streets', ['streets']], ['settings', '#/settings', []]]) {
+    const root = await show('owner', file, hash, params);
+    const box = root.querySelector('.error-box');
+    assert.equal(box, null, `${hash}: ${box && box.textContent}`);
+  }
+  const ski = asked.filter((u) => /\/api\/v1\/(skischool|guest-types)(\/|\?|$)/.test(u));
+  assert.deepEqual(ski, [], 'no ski API asked for');
+});
+
+test('shared screens and help use municipal words for a municipality', skip(), async () => {
+  const assets = await show('owner', 'assets', '#/assets');
+  assert.ok(!/lift part|snow gun/i.test(assets.textContent), 'Assets: no lift parts or snow guns');
+  const help = await show('owner', 'help', '#/help/time-zone', ['time-zone']);
+  assert.match(help.textContent, /Your municipality.s time zone/);
+  assert.ok(!/mountain/i.test(help.querySelector('h1').textContent + help.querySelector('.help-intro').textContent), help.textContent.slice(0, 200));
+  const sec = await show('owner', 'help', '#/help/for-assets', ['for-assets']);
+  assert.ok(!/snow gun|lift part/.test(sec.textContent), 'the Assets help section');
+  const settingsHelp = await show('owner', 'help', '#/help/for-settings', ['for-settings']);
+  assert.ok(!/the mountain.s details/.test(settingsHelp.textContent));
+  const mfa = await show('owner', 'settings', '#/settings/profile', ['profile']);
+  assert.ok(!/guest and patient/.test(mfa.textContent), 'two-step sign-in: residents, not guests and patients');
+});
+
+test('"Mark the rest as pass" shows only when a checklist has pass-or-fail items', skip(), async () => {
+  const { answerSheet } = await import(pathToFileURL(path.join(tmp, 'js', 'checksteps.js')).href);
+  const chips = () => { const el = document.createElement('div'); let v = null; return { el, get: () => v, set: (x) => { v = x; } }; };
+  assert.equal(answerSheet([{ key: 'a', label: 'Run time', type: 'number', min: 1 }, { key: 'b', label: 'Next test', type: 'date' }], chips).hasPassItems, false);
+  assert.equal(answerSheet([{ key: 'a', label: 'Run time', type: 'number' }, { key: 'c', label: 'Panel clean' }], chips).hasPassItems, true);
 });

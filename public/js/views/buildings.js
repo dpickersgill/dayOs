@@ -526,7 +526,7 @@ function failDialog(s, roundId, send, done) {
 function checklistDialog(s, send, done) {
   const sheet = answerSheet(s.steps, resultChips);
   formDialog(`${s.task}: ${s.asset}`, h('div', { class: 'stack ins-sheet' }, sheet.el,
-    h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true }))), async () => {
+    sheet.hasPassItems ? h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true })) : null), async () => {
     const missing = sheet.answers.filter((a) => a.missing());
     if (missing.length) { missing[0].focus(); throw new Error(`Answer every item (${missing.length} left)`); }
     const noNote = sheet.answers.filter((a) => a.needsNote());

@@ -13,7 +13,7 @@
 import { stepsEditor } from '../checksteps.js';
 import { get, post, patch, put, download } from '../api.js';
 import { drawMap } from './asset-map.js';
-import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox } from '../ui.js';
+import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox, isMuni } from '../ui.js';
 import { renderAsset, renderLabels, assetDialog, fullMeta, STATUS, SERVICE, workOrderSheet, fmtDay, leftText } from './asset-page.js';
 import { riskState, conditionText, criticalityText } from './asset-bits.js';
 
@@ -34,7 +34,7 @@ export async function render(root, params = []) {
     ...(isManager() ? [['costs', 'Costs', drawCosts], ['settings', 'Settings', drawSettings]] : []),
   ];
   const want = items.some((i) => i[0] === params[0]) ? params[0] : 'overview';
-  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Assets and fleet'), h('p', { class: 'page-note' }, 'Every machine, lift part and building system: what it is, where it is, what it needs and what it costs.'))),
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Assets and fleet'), h('p', { class: 'page-note' }, isMuni() ? 'Every truck, pump, hydrant, valve and building system: what it is, where it is, what it needs and what it costs.' : 'Every machine, lift part and building system: what it is, where it is, what it needs and what it costs.'))),
     tabs(items, want)); // the open tab is kept in the address (?tab=); #/assets/<tab> still opens that tab
 }
 

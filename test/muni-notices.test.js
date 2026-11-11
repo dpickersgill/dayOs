@@ -313,9 +313,15 @@ test('quiet hours: a paving notice at night waits for 8 AM; a water outage goes 
 test('a boil water advisory needs the certified operator who issued it; the public page names nobody', async () => {
   const st = streetsA['Dayton Street'];
   const r = await signUp(A, { street: st, house: '44', phone: newPhone(), email: `dayton44.${suffix}@example.com`, name: 'Jordan Privateperson' });
+  // Only logins a manager marked as certified operators can be picked (2026.11.19 review fix).
+  const before = ok(await api('GET', '/street-notices/setup', { token: A.token }));
+  assert.equal(before.operator_rule, 'Only send when your certified operator has issued the advisory.');
+  assert.deepEqual(before.operators, [], 'nobody is a certified operator until a manager says so');
+  const owner = ok(await api('GET', '/street-notices/settings', { token: A.token })).logins.find((l) => l.role === 'owner');
+  ok(await api('PUT', '/street-notices/settings', { token: A.token, body: { crew_senders: [], certified_operators: [owner.id] } }));
   const setup = ok(await api('GET', '/street-notices/setup', { token: A.token }));
-  assert.equal(setup.operator_rule, 'Only send when your certified operator has issued the advisory.');
   const op = setup.operators[0];
+  assert.equal(op.id, owner.id);
   const body = notice({ type: 'boil_water', title: 'Boil water: Dayton Street', sms_text: 'Boil water advisory for Dayton Street.', areas: [{ street_id: st, from_no: 40, to_no: 48, side: 'even' }] });
   const no = await api('POST', '/street-notices', { token: A.token, body });
   assert.equal(no.status, 400); assert.match(no.body.error, /certified operator/);
@@ -470,23 +476,28 @@ test('the pages: sign-up, a notice and the manage link are served', async () => 
 
 test('a municipality\'s own texting number sends its alerts; without one, the shared number does', async () => {
   const M = await createMuniTenant(base, { slug: `sn-from-${suffix}` });
+  // A number no other run of this test has given out: a texting number belongs to one municipality.
+  const own = `555${String(Date.now()).slice(-4)}`;
   const st = await addStreets(M.id, ['Birch Street']);
   const r = await signUp(M, { street: st['Birch Street'], house: '2', phone: newPhone() });
   assert.equal(textsTo(r.phone).at(-1).From, '+16105550000', 'the shared number');
-  assert.equal((await api('PUT', '/street-notices/settings', { token: M.token, body: { from_number: '12' } })).status, 400);
-  ok(await api('PUT', '/street-notices/settings', { token: M.token, body: { from_number: '(484) 555-0999' } }));
-  assert.equal(ok(await api('GET', '/street-notices/settings', { token: M.token })).from_number, '+14845550999');
+  // Only the platform operator sets a municipality's own number (2026.11.19 review fix); a manager sees it, read-only.
+  assert.equal((await api('PUT', '/street-notices/settings', { token: M.token, body: { from_number: `(484) ${own.slice(0, 3)}-${own.slice(3)}` } })).status, 403);
+  const key = { 'x-platform-key': process.env.BOOTSTRAP_KEY };
+  assert.equal((await api('PUT', `/platform/tenants/${M.id}/texting-number`, { headers: key, body: { from_number: '12' } })).status, 400);
+  ok(await api('PUT', `/platform/tenants/${M.id}/texting-number`, { headers: key, body: { from_number: `(484) ${own.slice(0, 3)}-${own.slice(3)}` } }));
+  assert.equal(ok(await api('GET', '/street-notices/settings', { token: M.token })).from_number, `+1484${own}`);
   const n = ok(await api('POST', '/street-notices', { token: M.token, body: notice({ areas: [{ street_id: st['Birch Street'] }] }) }), 201);
   ok(await api('POST', `/street-notices/${n.id}/send`, { token: M.token, body: { confirm: true } }));
   await settled(M, n.id);
-  assert.equal(textsTo(r.phone).find((t) => t.Body.includes(n.code)).From, '+14845550999');
+  assert.equal(textsTo(r.phone).find((t) => t.Body.includes(n.code)).From, `+1484${own}`);
 
   // The one STOP rule with a number of its own: a STOP texted to this municipality's number counts here only, for every
   // kind of resident text, and the words name this number. The same phone at another municipality is not touched.
   const other = await createMuniTenant(base, { slug: `sn-other-${suffix}` });
   const ost = await addStreets(other.id, ['Birch Street']);
   await signUp(other, { street: ost['Birch Street'], house: '2', phone: r.phone });
-  await textBack(r.phone, 'STOP', '+14845550999');
+  await textBack(r.phone, 'STOP', `+1484${own}`);
   const RES = require('../src/lib/residents');
   assert.equal(await RES.stoppedByText(pool, M.id, r.phone), true);
   assert.equal(await RES.stoppedByText(pool, other.id, r.phone), false, 'the other municipality texts from the shared number, which was not stopped');
@@ -494,11 +505,11 @@ test('a municipality\'s own texting number sends its alerts; without one, the sh
   assert.equal((await q('SELECT texts_ok FROM residents WHERE tenant_id = ? AND phone = ?', [other.id, `+1${keyOf(r.phone)}`]))[0].texts_ok, 1);
   const again = await api('POST', `/public/${M.slug}/alerts`, { body: { street_id: st['Birch Street'], house_number: '2', phone: r.phone } });
   assert.equal(again.status, 409);
-  assert.equal(again.body.error, 'This phone has texts turned off. Text START to 484-555-0999 to turn them back on. Then sign up again.');
+  assert.equal(again.body.error, `This phone has texts turned off. Text START to 484-${own.slice(0, 3)}-${own.slice(3)} to turn them back on. Then sign up again.`);
   // START to the shared number is for the other municipalities: this one stays stopped until START reaches its own number.
   await textBack(r.phone, 'START');
   assert.equal(await RES.stoppedByText(pool, M.id, r.phone), true);
-  await textBack(r.phone, 'START', '+14845550999');
+  await textBack(r.phone, 'START', `+1484${own}`);
   assert.equal(await RES.stoppedByText(pool, M.id, r.phone), false);
   assert.equal((await q('SELECT texts_ok FROM residents WHERE tenant_id = ? AND phone = ?', [M.id, `+1${keyOf(r.phone)}`]))[0].texts_ok, 1);
 });

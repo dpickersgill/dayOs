@@ -348,7 +348,8 @@ router.get('/:id/export.csv', async (req, res) => {
   const p = await programFor(pool, t, id);
   const { org } = await require('../lib/modules').stateOf(t);
   const list = await targetsOf(pool, t, id, org);
-  const esc = (v) => { let x = v === null || v === undefined ? '' : String(v); if (/^[=+\-@\t\r]/.test(x)) x = `'${x}`; return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  // Coordinates and readings stay numbers; only text that starts like a formula is defused (lib/csv.js).
+  const esc = (v) => { const x = require('../lib/csv').defuse(v === null || v === undefined ? '' : String(v)); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
   const head = ['Tag', 'Name', 'Kind', 'Latitude', 'Longitude', 'State', 'Result', 'Skipped because', 'Done', 'By', 'Work order'];
   const body = list.map((g) => [g.tag, g.name, g.kind_label, g.lat, g.lng, { todo: 'To do', done: 'Done', skipped: 'Skipped' }[g.status], g.result, g.skip_reason, g.done_at ? String(g.done_at instanceof Date ? g.done_at.toISOString() : g.done_at).slice(0, 16).replace('T', ' ') : '', g.done_by, g.work_order_id].map(esc).join(','));
   await audit(pool, req, 'export', 'asset_programs', id, { rows: list.length });

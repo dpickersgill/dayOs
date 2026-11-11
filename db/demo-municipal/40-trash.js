@@ -77,7 +77,7 @@ module.exports = async function trash(conn, tenantId, helpers = {}) {
     const texts = rand() < 0.6; const emails = rand() < 0.5;
     const r = await q('INSERT INTO residents (tenant_id, name, phone, email, street_id, house_number, texts_ok, emails_ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [tenantId, `${first} ${last}`, phone, `${first}.${last}${people}@example.com`.toLowerCase(), streetId, house, texts ? 1 : 0, emails ? 1 : 0]);
-    return { id: r.insertId, texts, emails };
+    return { id: r.insertId, texts, emails, name: `${first} ${last}`, phone, email: `${first}.${last}${people}@example.com`.toLowerCase() };
   }
   async function book(date, { past: done }) {
     const street = pick(streets);
@@ -98,10 +98,10 @@ module.exports = async function trash(conn, tenantId, helpers = {}) {
     let b;
     for (let attempt = 0; ; attempt += 1) {
       try {
-        b = await q(`INSERT INTO bulk_bookings (tenant_id, reference, view_token, collection_date, street_id, house_number, resident_id, items_note, source, status, pay_method, pay_status, total_cents, paid_cents, paid_at,
+        b = await q(`INSERT INTO bulk_bookings (tenant_id, reference, view_token, collection_date, street_id, house_number, resident_id, contact_name, contact_phone, contact_email, items_note, source, status, pay_method, pay_status, total_cents, paid_cents, paid_at,
             texts_ok, emails_ok, reminded_at, outcome, outcome_reason, outcome_at, outcome_by, notified_at, notified_via, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'booked', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [tenantId, ref(), tok, date, street.id, house, who.id, pick(NOTES), rand() < 0.6 ? 'online' : 'staff', how, payStatus, total, payStatus === 'paid' ? total : 0, payStatus === 'paid' ? `${addDays(date, -5)} 15:00:00` : null,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'booked', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [tenantId, ref(), tok, date, street.id, house, who.id, who.name, who.phone, who.email, pick(NOTES), rand() < 0.6 ? 'online' : 'staff', how, payStatus, total, payStatus === 'paid' ? total : 0, payStatus === 'paid' ? `${addDays(date, -5)} 15:00:00` : null,
           who.texts ? 1 : 0, who.emails ? 1 : 0, done && (who.texts || who.emails) ? `${addDays(date, -1)} 20:00:00` : null,
           outcome, reason, outcome ? `${date} ${String(7 + Math.floor(rand() * 6)).padStart(2, '0')}:${String(Math.floor(rand() * 60)).padStart(2, '0')}:00` : null, outcome ? crewId : null,
           outcome && outcome !== 'picked_up' ? `${date} 14:00:00` : null, outcome && outcome !== 'picked_up' ? (who.texts ? 'text' : who.emails ? 'email' : 'none') : null, `${addDays(date, -6)} 14:00:00`]);

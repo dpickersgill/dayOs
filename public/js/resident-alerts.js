@@ -112,7 +112,7 @@ function emailWait(page, r) {
 function done(town, r, lead) {
   clear(root).append(h('div', { class: 'help-done' }, h('h1', null, 'You are signed up'),
     h('p', null, `${lead} ${town} will send you alerts for this address.`),
-    h('p', null, h('a', { href: r.manage }, 'Manage your alerts'), ' (change topics, add the email or stop). Every alert has this link too.'),
+    h('p', null, h('a', { href: r.manage }, 'Manage your alerts'), ' (change topics or stop). Every alert email has this link too.'),
     h('p', null, h('a', { href: `/alerts/${encodeURIComponent(slug)}` }, 'Sign up another address'))));
 }
 
@@ -142,7 +142,10 @@ async function managePage(token) {
   function draw() {
     const anyText = v.signups.some((s) => s.texts === 'on');
     const anyMail = v.signups.some((s) => s.emails === 'on');
+    // A manage link is for one phone or one email: the addresses signed up through it, nothing else.
+    const forWhat = v.channel === 'sms' ? `texts to the phone ${v.hint}` : `emails to ${v.hint}`;
     appendAll(clear(root), h('h1', null, `Your ${v.municipality} alerts`),
+      h('p', { class: 'muted' }, `This page is for ${forWhat}. Addresses signed up with another phone or email have their own link.`),
       v.signups.length ? null : h('p', null, 'You have no addresses signed up now.'),
       ...v.signups.map((s) => {
         const boxes = v.topics.map((t) => ({ t, ...check(`m-${s.id}-${t.key}`, t.always ? `${t.label} (always on)` : t.label, s.topics.includes(t.key), t.always ? { disabled: true } : {}) }));
@@ -155,8 +158,8 @@ async function managePage(token) {
           h('p', { class: 'muted' }, how.join('. ') || 'Waiting for you to confirm your phone or email.'), ...boxes.map((b) => b.el), h('div', { class: 'row' }, save, remove));
       }),
       anyText || anyMail ? h('h2', null, 'Stop everything') : null,
-      anyText ? h('button', { type: 'button', class: 'btn', onclick: () => act({ action: 'stop', channel: 'sms' }, 'Texts stopped.') }, 'Stop all texts') : null,
-      anyMail ? h('button', { type: 'button', class: 'btn', onclick: () => act({ action: 'stop', channel: 'email' }, 'Emails stopped.') }, 'Stop all emails') : null,
+      anyText ? h('button', { type: 'button', class: 'btn', onclick: () => act({ action: 'stop', channel: 'sms' }, 'Texts stopped.') }, 'Stop all texts to this phone') : null,
+      anyMail ? h('button', { type: 'button', class: 'btn', onclick: () => act({ action: 'stop', channel: 'email' }, 'Emails stopped.') }, 'Stop all emails to this address') : null,
       h('p', null, h('a', { href: `/alerts/${encodeURIComponent(slug)}` }, 'Sign up another address')), msg);
   }
   draw();

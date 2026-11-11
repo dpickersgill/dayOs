@@ -2,7 +2,7 @@
 // (shown once) get someone in if the phone is lost. The owner can require it for the whole mountain.
 
 import { get, post } from '../api.js';
-import { h, clear, ctx, input, field, button, toast, formDialog, errorBox, state } from '../ui.js';
+import { h, clear, ctx, input, field, button, toast, formDialog, errorBox, state, isMuni } from '../ui.js';
 import { qr } from '../barcode.js';
 
 const groupSecret = (s) => String(s).replace(/(.{4})/g, '$1 ').trim();
@@ -25,7 +25,7 @@ export function mfaPanel(onChange) {
     }
     box.append(h('p', null, me.passkeys
       ? 'Optional, as a backup to your passkey: a six-digit code from an app on your phone.'
-      : 'A six-digit code from an app on your phone, as a second step after your password. It protects guest and patient information even if a password is guessed or leaked.'),
+      : `A six-digit code from an app on your phone, as a second step after your password. It protects ${isMuni() ? 'residents\u2019 information' : 'guest and patient information'} even if a password is guessed or leaked.`),
     h('div', { class: 'row' }, button('Set up an authenticator app', () => setup(), { kind: me.passkeys ? undefined : 'primary', small: Boolean(me.passkeys) })));
   }
 
