@@ -93,4 +93,98 @@ function sniff(buf) {
   return null;
 }
 
-module.exports = { photoFacts, sniff };
+/**
+ * A copy of a photo with where it was taken removed, for anything shown publicly (muni release 1). The original is never
+ * changed: it stays as taken, with its fingerprint. JPEG: the GPS block of the EXIF is blanked in place (its entries and
+ * values zeroed, so every other offset still holds and the orientation stays) and XMP blocks (which can repeat the
+ * position) are dropped. PNG: text and EXIF chunks are dropped. WebP: the EXIF and XMP chunks are dropped. Anything else
+ * (HEIC, a file it cannot read) returns null: show it to staff only.
+ */
+function stripGps(input) {
+  try {
+    if (!Buffer.isBuffer(input)) return null;
+    const kind = sniff(input);
+    if (kind === 'image/jpeg') return stripJpeg(Buffer.from(input));
+    if (kind === 'image/png') return stripPng(input);
+    if (kind === 'image/webp') return stripWebp(input);
+  } catch (_) { /* unreadable: not shown publicly */ }
+  return null;
+}
+
+function blankGps(buf, start, end) {
+  const order = buf.toString('latin1', start, start + 2);
+  const le = order === 'II';
+  if (!le && order !== 'MM') return;
+  const u16 = (o) => (le ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+  const u32 = (o) => (le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const SIZES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+  const ifd0 = start + u32(start + 4);
+  if (ifd0 + 2 > end) return;
+  const n0 = u16(ifd0);
+  for (let i = 0; i < n0 && ifd0 + 2 + (i + 1) * 12 <= end; i += 1) {
+    const e = ifd0 + 2 + i * 12;
+    if (u16(e) !== 0x8825) continue;
+    const gps = start + u32(e + 8);
+    if (gps + 2 > end) return;
+    const n = u16(gps);
+    for (let j = 0; j < n && gps + 2 + (j + 1) * 12 <= end; j += 1) {
+      const g = gps + 2 + j * 12;
+      const size = (SIZES[u16(g + 2)] || 0) * u32(g + 4);
+      if (size > 4) { const vo = start + u32(g + 8); if (vo >= start && vo + size <= end) buf.fill(0, vo, vo + size); }
+      buf.fill(0, g, g + 12);
+    }
+    buf.fill(0, gps, gps + 2); // no entries left; the "next" pointer after them reads as none
+  }
+}
+
+function stripJpeg(buf) {
+  const keep = [buf.subarray(0, 2)];
+  let o = 2;
+  while (o + 4 <= buf.length) {
+    if (buf[o] !== 0xff) break;
+    const marker = buf[o + 1];
+    if (marker === 0xda || marker === 0xd9) break; // the image data: kept as it is
+    const len = buf.readUInt16BE(o + 2);
+    const seg = buf.subarray(o, o + 2 + len);
+    if (marker === 0xe1 && buf.toString('latin1', o + 4, o + 10) === 'Exif\0\0') { blankGps(buf, o + 10, Math.min(buf.length, o + 2 + len)); keep.push(seg); }
+    else if (marker === 0xe1 && buf.toString('latin1', o + 4, o + 33).startsWith('http://ns.adobe.com/xap/1.0/')) { /* XMP: dropped */ }
+    else keep.push(seg);
+    o += 2 + len;
+  }
+  keep.push(buf.subarray(o));
+  return Buffer.concat(keep);
+}
+
+function stripPng(buf) {
+  const keep = [buf.subarray(0, 8)];
+  let o = 8;
+  while (o + 12 <= buf.length) {
+    const len = buf.readUInt32BE(o);
+    const type = buf.toString('latin1', o + 4, o + 8);
+    const end = o + 12 + len;
+    if (end > buf.length) { keep.push(buf.subarray(o)); return Buffer.concat(keep); }
+    if (!['eXIf', 'tEXt', 'iTXt', 'zTXt'].includes(type)) keep.push(buf.subarray(o, end));
+    o = end;
+  }
+  keep.push(buf.subarray(o));
+  return Buffer.concat(keep);
+}
+
+function stripWebp(buf) {
+  const keep = [];
+  let o = 12;
+  while (o + 8 <= buf.length) {
+    const type = buf.toString('latin1', o, o + 4);
+    const len = buf.readUInt32LE(o + 4);
+    const end = Math.min(buf.length, o + 8 + len + (len % 2));
+    if (type === 'VP8X') { const c = Buffer.from(buf.subarray(o, end)); c[8] &= ~0x0c; keep.push(c); } // no EXIF or XMP flags
+    else if (type !== 'EXIF' && type !== 'XMP ') keep.push(buf.subarray(o, end));
+    o = end;
+  }
+  const body = Buffer.concat(keep);
+  const head = Buffer.from(buf.subarray(0, 12));
+  head.writeUInt32LE(body.length + 4, 4);
+  return Buffer.concat([head, body]);
+}
+
+module.exports = { photoFacts, sniff, stripGps };

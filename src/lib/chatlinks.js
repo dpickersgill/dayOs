@@ -60,13 +60,19 @@ const TYPES = {
       return out;
     },
   },
+  // muni release 1: a resident's request, by its reference and what it is about; never the resident.
+  resident_request: {
+    label: 'Resident request', path: (id) => `#/requests/r/${id}`, module: 'requests',
+    allowed: async (req) => is(req, 'staff', 'counter', 'manager'),
+    titles: async (t, ids) => rows(pool, "SELECT r.id, CONCAT('Request ', r.reference) AS title, CONCAT_WS(' · ', c.name, s.name) AS subtitle FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id LEFT JOIN streets s ON s.tenant_id = r.tenant_id AND s.id = r.street_id WHERE r.tenant_id = ? AND r.id IN (?)", [t, ids]),
+  },
 };
 const TYPE_KEYS = Object.keys(TYPES);
 
 /** The app address a link opens, to recognize links pasted into a message. Returns { type, id } or null. */
 const PATTERNS = [
   [/#\/patrol\/case\/(\d+)/, 'patrol_case'], [/#\/assets\/a\/(\d+)/, 'asset'], [/#\/conditions\/wo\/(\d+)/, 'work_order'],
-  [/#\/people\/(\d+)/, 'customer'], [/#\/sell\/order\/(\d+)/, 'order'], [/#\/waivers\/w\/(\d+)/, 'waiver'], [/#\/documents\/d\/(\d+)/, 'document'],
+  [/#\/people\/(\d+)/, 'customer'], [/#\/requests\/r\/(\d+)/, 'resident_request'], [/#\/sell\/order\/(\d+)/, 'order'], [/#\/waivers\/w\/(\d+)/, 'waiver'], [/#\/documents\/d\/(\d+)/, 'document'],
 ];
 
 /** Look up a list of links for one reader: [{ type, id, label, path, title?, subtitle?, state: 'ok' | 'no_access' | 'gone' }]. */

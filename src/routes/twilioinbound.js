@@ -69,6 +69,8 @@ async function applyReply(phone, intent) {
     if (intent === 'stop' && status !== 'opted_out') { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_out', SOURCE, null); changed += 1; }
     if (intent === 'start' && status === 'opted_out' && source === SOURCE) { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_in', SOURCE, null); changed += 1; }
   }
+  // A municipality's residents (muni release 1) are kept apart from customers: the same STOP or START applies to them.
+  changed += await require('../lib/residents').applyTextReply(pool, phone, intent);
   return changed;
 }
 

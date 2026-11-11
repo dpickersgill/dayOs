@@ -4184,3 +4184,7 @@ dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px;
 dl.facts dt { color: var(--quiet); }
 dl.facts dd { margin: 0; }
 @media (max-width: 560px) { dl.facts { grid-template-columns: 1fr; gap: 0; } dl.facts dd { margin-bottom: 6px; } }
+
+/* Requests (muni release 1): filter rows keep their selects and dates at their own width. */
+.req-filters > select, .req-filters > input { width: auto; min-width: 0; flex: 0 1 auto; }
+.req-filters > input[type=search] { min-width: min(260px, 100%); }
