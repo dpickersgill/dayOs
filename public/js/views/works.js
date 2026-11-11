@@ -3,7 +3,7 @@
 // the API under /ops/work-orders and /ops/pm, the same statuses, notes and "Make work order"), without lifts or ski words.
 // Reachable with Assets and fleet on (lib/modules.js opens those two paths for it). Tabs: Open, Done, Service plans.
 // Filters: priority, assigned to, where it came from, overdue. #/works?tab=done, #/works?overdue=1, #/works/12 opens one.
-import { get, post, patch, del } from '../api.js';
+import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
@@ -56,14 +56,25 @@ async function drawOrders(box, status, pick) {
   const overdue = h('input', { type: 'checkbox', name: 'overdue' });
   overdue.checked = status === 'open' && hashParam('overdue') === '1';
   const body = h('div');
-  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
-    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body);
-  async function load() {
+  // Work orders are public records. The spreadsheet leaves out what would identify a resident (the house number and the
+  // resident's own words on a work order made from a request) unless a manager ticks the box, which is logged.
+  const contacts = h('input', { type: 'checkbox' });
+  const filters = () => {
     const q = new URLSearchParams({ status });
     if (priority.value) q.set('priority', priority.value);
     if (who.value === 'mine') q.set('mine', '1'); else if (who.value) q.set('assigned_staff_id', who.value);
     if (source.value) q.set('source', source.value);
     if (status === 'open' && overdue.checked) q.set('overdue', '1');
+    return q;
+  };
+  const exportRow = h('div', { class: 'row no-print' },
+    button('Download spreadsheet', () => { const q = filters(); if (contacts.checked) q.set('contacts', '1'); return download(`/ops/work-orders/export?${q}`, `work-orders-${todayStr()}.csv`); }, { small: true }),
+    isManager() ? h('label', { class: 'check', title: 'Logged with your name' }, contacts, ' Include contact details (logged)') : null,
+    h('span', { class: 'muted small' }, 'Work orders are public records. The spreadsheet leaves out residents’ house numbers and their own words.'));
+  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
+    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, exportRow);
+  async function load() {
+    const q = filters();
     const { data } = await get(`/ops/work-orders?${q}`);
     clear(body);
     if (!data.length) { body.append(empty(status === 'open' ? 'No open work orders. Nice work.' : 'Nothing done yet.')); return; }

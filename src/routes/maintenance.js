@@ -151,7 +151,8 @@ async function createOrder(conn, req, b, source = 'manual') {
   return r.insertId;
 }
 
-router.get('/work-orders', async (req, res) => {
+/** The list's filters, shared by the list and the export: [where, params]. */
+async function orderFilters(req) {
   const where = ['w.tenant_id = ?']; const params = [req.auth.tenantId];
   const status = first(req.query.status || 'open');
   if (status === 'open') where.push("w.status NOT IN ('done','cancelled')");
@@ -167,8 +168,58 @@ router.get('/work-orders', async (req, res) => {
   if (req.query.assigned_staff_id) { if (first(req.query.assigned_staff_id) === 'none') where.push('w.assigned_staff_id IS NULL'); else { where.push('w.assigned_staff_id = ?'); params.push(Number(first(req.query.assigned_staff_id))); } }
   if (req.query.source && /^[a-z]{2,20}$/.test(first(req.query.source))) { where.push('w.source = ?'); params.push(first(req.query.source)); }
   if (req.query.overdue === '1') { where.push("w.status NOT IN ('done','cancelled') AND w.due_date < ?"); params.push(todayIn(await tenantTz(req.auth.tenantId))); }
+  return [where, params];
+}
+
+router.get('/work-orders', async (req, res) => {
+  const [where, params] = await orderFilters(req);
   const limit = Math.min(Number(req.query.limit) || 200, 500);
   res.json({ data: await rows(pool, `${ORDER_SQL} WHERE ${where.join(' AND ')} ORDER BY FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.opened_at DESC LIMIT ?`, [...params, limit]) });
+});
+
+/**
+ * The work orders as a spreadsheet (muni release 1), with the list's filters. Work orders are public records in
+ * Pennsylvania (Right-to-Know), and one made from a resident request carries the resident's house number in its title
+ * and location and the resident's own words in its description. The export leaves those out: the street and cross
+ * street stay. contacts=1 keeps them, for managers only, and is written to the audit log with the manager's name. The
+ * crew's screens are not changed by this: they see the full location they need to do the job.
+ */
+router.get('/work-orders/export', async (req, res) => {
+  const contacts = first(req.query.contacts || '') === '1';
+  if (contacts && !['owner', 'manager'].includes(req.auth.role)) throw require('../lib/errors').forbidden('Only a manager can include contact details');
+  const Q = require('../lib/requests');
+  const { toCsv } = require('../lib/csv');
+  const [where, params] = await orderFilters(req);
+  const list = await rows(pool, `SELECT w.id, w.title, w.description, w.priority, w.status, w.location, w.source, w.due_date, w.opened_at, w.completed_at, w.labor_hours, w.resolution,
+      a.name AS asset, l.name AS lift, mf.name AS feature_name, mf.tag AS feature_tag, ap.name AS program, CONCAT(p.first_name, ' ', p.last_name) AS assignee,
+      rq.reference AS request, rq.house_number, rq.cross_street, st.name AS street_name, rq.lat, rc.name AS category
+    FROM work_orders w
+    LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
+    LEFT JOIN map_features mf ON mf.tenant_id = w.tenant_id AND mf.id = w.map_feature_id
+    LEFT JOIN asset_programs ap ON ap.tenant_id = w.tenant_id AND ap.id = w.program_id
+    LEFT JOIN lifts l ON l.tenant_id = w.tenant_id AND l.id = w.lift_id
+    LEFT JOIN staff s ON s.tenant_id = w.tenant_id AND s.id = w.assigned_staff_id
+    LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id
+    LEFT JOIN requests rq ON rq.tenant_id = w.tenant_id AND rq.id = w.request_id
+    LEFT JOIN streets st ON st.tenant_id = rq.tenant_id AND st.id = rq.street_id
+    LEFT JOIN request_categories rc ON rc.tenant_id = rq.tenant_id AND rc.id = rq.category_id
+    WHERE ${where.join(' AND ')} ORDER BY w.opened_at DESC, w.id DESC LIMIT 5000`, params);
+  const at = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '');
+  const data = list.map((w) => {
+    const fromRequest = Boolean(w.request);
+    const open = contacts || !fromRequest;
+    return {
+      work_order: w.id, title: open ? w.title : Q.withoutHouseNumber(w.title, w), status: w.status, priority: w.priority, from: w.source,
+      location: open ? (w.location || '') : Q.publicPlace(w), asset: w.asset || w.lift || '', map_item: w.feature_tag || w.feature_name || '', program: w.program || '', request: w.request || '',
+      assigned_to: (w.assignee || '').trim(), opened_at: at(w.opened_at), due_date: w.due_date ? String(w.due_date).slice(0, 10) : '', completed_at: at(w.completed_at),
+      labor_hours: w.labor_hours ?? '', resolution: open ? (w.resolution || '') : Q.withoutHouseNumber(w.resolution, w),
+      // A resident's own words can name them, so a request's description leaves only with contact details.
+      description: open ? (w.description || '') : `Resident request ${w.request}${w.category ? ` (${w.category})` : ''}.`,
+    };
+  });
+  await audit(pool, req, contacts ? 'export_contacts' : 'export', 'work_orders', null, { format: 'csv', rows: data.length });
+  const cols = ['work_order', 'title', 'status', 'priority', 'from', 'location', 'asset', 'map_item', 'program', 'request', 'assigned_to', 'opened_at', 'due_date', 'completed_at', 'labor_hours', 'resolution', 'description'];
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="work-orders${contacts ? '-with-contacts' : ''}.csv"`, 'Cache-Control': 'private, no-store' }).send(toCsv(cols, data));
 });
 
 /**

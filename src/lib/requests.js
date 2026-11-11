@@ -295,6 +295,24 @@ async function alertNew(tenantId, requestId, { exceptUserId = null } = {}) {
 }
 
 // ---------------------------------------------------------------- work orders
+/**
+ * A work order's words without the house number of the resident request it came from (Right-to-Know: a work order is a
+ * public record, and the house number is a resident's contact detail). r: the request, with its street's name.
+ * The street, the cross street and the job stay; the crew's own screens keep the full location.
+ */
+function withoutHouseNumber(text, r) {
+  let out = String(text || '');
+  const house = String((r && r.house_number) || '').trim();
+  if (!out || !house) return out;
+  const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  out = out.split(placeWords(r)).join(placeWords(r, { withNumber: false }));
+  // The number wherever else it was typed ("in front of 120"), as a whole word.
+  out = out.replace(new RegExp(`(^|[^0-9A-Za-z])${esc(house)}(?=[^0-9A-Za-z]|$)`, 'gi'), '$1');
+  return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
+/** Where a request's work order is, for a public record: the street and cross street, never the house number. */
+const publicPlace = (r) => placeWords(r, { withNumber: false });
+
 /** Makes the request's work order (source 'request', request_id) inside the caller's transaction. Returns its id. */
 async function makeWorkOrder(conn, req, r, { title, priority, assigned_staff_id: staffId, due_date: due, description }) {
   if (staffId && !(await one(conn, 'SELECT id FROM staff WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, staffId]))) {
@@ -389,5 +407,5 @@ module.exports = {
   DEFAULT_CATEGORIES, SOURCES, SOURCE_WORDS, STATUSES, STATUS_WORDS, OPEN, DONE, CLASSES, CLASS_WORDS, REQ_SQL, ALERT_THREAD,
   ensureSetup, settingsOf, categoriesOf, standardsOf, standardFor, newReference, newToken, normalRef,
   spanWords, targetWords, measure, timing, placeWords, roundPosition, requestOf, event, tzOf, publicStatus, statusLink,
-  tellResident, syncAlertThread, alertNew, makeWorkOrder, markFixed, workOrderDone, duplicatesOf, tellFixed, ledger, hoursBetween,
+  tellResident, syncAlertThread, alertNew, makeWorkOrder, markFixed, workOrderDone, duplicatesOf, tellFixed, ledger, hoursBetween, withoutHouseNumber, publicPlace,
 };

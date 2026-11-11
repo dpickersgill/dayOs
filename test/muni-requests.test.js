@@ -576,6 +576,45 @@ test('the resident can stop updates from the status page', async () => {
   assert.equal(textsTo(ph).length, n);
 });
 
+test('Right-to-Know: the work order spreadsheet leaves out the house number unless a manager includes contact details, and the crew still see it', async () => {
+  const id = await staffRequest(T.desk.token, { category_id: catId(A, 'Pothole'), street_id: A.streets['Church Street'], house_number: '8125', description: 'Deep hole. Ask for Dana at the blue house.', contact: { name: 'Dana Whitlow', phone: '6105550177' } });
+  const made = await api('POST', `/requests/${id}/work-order`, { token: T.desk.token, body: {} });
+  is(made, 201);
+  const wo = made.body.work_order_id;
+  // The crew's own screen: the full location, to find the job.
+  const seen = await api('GET', `/ops/work-orders/${wo}`, { token: T.crew.token });
+  is(seen, 200);
+  assert.match(seen.body.location, /8125 Church Street/);
+  assert.match(seen.body.title, /8125 Church Street/);
+  const line = (csv) => csv.split('\r\n').find((l) => l.startsWith(`"${wo}"`));
+  // The public record: the street stays, the house number and the resident's own words do not.
+  for (const token of [T.crew.token, T.manager.token]) {
+    const plain = await api('GET', '/ops/work-orders/export?status=all&source=request', { token });
+    is(plain, 200);
+    assert.match(plain.headers.get('content-type'), /text\/csv/);
+    assert.match(plain.headers.get('content-disposition'), /work-orders\.csv/);
+    const row = line(plain.body);
+    assert.ok(row, 'the work order is in the spreadsheet');
+    assert.match(row, /Pothole: Church Street/);
+    assert.ok(!row.includes('8125') && !row.includes('Dana') && !row.includes('blue house'), row);
+    assert.ok(!plain.body.includes('Whitlow') && !plain.body.includes('6105550177'));
+  }
+  // With contact details: managers only, and written to the audit log.
+  assert.equal((await api('GET', '/ops/work-orders/export?status=all&contacts=1', { token: T.crew.token })).status, 403);
+  const full = await api('GET', '/ops/work-orders/export?status=all&contacts=1', { token: T.manager.token });
+  is(full, 200);
+  assert.match(full.headers.get('content-disposition'), /work-orders-with-contacts\.csv/);
+  assert.ok(line(full.body).includes('8125 Church Street') && line(full.body).includes('blue house'));
+  const log = await q("SELECT action, user_id FROM audit_log WHERE tenant_id = ? AND entity = 'work_orders' AND action IN ('export', 'export_contacts') ORDER BY id", [A.id]);
+  assert.deepEqual(log.map((l) => l.action), ['export', 'export', 'export_contacts']);
+  assert.equal(Number(log[2].user_id), Number(T.manager.id));
+  // A work order that is not from a request is exported as it is.
+  const own = await api('POST', '/ops/work-orders', { token: T.manager.token, body: { title: 'Replace plow blade on truck 12', priority: 'normal', location: 'Garage bay 2' } });
+  is(own, 201);
+  const all = await api('GET', '/ops/work-orders/export?status=all', { token: T.crew.token });
+  assert.ok(all.body.includes('Replace plow blade on truck 12') && all.body.includes('Garage bay 2'));
+});
+
 test('Today: new to look at, open past target, fixed today', async () => {
   const t = await api('GET', '/requests/today', { token: T.desk.token });
   is(t, 200);
