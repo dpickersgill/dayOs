@@ -818,6 +818,58 @@ The add-on keeps its module key `assistant_plus` and its prices. Its label is no
 - Evaluations: `test/evals/conditions.test.js` runs six mornings (powder day, wind hold, rain, early season with one lift, closed day, holiday) against a stand-in model. `ASSISTANT_API_KEY=... node scripts/ai-evals.js` runs the same fixtures (`scripts/ai-evals-conditions.js`) against the real model and prints pass and fail.
 - Patient records: `test/proposals.test.js` fails if the proposals layer or the writer requires patrol code (at any depth) or names a patrol table.
 
+## Municipal edition
+
+Release 1 adds a municipal edition for small boroughs, townships and water and sewer authorities, on the same platform. This part is the foundation every municipal app builds on.
+
+### Ski area or municipality (`tenants.org_type`)
+
+- Every tenant is a `mountain` (a ski area, the default; every tenant made before this is one) or a `municipality`. The platform operator picks Ski area or Municipality in the console's Add a mountain form (`POST /platform/tenants` with `org_type`; the bootstrap `POST /tenants` takes it too). It never changes: `PATCH /platform/tenants/:id` with `org_type` is refused with "The organization type is set when the tenant is created and cannot be changed". The console's tenant list has a Type column and the Manage dialog names it.
+- `GET /auth/me` returns `org_type`. In the app, `isMuni()` and `orgWord()` ("mountain" or "municipality") in `public/js/ui.js` are what shared screens use.
+- The website's self-serve trial stays ski only.
+
+### Apps by kind (`src/lib/modules.js`)
+
+- Each app has `orgs`: the kinds it is for. Six municipal apps, never on for a mountain: Resident requests (`requests`: `/requests`, `/street-notices`; public pages `report`, `open-requests`, `alerts`, `streets`; part of the core), and the add-ons Water (`/water`), Sewer (`/sewer`), Stormwater (`/stormwater`), Trash and recycling (`solidwaste`: `/solid-waste`, public `bulk-pickup`) and Buildings (`/buildings`).
+- Shared with a municipality: Assets and fleet (on by default and part of the core there, still an add-on for a mountain), Staff and schedule, Documents, Messages, and the add-ons Document text recognition and AI Operations. Every other app is ski only.
+- `settle(want, org)`, `apply(current, changes, org)` and `stateOf` (which caches the kind) follow the tenant's kind: an app not for it is always off. With no saved choice a municipality has Assets and fleet, Staff and schedule, Documents, Messages and Resident requests on, and its add-ons off.
+- A municipality's API calls to a ski app's paths get 403 `module_disabled` ("... is not turned on for your municipality"); a mountain's calls to a municipal app's paths get the same. Public pages: a ski page word on a municipality (including the waiver and lost and found pages, which have no app of their own) and a municipal word on a mountain are "Page not found".
+- Assets and fleet no longer needs Lifts and trails. Work orders and service plans (`/ops/work-orders`, `/ops/pm`) open with Assets and fleet on, for a municipality and for a mountain without Lifts and trails; nothing else under `/ops` does.
+- The console lists only the apps for the tenant's kind (`GET /platform/modules?org_type=`), and refuses turning on another kind's app (on creation and under Apps).
+
+### Roles, menus and screens for a municipality
+
+- Four roles: Owner, Manager, Crew (`staff`) and Front desk (`counter`). `POST /users` and `PATCH /users/:id` refuse patrol, instructor and the ski area login for a municipality (400, `role_not_offered`). Settings, Team and logins offers only those roles, with those names, and has no Menus tab or Season end.
+- Fixed menus: owner and manager Requests, Work orders, Assets and fleet, Staff and schedule; Crew Work orders, Requests, Assets and fleet; Front desk Requests, Bulk pickup, Street notices. All apps holds Residents (Requests, Street notices, Bulk pickup), Public works (Work orders, Assets and fleet, Programs, Buildings) and Back office (Staff and schedule, Messages, Documents). Home is Today and Inbox, and My shifts with Staff and schedule on. No ski app or ski group shows.
+- Views (`public/js/main.js`): `requests`, `notices`, `works`, `assetprograms`, `bulk`, `buildings`, each gated by its app (`VIEW_MODULE`) and role. The feature apps start as stub pages that their own work replaces.
+- Settings shows Your profile, Morning brief, Municipality details (name, phone, address, time zone), Team and logins, Billing and plan, Payments (no card readers), Staff and schedule, Messages and Streets. The ski apps' pages never show.
+
+### Today for a municipality
+
+- A greeting with the date, then one card per thing to look at from each app that is on. Every municipal app answers `GET /<its prefix>/today` with `{ cards: [{ title, count, text, href }] }` (`src/lib/today.js`: `card()` and `todayRoute()`). An app whose endpoint is not there, or fails, is left out.
+- Work orders: `GET /ops/work-orders/today` gives Open work orders (with how many are urgent), Overdue work orders, Done today, and Service plans due this week. Each card opens Work orders.
+
+### Work orders for a municipality (`#/works`)
+
+- The same work orders and service plans as Mountain status, Maintenance, without lifts or ski words: tabs Open, Done and Service plans. A work order has a priority, the asset (from Assets and fleet), where it is, who it is assigned to (managers pick from Staff and schedule) and a due date. Start work, Waiting for parts, Mark done (what was done, labor hours, parts), Reopen, Cancel job; managers edit and delete.
+- Filters: priority, assigned to (anyone, me, nobody, a person), where it came from (staff, service plan, inspection, resident request, program, street notice) and overdue only. `GET /ops/work-orders` takes `priority`, `assigned_staff_id` (or `none`), `source` and `overdue=1`.
+- Service plans by days, hours or miles, with a checklist; Make work order and Mark done.
+
+### Streets (`streets` table, `src/routes/streets.js`)
+
+- A municipality's street list, picked from by requests, bulk pickup and street notices. Signed in, with Resident requests on: `GET /requests/streets` (in use; `?all=1` for all), and for managers `POST /requests/streets` (`name`, `aliases`), `PATCH /requests/streets/:id` (rename, other spellings, `active`) and `POST /requests/streets/import` (`text`, `format` `lines` or `csv` with `name,aliases`). A street is never deleted, only marked not in use. Names are unique per municipality in any case; changes are in the audit log.
+- Public: `GET /public/<slug>/streets` gives `{ streets: [names in use] }` and nothing else, for a municipality with Resident requests on.
+- Settings, Streets: add, import (paste), edit, mark not in use.
+
+### Plans for municipalities
+
+- `billing_plans.org_type`. Public Works (`muni-core`: Assets and fleet, Staff and schedule, Documents, Messages, Resident requests) $400 a month or $4,800 a year, and the add-ons Water and Sewer ($200 / $2,400 each), Stormwater ($100 / $1,200), Trash and recycling ($150 / $1,800) and Buildings ($100 / $1,200). Yearly is twelve times monthly.
+- The website's Pricing page and llms.txt, the outreach emails and the ski Billing screen list only ski area plans. A municipality's Billing screen lists only municipal ones, yearly prices first, with no season billing. Choosing the other kind's plan is refused, in the app and in the console; a plan's apps must be for its kind.
+
+### Demo borough
+
+- `SEED_PASSWORD=... node db/demo-municipal.js demo-borough` builds Riverbend Borough (made up), every municipal app on: an owner, a manager, four crew and a front desk login, 40 streets, eight vehicles and machines (two plow trucks, a packer, a pickup, a loader, a sweeper, a jet-vac and a generator) with meters and 12 service plans, and 6 open and 10 done work orders. Then it runs each file in `db/demo-municipal/` in name order (`async function (conn, tenantId, helpers)`), where each municipal app adds its own sample data. Running it again adds nothing.
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

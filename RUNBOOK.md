@@ -23,6 +23,17 @@
 4. The read-only login's Summary shows the Patrol section when the mountain also has Patrol on, the Ski school section when it has Ski school on, or both.
 5. If the ski school later buys Mountain or Resort, change the plan on the same mountain: everything it set up carries on.
 
+## Setting up a municipality (municipal edition)
+
+1. In the console, press Add a mountain and set Type to Municipality. The type cannot be changed later: a ski area that also wants the municipal apps (or the other way) needs a second tenant.
+2. Give the borough, township or authority's name, its web name and time zone, and the borough manager (or public works director) as owner. The core apps are ticked for you: Assets and fleet, Staff and schedule, Documents, Messages and Resident requests. Tick any add-ons they bought (Water, Sewer, Stormwater, Trash and recycling, Buildings).
+3. Under Billing, pick Public Works and its add-ons, yearly. Only municipal plans are offered for a municipality, and ski plans for a ski area.
+4. The owner adds the crew (role Crew) and front desk (role Front desk) under Settings, Team and logins, imports the street list under Settings, Streets (paste one street per line), and connects Stripe under Settings, Payments for bulk pickup fees.
+
+## The demo borough
+
+`SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.
+
 ## Tiered sign-in (2026.10.17)
 
 Who signs in how:

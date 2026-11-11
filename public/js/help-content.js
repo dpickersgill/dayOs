@@ -30,6 +30,8 @@ export const SECTIONS = [
   { key: 'calendar', label: 'Calendar', who: null, blurb: 'What is happening at the mountain: events, closures, groups, training and upkeep, and the calendar on your phone.' },
   { key: 'settings', label: 'Settings', who: null, blurb: 'Your password and two-step sign-in; for managers, the mountain\'s details, logins, menus for each role, billing, card payments and each app\'s setup.' },
   { key: 'area', label: 'Summary', who: ['area'], blurb: 'For the ski area: the patrol\'s day in numbers and approved reports, and the ski school\'s day in numbers.' },
+  // The municipal edition (muni release 1). module: the app that opens the screen; orgs: shown only to a municipality.
+  { key: 'works', label: 'Work orders', who: ['staff'], module: 'assets', orgs: ['municipality'], blurb: 'Jobs for the crew, and the service plans that keep trucks and equipment running.' },
 ];
 
 // steps: numbered; tips: short notes; related: other article ids.
@@ -1427,6 +1429,21 @@ export const ARTICLES = [
     steps: ['If the box is empty, or only a dot, the page asks the guest to sign in the box.', 'Clear the box and sign again if the page says the signature cannot be read.'],
     tips: ['This works the same on the online waiver, the counter waiver and the rental form.'], related: ['waiver-sign'] },
   // ---- end Track SCHOOL AND GUEST
+  // ---- Municipal edition (muni release 1): work orders and the street list
+  { id: 'muni-work-orders', app: 'works', title: 'Work orders for the crew', keywords: 'work order job repair pothole sign crew assign due overdue priority mark done labor parts notes',
+    intro: 'Work orders are the jobs for the crew: a pothole, a fallen sign, a truck that needs a part. Open has what is still to do, Done has what is finished, and Service plans has the regular upkeep.',
+    steps: ['Open Work orders and press New work order. Say what needs doing, how urgent it is, where it is and, if there is one, the truck or equipment.', 'A manager picks who it is assigned to and a due date. Anything past its due date shows Overdue.', 'Use the filters to narrow the list: priority, who it is assigned to, where it came from, or Overdue only.', 'Open a work order to add a note, press Start work, or Waiting for parts.', 'When it is finished, press Mark done and say what was done, the labor hours and any parts. It moves to the Done tab.'],
+    tips: ['Today shows how many work orders are open, overdue and done today, and the service plans due this week. Press a card to open the list.', 'Where it came from tells you how the job started: entered by staff, a service plan, an inspection, and later a resident request or a program.', 'To keep the record of a job that is not needed, press Cancel job rather than Delete. Only managers can delete.', 'Work orders are public records in Pennsylvania. Write notes as you would want a resident to read them.'],
+    related: ['muni-service-plans'] },
+  { id: 'muni-service-plans', app: 'works', title: 'Service plans for trucks and equipment', keywords: 'service plan preventive maintenance oil change plow spreader generator test run inspection hours miles days due',
+    intro: 'A service plan is upkeep that comes back: an oil change every 250 hours or 5,000 miles, a plow check every month, a generator test run. The Service plans tab lists them, the most urgent first.',
+    steps: ['Open Work orders, then Service plans, and press Add a service plan.', 'Name the job, pick the asset, and say how often: every so many days, hours on the meter, or miles. Hours and miles need an asset.', 'Add a checklist, one step per line. It goes on each work order the plan makes.', 'When a plan is due, press Make work order so the crew sees it on the Open tab. Mark the work order done and the plan is marked done too.', 'Or press Mark done on the plan itself for a job done without a work order.'],
+    tips: ['A plan has one open work order at a time, so pressing Make work order twice does not make two.', 'Hours and miles come from the asset\u2019s meters in Assets and fleet. Log a reading there to keep plans on time.'],
+    related: ['muni-work-orders', 'assets-service'] },
+  { id: 'muni-streets', app: 'settings', who: [], orgs: ['municipality'], title: 'Set up your street list', keywords: 'streets street list import paste csv aliases spelling rename not in use resident request bulk pickup notice',
+    intro: 'Residents and staff pick a street from your street list when they report a problem, book a bulk pickup or send a street notice. Managers keep it under Settings, Streets.',
+    steps: ['Open Settings, then Streets.', 'Press Import a list and paste your streets, one per line. Or pick CSV and paste name,aliases, such as Main Street,"Main St, Main".', 'Press Add a street for one more, as it is written on the street sign.', 'Press Edit to rename a street or add the other spellings people use, separated by commas.', 'Press Mark not in use for a street that is gone or private. It leaves the lists people pick from, and old records keep it.'],
+    tips: ['Importing again is safe: streets already on the list are kept, put back in use, and gain any new spellings.', 'The public report page shows only street names, never who lives where.'] },
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;

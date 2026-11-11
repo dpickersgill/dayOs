@@ -36,12 +36,15 @@ const PAGES = [
   ['patrol', 'apps', 'Patrol', 'Patrol settings, what a report must hold, and who can do what.', () => import('./settings-apps.js')],
   ['workforce', 'apps', 'Staff and schedule', 'Positions, certifications and the time clock.', () => import('./settings-apps.js')],
   ['messages', 'apps', 'Messages', 'How email and text messages are sent.', () => import('./settings-apps.js')],
+  // Municipal edition (muni release 1): the street list requests, bulk pickup and street notices pick from.
+  ['streets', 'apps', 'Streets', 'The street list residents and staff pick from in requests, bulk pickup and street notices.', () => import('./settings-streets.js')],
 ];
 export const PAGE_KEYS = PAGES.map((p) => p[0]);
 
 // The app each Apps page opens, and the module that must be on for the page to show.
 export const APP_OF = { sell: ['sell', 'Sell', ['sell', 'gate']], shop: ['shop', 'Online shop', ['shop']], school: ['school', 'Lessons', ['school']], programs: ['programs', 'Programs', ['programs']],
-  rentals: ['rentals', 'Rentals', ['rentals']], attractions: ['conditions', 'Mountain status', ['conditions']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']] };
+  rentals: ['rentals', 'Rentals', ['rentals']], attractions: ['conditions', 'Mountain status', ['conditions']], waivers: ['waivers', 'Waivers', null], patrol: ['patrol', 'Patrol', ['patrol']], workforce: ['workforce', 'Staff and schedule', ['workforce']], messages: ['messages', 'Messages', ['messages']],
+  streets: ['requests', 'Requests', ['requests']] };
 
 const moduleOn = (keys) => !keys || !ctx.me.modules || keys.some((k) => ctx.me.modules.includes(k));
 
@@ -67,6 +70,7 @@ async function visiblePages(who) {
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }
     if (!moduleOn(APP_OF[key][2])) continue;
+    if (key === 'streets') { if (isMuni() && who.manager) out.push(p); continue; } // the street list: managers of a municipality
     if (key === 'patrol' ? !(who.manager || who.patrol) : key === 'school' ? !(who.manager || who.schoolDirector) : !who.manager) continue; // school: a ski school director too (2026.11.9) // patrol: the cards decide, by permission
     if (await apps.pageHasSetup(key, who)) out.push(p);
   }
