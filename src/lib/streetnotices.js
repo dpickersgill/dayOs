@@ -308,6 +308,8 @@ async function queueUpdate(tenantId, updateId) {
 
 // ---------------------------------------------------------------- sending the queue
 const cache = { tenants: new Map(), updates: new Map() };
+/** Drops what this server remembers about a tenant's sending (its texting number changed). */
+const forget = (id) => { cache.tenants.delete(Number(id)); };
 async function tenantOf(id) {
   const hit = cache.tenants.get(id);
   if (hit && Date.now() - hit.at < 60_000) return hit.t;
@@ -461,5 +463,5 @@ module.exports = {
   TOPICS, TOPIC_KEYS, TYPES, TYPE, TYPE_KEYS, OPERATOR_RULE, blanksIn, houseNo, areaWords, areasWords, areasOf, areaSql,
   phoneAddr, emailAddr, addrKey, addressRow, confirmAddress, stopAddress, recordAnswer, textReply,
   tokenFor, readToken, manageToken, signupRef, emailToken, publicLink, manageLink,
-  audienceOf, followupAudience, countsOf, queueUpdate, sendAfterFor, smsBody, emailOf, drain, kick, idle, tick, purge,
+  audienceOf, followupAudience, countsOf, queueUpdate, sendAfterFor, smsBody, emailOf, drain, kick, idle, tick, purge, forget,
 };

@@ -357,6 +357,7 @@ router.put('/settings', mgr, validate(z.object({ crew_senders: z.array(z.coerce.
   if (b.from_number && !from) throw bad('The texting number must be a full phone number, like +16105550100');
   await pool.query('INSERT INTO street_notice_settings (tenant_id, crew_senders, from_number, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE crew_senders = VALUES(crew_senders), from_number = VALUES(from_number), updated_by = VALUES(updated_by)',
     [t, ids.join(',') || null, from, req.auth.userId]);
+  SN.forget(t);
   await audit(pool, req, 'settings', 'street_notice_settings', t, { crew_senders: ids, from_number: from });
   res.json(await settingsOf(t));
 });

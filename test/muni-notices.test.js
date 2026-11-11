@@ -467,3 +467,17 @@ test('the pages: sign-up, a notice and the manage link are served', async () => 
     assert.match(await res.text(), /resident-alerts\.js/);
   }
 });
+
+test('a municipality\'s own texting number sends its alerts; without one, the shared number does', async () => {
+  const M = await createMuniTenant(base, { slug: `sn-from-${suffix}` });
+  const st = await addStreets(M.id, ['Birch Street']);
+  const r = await signUp(M, { street: st['Birch Street'], house: '2', phone: newPhone() });
+  assert.equal(textsTo(r.phone).at(-1).From, '+16105550000', 'the shared number');
+  assert.equal((await api('PUT', '/street-notices/settings', { token: M.token, body: { from_number: '12' } })).status, 400);
+  ok(await api('PUT', '/street-notices/settings', { token: M.token, body: { from_number: '(484) 555-0999' } }));
+  assert.equal(ok(await api('GET', '/street-notices/settings', { token: M.token })).from_number, '+14845550999');
+  const n = ok(await api('POST', '/street-notices', { token: M.token, body: notice({ areas: [{ street_id: st['Birch Street'] }] }) }), 201);
+  ok(await api('POST', `/street-notices/${n.id}/send`, { token: M.token, body: { confirm: true } }));
+  await settled(M, n.id);
+  assert.equal(textsTo(r.phone).find((t) => t.Body.includes(n.code)).From, '+14845550999');
+});
