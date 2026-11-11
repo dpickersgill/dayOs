@@ -95,6 +95,7 @@ const SIGNED = {
   // Municipal edition (muni release 1): asset programs and asset photos, inside the Assets and fleet router.
   'assetprograms.js': { router: '/assets/programs' }, 'assetphotos.js': { router: '/assets/photos' },
   'utilities.js': { router: '/water' }, // the same Today card router is also mounted at /sewer and /stormwater
+  'requests.js': { router: '/requests' }, // muni release 1: resident requests (test/muni-requests.test.js sweeps two municipalities)
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -108,6 +109,7 @@ const PUBLIC = {
   'guesthelp.js': { publicRouter: '/public' }, // help/guest: the guest's status page, keyed by the mountain and the call's guest token
   // help/sms: Twilio's inbound text webhook for every mountain's help number (refused without Twilio's signature).
   'helpsms.js': { publicRouter: '/public' },
+  'requests.js': { publicRouter: '/public' }, // muni release 1: the report page and its status links, keyed by the web address and the request's token
   'streets.js': { publicRouter: '/public' }, // muni release 1: a municipality's street names, keyed by its web address
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.

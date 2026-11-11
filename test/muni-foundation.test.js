@@ -414,6 +414,7 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
   const me = (await api('GET', '/auth/me', { token: login.body.token })).body;
   for (const k of ['requests', 'water', 'sewer', 'stormwater', 'solidwaste', 'buildings', 'assets']) assert.ok(me.modules.includes(k), k);
   const today = await api('GET', '/ops/work-orders/today', { token: login.body.token });
-  assert.ok(today.body.cards.find((c) => c.title === 'Open work orders').count >= 6);
+  const [[openAll]] = await pool.query("SELECT COUNT(*) AS n FROM work_orders WHERE tenant_id = ? AND status NOT IN ('done','cancelled')", [t.id]);
+  assert.equal(today.body.cards.find((c) => c.title === 'Open work orders').count, Number(openAll.n), 'every open work order, the foundation\'s 6 and those made from resident requests');
   assert.equal((await api('GET', `/public/${demo}/streets`)).body.streets.length, 40);
 });

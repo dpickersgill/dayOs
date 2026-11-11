@@ -234,6 +234,7 @@ router.post('/work-orders/:id/status', validate(z.object({
   labor_hours: nullable(z.number().min(0).max(999)), parts_note: nullable(z.string().max(255)), resolution: nullable(z.string().max(500)),
 })), async (req, res) => {
   const id = paramId(req);
+  let fixed = [];
   await tx(async (conn) => {
     const w = await one(conn, 'SELECT status, pm_task_id, meter_hours, meter_miles FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
     if (!w) throw notFound('Work order');
@@ -250,8 +251,11 @@ router.post('/work-orders/:id/status', validate(z.object({
       const already = await one(conn, 'SELECT id FROM pm_log WHERE tenant_id = ? AND work_order_id = ?', [req.auth.tenantId, id]);
       if (t && !already) await markPmDone(conn, req, t, { on: todayIn(await tenantTz(req.auth.tenantId)), hours: w.meter_hours === null ? undefined : Number(w.meter_hours), miles: w.meter_miles === null ? undefined : Number(w.meter_miles), note: `Work order ${id}`, workOrderId: id });
     }
+    // A work order made from a resident's request (muni release 1): completing it marks the request fixed.
+    if (b.status === 'done' && w.status !== 'done') fixed = await require('../lib/requests').workOrderDone(conn, req, id);
     await audit(conn, req, 'status', 'work_orders', id, { from: w.status, to: b.status });
   });
+  if (fixed.length) await require('../lib/requests').tellFixed(req.auth.tenantId, fixed, require('../lib/baseurl').baseUrl(req));
   res.json({ ok: true });
 });
 

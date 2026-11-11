@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Open reports</title>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <style>
+    :root { --bg: #f4f6f7; --card: #fff; --ink: #14202b; --ink2: #3c4a56; --line: #8a98a5; --slate: #1e2d3a; --gold: #d8b672; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; } }
+    :root[data-theme="dark"] { --bg: #0f171e; --card: #17232d; --ink: #f1f4f6; --ink2: #c4cdd4; --line: #6d7c88; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 1.0625rem/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    .bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--slate); color: #fff; }
+    .bar span { flex: 1; font-weight: 700; } .bar a { background: var(--gold); color: #14202b; font-weight: 700; padding: 8px 14px; border-radius: 10px; text-decoration: none; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.6rem; margin: 4px 0 8px; } .muted { color: var(--ink2); }
+    #map { height: 60vh; min-height: 320px; border-radius: 12px; border: 1px solid var(--line); margin: 12px 0; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; list-style: none; }
+    .dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 6px; vertical-align: -2px; border: 2px solid #fff; box-shadow: 0 0 0 1px #0006; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); } th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
+    .cta { display: inline-block; margin: 8px 0; padding: 12px 16px; border-radius: 12px; background: var(--slate); color: #fff; font-weight: 700; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="bar"><span>For an emergency, call 911.</span><a href="tel:911">Call 911</a></header>
+  <main id="app"><p>Loading…</p></main>
+  <script type="module" src="/js/open-requests.js"></script>
+</body>
+</html>

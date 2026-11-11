@@ -4202,3 +4202,6 @@ dl.facts dd { margin: 0; }
 .prog-bar .failed { background: var(--prog-failed); }
 .prog-target { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
 .prog-target .dist { font-variant-numeric: tabular-nums; }
+/* Requests (muni release 1): filter rows keep their selects and dates at their own width. */
+.req-filters > select, .req-filters > input { width: auto; min-width: 0; flex: 0 1 auto; }
+.req-filters > input[type=search] { min-width: min(260px, 100%); }

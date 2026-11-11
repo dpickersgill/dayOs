@@ -357,6 +357,16 @@ Upgrading needs `npm run migrate` (adds the access level column and the rules ta
 - Held alerts (the next flood push, the summary) are saved and go out from the process's timer, the next board load or guest request at that mountain, or the 5-minute guests job (`summitops-guests`), once each. Worst case when the timer is lost: the gap plus 5 minutes. Keep the guests job running.
 - Upgrading needs `npm run migrate` (adds `dispatch_calls.same_phone_of`, `dispatch_alert_state` and `dispatch_calls.flood_pending_at`).
 
+## Resident report page (municipal edition, Requests)
+
+- The page is `/report/<slug>` on the app's address (for example `<app address>/report/riverbend-borough`). A manager finds the link and a QR code under Requests, Settings, The report page: copy the link onto the municipality's website ("Report a problem" on its home page and its public works page), and print the QR code for flyers, the counter, the newsletter and the trucks. The page needs no app or account.
+- Before telling residents about it: in Requests, Settings, set the municipal office phone and the after-hours number (shown for water and sewer categories), choose the categories (and which need a phone or email), set the response standards, set the street classes, and tick who is alerted about new requests. The street list itself is under Settings, Streets.
+- Texts go through the shared Twilio number and its STOP handling (`/api/v1/twilio/sms`, see Text HELP set-up); email through Postmark. Without them, requests still work and no messages go.
+- Limits: `REPORT_RATE_LIMIT` (10 reports an hour per address and municipality), `REPORT_PHOTO_LIMIT` (10 photo uploads an hour per report; 3 are kept), `REPORT_STOP_LIMIT`. Leave them as they are in production.
+- The public map of open requests is off until a manager ticks it; its address is `/open-requests/<slug>`.
+- A Right-to-Know request for request records: Requests, Ledger, pick the street or dates, Download CSV or Print. Leave "Include contact details" unticked; it is for internal use, managers only, and logged.
+- Upgrading needs `npm run migrate` (adds `residents`, `resident_consent`, `request_*`, `requests`, `streets.street_class`, `work_orders.request_id` and the work order source `request`).
+
 ## Terrain park
 Upgrading needs `npm run migrate` (creates park_areas, park_features, park_placements and park_inspections). Park crew sign in with the `staff` role; managers and owners can do everything. To make a past day editable for the crew there is no switch: a manager makes the change. `node db/reset.js <slug> --yes` also clears the park, and `node db/demo.js <slug>` loads 12 demo features placed for today.
 

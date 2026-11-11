@@ -115,6 +115,10 @@ const REGISTRY = [
   { table: 'dispatch_sms_optouts', by: { phone: ['phone_key'] }, erase: { keep: 'Kept so the patrol help line never texts this phone again after it texted STOP.' } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
+  // Municipal edition (muni release 1): a resident who reported a problem, booked a pickup or signed up for street notices.
+  // Erasing blanks who they are and how to reach them; the requests stay as the municipality's public record, with no one's
+  // name on them, and their consent history stays so the municipality can show they said no.
+  { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', email: null, phone: null, house_number: null, unit: null, texts_ok: 0, emails_ok: 0 } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
   { table: 'users', by: { person: ['person_id'] }, erase: { keep: 'Sign-ins are not anonymised here.' }, columns: ['id', 'email', 'username', 'role', 'active', 'created_at', 'access_ends_on'] },
@@ -141,6 +145,9 @@ const NOT_GUESTS = {
   mountain_places: 'a sign, tower or junction on the mountain, never a guest',
   // help/sms: the mountain's Text HELP number and patrol phone, a mountain setting.
   patrol_help_lines: 'a mountain setting (its Text HELP number and patrol phone)',
+  // muni release 1: a resident request keeps its resident in residents (above); its own columns are yes or no flags
+  // (updates by text, by email). request_settings holds the municipality's office and after-hours numbers.
+  requests: 'a resident request: the resident is in residents; its email and text columns are yes or no flags', request_settings: 'a municipality setting (its office and after-hours numbers)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

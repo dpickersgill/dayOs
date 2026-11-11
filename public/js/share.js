@@ -14,6 +14,7 @@ export const LINK_TYPES = {
   order: { label: 'Order', path: (id) => `#/sell/order/${id}` },
   waiver: { label: 'Waiver', path: (id) => `#/waivers/w/${id}` },
   document: { label: 'Document', path: (id) => `#/documents/d/${id}` },
+  resident_request: { label: 'Resident request', path: (id) => `#/requests/r/${id}` },
 };
 const PATTERNS = Object.entries(LINK_TYPES).map(([type, t]) => [type, new RegExp(`${t.path('(\\d+)').replace(/[/]/g, '\\/')}`, 'g')]);
 

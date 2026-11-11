@@ -154,6 +154,9 @@ function createApp() {
   // Locating a caller: the one-time link dispatch texts to a guest.
   app.get('/locate/:token', page('locate.html'));
   app.get('/help/:slug', page('help.html'));
+  // The municipal report page (muni release 1): a resident reports a pothole or a streetlight, and the status page after.
+  app.get('/report/:slug', page('report.html'));
+  app.get('/open-requests/:slug', page('open-requests.html')); // the public map of open requests, when the municipality turned it on
   app.get('/lost/:slug', page('lost.html'));
   app.get('/reserve/:slug', page('reserve.html'));
   app.get('/c/:token', page('claim-share.html')); // a claim file or season report shared with an insurer
@@ -259,6 +262,8 @@ function createApp() {
   // The caller-location link is open to anyone with it: 30 tries per 10 minutes per address.
   api.post('/public/locate/:token', rateLimit({ windowMs: 600_000, max: 30, message: 'Too many tries. Please call patrol.' }));
   api.post('/public/:slug/partner/:id/reserve', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 10, message: 'Too many reservations from here. Please call the mountain.' }));
+  // A resident's report (muni release 1): 10 an hour per address and municipality, so one family's Wi-Fi never uses up another town's.
+  api.post('/public/:slug/report', rateLimit({ name: 'report', windowMs: 3_600_000, max: Number(process.env.REPORT_RATE_LIMIT) || 10, keyOf: (req) => `${req.ip}|${String(req.params.slug || '').toLowerCase().slice(0, 80)}`, message: 'Too many reports from this address. Please call the municipal office, or try again in an hour.' }));
   api.post('/public/:slug/lost', rateLimit({ windowMs: 600_000, max: Number(process.env.HELP_RATE_LIMIT) || 5, message: 'Too many reports from here. Please call the mountain.' }));
   // The guest help form has no address limit here: a request for help is always accepted. dispatch.js groups repeats from
   // one phone or address on the board and alerts patrol instead of refusing anyone.
@@ -311,7 +316,7 @@ function createApp() {
   // busiest hour at a small lodge, and a guest at one mountain never uses up another's. PUBLIC_RATE_LIMIT_ALL (2400 a
   // minute) caps one address across every mountain, so moving from mountain to mountain does not multiply the limit.
   api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
-    rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter);
+    rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter, require('./routes/requests').publicRouter);
   // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
   api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
   // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
@@ -408,6 +413,7 @@ function createApp() {
   api.use('/patrol', require('./routes/patrolpark')); // a case linked to a terrain park feature
   api.use('/park', park);
   api.use('/park', require('./routes/parkrecords')); // photos, opening an area, history, the day record
+  api.use('/requests', require('./routes/requests').router); // muni release 1: resident requests and the repair record (streets: routes/streets.js)
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type
