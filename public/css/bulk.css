@@ -1,0 +1,39 @@
+/* ---- bulk pickup: the public booking page (/public/<municipality>/bulk-pickup), phone first ---- */
+.bulk h1 { font-size: 1.4rem; margin: 0 0 4px; }
+.bulk h2 { font-size: 1.15rem; margin: 8px 0 12px; }
+.bulk .field { display: grid; gap: 4px; margin-bottom: 14px; }
+.bulk .field label { font-weight: 700; }
+.bulk .hint { color: var(--muted); font-size: 0.875rem; }
+.bulk .check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+.bulk .check input { width: 22px; min-height: 22px; height: 22px; flex: none; margin-top: 2px; }
+.bulk-progress { margin: 0 0 8px; }
+.bulk-step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.bulk-nav { display: flex; gap: 10px; justify-content: space-between; margin: 14px 0 32px; }
+.bulk-nav .btn.primary { flex: 1; }
+.bulk-days { display: grid; gap: 8px; }
+.bulk-day { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 12px; background: var(--surface); cursor: pointer; }
+.bulk-day input { width: 22px; min-height: 22px; height: 22px; flex: none; margin-top: 2px; }
+.bulk-day span { display: grid; gap: 2px; }
+.bulk-day small { color: var(--muted); }
+.bulk-day.off { opacity: 0.6; cursor: not-allowed; }
+.bulk-day:has(input:checked) { border-color: var(--accent-line); background: var(--accent-tint); }
+.bulk-sizes { display: grid; gap: 10px; margin-bottom: 8px; }
+.bulk-size { display: flex; justify-content: space-between; gap: 12px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.bulk-size p { margin: 2px 0 0; }
+.bulk-price { font-weight: 700; color: var(--accent-ink); }
+.bulk-stepper { display: flex; align-items: center; gap: 6px; flex: none; }
+.bulk-stepper .btn { min-width: 44px; min-height: 44px; font-size: 1.25rem; padding: 0; }
+.bulk-qty { min-width: 2ch; text-align: center; font-weight: 700; font-size: 1.1rem; }
+.bulk-total { font-weight: 700; font-size: 1.1rem; margin: 6px 0 14px; }
+.bulk-rules { margin-top: 12px; }
+.bulk-rules summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.bulk-rules ul { margin: 6px 0 0; padding-left: 20px; }
+.bulk-ref { font-size: 1.1rem; }
+.bulk-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 8px 0; }
+.bulk-facts dt { font-weight: 700; }
+.bulk-facts dd { margin: 0; }
+.bulk .help-done .btn { width: 100%; }
+@media (max-width: 380px) {
+  .bulk-facts { grid-template-columns: 1fr; }
+  .bulk-facts dd { margin-bottom: 6px; }
+}

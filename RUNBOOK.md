@@ -37,6 +37,19 @@
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.
 
+## Bulk pickup for a municipality (Trash and recycling)
+
+**Connecting Stripe.** Residents' card payments for bulk pickup go into the municipality's own Stripe account, never Verdynt/OS's.
+1. The owner (only the owner) opens Settings, Payments and presses Connect with Stripe. They confirm it is them, then Stripe asks for the municipality (a government entity), a contact and the bank account payouts go to. A municipality that already uses Stripe signs in with that login.
+2. Back in Verdynt/OS the panel says Ready once Stripe can take payments. Bulk pickup, Settings then shows "Card payments go to your Stripe account".
+3. Until then (or if it is disconnected), a resident who picks card on the page is booked to pay at the office, with a message saying so. Nothing is lost.
+4. The Connect webhook (`STRIPE_CONNECT_WEBHOOK_SECRET`) must be set, as for ski areas: it is how a payment books the stop. Refunds go back through the same account, and the platform fee is 0 unless the console sets one.
+5. A refund that Stripe did not take shows in `card_returns` (kind `bulk`) as failed and is retried by the daily job.
+
+**Linking the page from the municipal website.** The page is `https://<app address>/public/<web name>/bulk-pickup` (Bulk pickup, Settings shows it with Copy link). Put it on the website's trash or public works page as "Book a bulk pickup online", and in the newsletter and on the trash calendar. It works on a phone and needs no login. A QR code on the bulk pickup flyer at the office works too. Turning off "Residents can book online" leaves the page up with a call-us message.
+
+**Before turning it on.** Import the street list (Settings, Streets), check collection days, cutoff, stops a day, sizes and prices, and the rules, and add the year's holidays under Days with no pickup. Residents who said yes get a reminder the afternoon before; Twilio and Postmark must be set up for texts and emails (as for the rest of the app).
+
 ## Tiered sign-in (2026.10.17)
 
 Who signs in how:

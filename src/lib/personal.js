@@ -117,7 +117,8 @@ const REGISTRY = [
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
   // Municipal edition (muni release 1): a resident who reported a problem, booked a pickup or signed up for street notices.
   // Erasing blanks who they are and how to reach them; the requests stay as the municipality's public record, with no one's
-  // name on them, and their consent history stays so the municipality can show they said no.
+  // name on them, and their consent history stays so the municipality can show they said no. Bulk pickup bookings point
+  // at the row, so it is blanked rather than deleted, and the bookings keep only the street and the day.
   { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', email: null, phone: null, house_number: null, unit: null, texts_ok: 0, emails_ok: 0 } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
@@ -148,6 +149,9 @@ const NOT_GUESTS = {
   // muni release 1: a resident request keeps its resident in residents (above); its own columns are yes or no flags
   // (updates by text, by email). request_settings holds the municipality's office and after-hours numbers.
   requests: 'a resident request: the resident is in residents; its email and text columns are yes or no flags', request_settings: 'a municipality setting (its office and after-hours numbers)',
+  // muni release 1: a bulk pickup booking holds no contact of its own: its texts_ok and emails_ok are yes/no flags, and the
+  // resident's name, phone and email are in residents (above, in REGISTRY), which an erase blanks.
+  bulk_bookings: 'a municipality\u2019s bulk pickup stop; the resident\u2019s contact is in residents',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

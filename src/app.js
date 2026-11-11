@@ -196,6 +196,9 @@ function createApp() {
   app.get('/rental-form/:slug', page('rental-form.html'));
   app.get('/waiver/:slug', page('waiver.html'));
   app.get('/availability/:slug', page('availability.html'));
+  // A municipality's bulk trash pickup page (muni release 1, Trash and recycling): /public/<municipality>/bulk-pickup, and
+  // a resident's own booking at ?booking=<token>.
+  app.get('/public/:slug/bulk-pickup', page('bulk-pickup.html'));
 
   // Pages behind the follow-up email: /f/<token> (rate us, give, stop) and /give/<mountain> (give).
   app.get(['/f/:token', '/give/:slug'], page('give.html'));
@@ -272,6 +275,7 @@ function createApp() {
   // "Next times with room" for a full lesson: a guest looks a few times; a script inflating sold-out demand does not get far.
   api.get('/public/:slug/booking/next/:id', rateLimit({ windowMs: 600_000, max: Number(process.env.NEXT_TIMES_RATE_LIMIT) || 30, message: 'Too many looks from this address. Please try again in a few minutes.' }));
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
+  api.post('/public/:slug/bulk-pickup/bookings', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many bookings from this address. Please call the office.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
   // The guest assistant costs money per question: 20 questions and 5 messages to the mountain an hour per address.
@@ -316,7 +320,7 @@ function createApp() {
   // busiest hour at a small lodge, and a guest at one mountain never uses up another's. PUBLIC_RATE_LIMIT_ALL (2400 a
   // minute) caps one address across every mountain, so moving from mountain to mountain does not multiply the limit.
   api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
-    rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter, require('./routes/requests').publicRouter);
+    rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter, require('./routes/requests').publicRouter, require('./routes/bulkpickup').publicRouter);
   // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
   api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
   // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
@@ -418,6 +422,7 @@ function createApp() {
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type
   api.use('/assets', assetRoutes);
+  api.use('/solid-waste', require('./routes/bulkpickup').router); // muni release 1: bulk trash pickup (Trash and recycling)
   api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
   api.use('/availability', availability.router);
