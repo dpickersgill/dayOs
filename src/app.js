@@ -432,6 +432,7 @@ function createApp() {
   api.use('/solid-waste', require('./routes/bulkpickup').router); // muni release 1: bulk trash pickup (Trash and recycling)
   api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
+  api.use('/buildings', require('./routes/buildings')); // muni release 1: buildings, the life-safety calendar and binder
   api.use('/availability', availability.router);
   api.use('/waivers', waiverRoutes.router);
   api.use('/programs', programs);

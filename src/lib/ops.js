@@ -15,6 +15,8 @@ const ASSET_KINDS = [
   ['pool', 'Pool, spa or water feature', 'facility'], ['electrical', 'Electrical or fire system', 'facility'], ['building', 'Building or system', 'facility'],
   ['tool', 'Tool or shop equipment', 'equipment'], ['other', 'Other', 'other'],
 ].map(([value, label, category]) => ({ value, label, category }));
+// What is inside a building and has a life-safety check of its own (muni release 1, Buildings; any tenant may use them).
+ASSET_KINDS.push(...require('./buildingkinds').KINDS);
 const CATEGORY_OF = Object.fromEntries(ASSET_KINDS.map((k) => [k.value, k.category]));
 const ASSET_KIND_KEYS = ASSET_KINDS.map((k) => k.value);
 

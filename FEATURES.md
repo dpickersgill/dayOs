@@ -984,6 +984,51 @@ break or road work affects and text and email every resident who signed up there
   `src/lib/personal.js`; the delivery log's addresses are blanked after 13 months (`retention.js`), the counts stay.
 - **Demo**: `db/demo-municipal/50-notices.js`: 300 sign-ups on Riverbend's streets (555-01xx numbers, example.com
   emails), 3 ended notices with follow-ups and an active water outage on two streets.
+## Municipal edition: Buildings
+
+The Buildings add-on (`buildings`, paths `/buildings`, view `#/buildings`) is the life-safety calendar and binder for a municipality's own properties: borough hall, the police station, the garage and salt shed, the library, pump houses, park restrooms, pavilions and playgrounds. Most of the work is done by vendors; the municipality has to show that each visit happened, keep the certificate and fix what was found. API: `src/routes/buildings.js`; rules: `src/lib/buildings.js`; tables: `db/steps/muni-buildings.js`. Never on for a mountain; refused (403) for a municipality without the add-on.
+
+### Buildings, rooms and what is in them
+
+- A building (`buildings`) has a name, a type (Office or borough hall, Police, Garage or public works yard, Library, Community center, Pump house, Park, Pool, Other), an address (a house number and a street from the street list, or free text for a park), year built, square feet and notes. Its place on the asset register is an `asset_locations` row (kind building); its rooms and areas are locations inside it, named "Building: Room" (location names are unique across the tenant). Renaming a building renames its rooms. Managers add and change buildings and rooms.
+- Equipment in a building is ordinary asset register items (`ops_assets`) whose location is the building or one of its rooms, so the asset page, QR tags and labels, inspections and work orders all work as before. New asset kinds, in Buildings and facilities, for any tenant: fire extinguisher, sprinkler system or riser, fire alarm panel, exit and emergency lights (a group), kitchen hood suppression, elevator, backflow preventer, playground structure, roof (`src/lib/buildingkinds.js`); generators, boilers and HVAC already had kinds. Add items (crew or managers) makes several at once ("Borough Hall extinguisher 1" to "14"), each with its own tag; an item already on the register can be moved in. Moving an item to another room or building takes its checks and history with it.
+
+### The library and the life-safety calendar
+
+- The library (`life_safety_tasks`) is the list of recurring checks, each with who does it (Staff or Vendor), how often (in days: monthly is 31, every 3 months 92, every 6 months 183, yearly 365), the standard as a reference line only (NFPA 10, NFPA 25, NFPA 72, NFPA 101, NFPA 96 and 17A, 34 Pa. Code 405.7, PA Labor and Industry boiler inspection, NFPA 110, CPSC and ASTM F1487 for playgrounds; never the standard's text), the certificate it renews (elevator and boiler: Certificate of operation), a default vendor and a checklist (`inspection_templates`, the same pass or fail items, readings with units and dates the asset register uses). Seeded with 17 checks the first time Buildings is turned on (`PUT /platform/tenants/:id/modules`) or used, recorded in `building_settings.library_seeded_at`, never again. Managers change, add and turn off checks (`GET/POST/PATCH /buildings/library`); a change follows into every plan made from it.
+- Each check on each item of its kind in a building is a service plan (`pm_tasks`, linked in `building_plans`), so it also shows on Work orders' Service plans. Plans are made when items are added or a check is added or turned back on, and paused (kept, with history) when the check is turned off or the item is retired or leaves every building.
+- Due math: the last time done plus the interval, the same as every service plan. A check is Overdue (due date passed), Due this week (next 7 days), Due this month (next 30), On track, or No record yet. Recording a check on an earlier date never moves the last-done date backward.
+- `GET /buildings/calendar` (filters: building, vendor, staff or vendor) lists every check with its state; the screen groups by when it is due, by building or by vendor. `GET /buildings/:id/year?year=` is a building's year: each check down the side and the twelve months across, each month done, done late, missed, overdue or due (worst of the items for that check).
+- Today: `GET /buildings/today` gives Building checks overdue (and how many have no record yet), Building checks due this week, and Certificates expiring in 30 days (and how many have expired). Counts only.
+
+### Vendor visits and certificates
+
+- `POST /buildings/visits` (crew or managers): the vendor (from the vendors list), the date (not in the future), the technician, notes, and every item the visit covered, many at once and across buildings, each Passed, Failed (with what was found) or Not done this visit; optional full checklist answers (readings such as backflow check valve pressures). Each covered item is an asset inspection (inspector: vendor and technician) and marks its plan done on the visit date. Each failed item opens a work order (source inspection, high priority, urgent for a critical item, at the building and room) and flags the item Needs service; each extra finding opens one too. Every one is a deficiency (`building_deficiencies`).
+- An item whose check renews a certificate can carry the new certificate (expiry date, number, issue date). `PUT /buildings/visits/:id/file` files the report or certificate (PDF, picture or Office file, checked as Documents checks it) in Documents, category "Building certificates and reports" (made the first time, readable by Crew and Front desk), lists it under every building the visit covered (`building_documents`), and points the visit's certificates at it. A second file becomes a new version.
+- Certificates (`building_certificates`): the newest of each name on each item is the one on file; the item's Annual inspection date on the asset register follows it. Managers add one by hand (`POST /buildings/certificates`); `PUT /buildings/certificates/:id/file` attaches its copy. `GET /buildings/documents/:id/file` opens a file listed under a building for anyone who may use Buildings.
+- Reminders (daily job, `lib/buildings.js remindAll`): 60, 30 and 7 days before a certificate on file runs out, and once when it has expired, a message in the owners' and managers' "Building certificates" Inbox conversation (with a link to the item) and a phone alert. Each is claimed once in `building_cert_reminders`; a certificate first seen inside a window gets that window's reminder only (the wider ones are marked skipped).
+
+### Staff rounds
+
+- `POST /buildings/:id/rounds` starts a round through a building's staff checks that are overdue, due this week or have no record (or every item of the checks picked), ordered by room, then name. An open round in the building is picked up again. `GET /buildings/rounds/:id` gives each stop with its checklist and tag.
+- On a phone (`#/buildings/round/:id`): Scan a tag (the camera reads the item's QR label) or pick it from the list. Pass is one tap (every pass or fail item passes; readings are not recorded). Fail asks what failed and what you see, opens a work order and flags the item; a photo (`POST /buildings/rounds/:id/stops/:stopId/photo`) is kept as taken with its SHA-256 (`building_photos`), never shown outside the app. Missing (not found in its place) opens a work order to find or replace it and leaves the check due. Checks with readings (generator run minutes, load and fuel; playground surfacing depth) ask for each reading. Finish lists anything not checked as Not checked; it stays due.
+
+### Deficiencies
+
+- Every failed item, vendor finding, missing item, or deficiency reported by hand (`POST /buildings/deficiencies`, such as the fire marshal's walk-through) has a work order. `GET /buildings/deficiencies?status=open|closed|all`: a deficiency is open while its work order is; its date fixed is the day the work order was done.
+
+### The binder
+
+- `GET /buildings/binder?building_id=&from=&to=` (any one building or all, default the last 12 months, at most five years): each building's summary (type, address, year built, size, rooms, items by kind), what is overdue now, the certificates on file with their expiry dates, deficiencies found in the range or still open with the date each was fixed, vendor visits with results and whether the report is on file, and every inspection in the range with failed items and readings. `#/buildings/binder` shows it as a printable page (Print, or Save as PDF; clean print styles) and `format=csv` downloads the same as a spreadsheet (audited as an export).
+- Right-to-Know: nothing in Buildings holds a resident's name, phone, email or address, so the binder and its spreadsheet are safe to hand over as they are. It says what people recorded; nothing in it certifies a building or a system.
+
+### Who does what
+
+- Everyone signed in (Owner, Manager, Crew, Front desk) reads the calendar, buildings, certificates, deficiencies and the binder. Crew and managers add items, do rounds, record vendor visits, attach files and report deficiencies. Managers add and change buildings, rooms, the library and certificates.
+
+### Demo
+
+- `db/demo-municipal/60-buildings.js`: Riverbend Borough Hall (elevator, boiler, sprinkler riser, fire alarm, 14 extinguishers, exit lights, kitchen hood, rooftop unit, roof), Public Works Garage (generator, 6 extinguishers, backflow preventer, exit lights), the library, Veterans Park and Creekside Park (playgrounds, restrooms), the Water Street Pump House; 12 months of checks with a few done late, one overdue and one with no record; two vendor visits with sample certificate PDFs made in code (the elevator's runs out in 25 days, so its reminder shows); one deficiency open. Made-up companies and people.
 
 ## Engineering notes
 

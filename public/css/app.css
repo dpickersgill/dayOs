@@ -4216,3 +4216,37 @@ dl.facts dd { margin: 0; }
 /* Requests (muni release 1): filter rows keep their selects and dates at their own width. */
 .req-filters > select, .req-filters > input { width: auto; min-width: 0; flex: 0 1 auto; }
 .req-filters > input[type=search] { min-width: min(260px, 100%); }
+/* ---- Buildings (muni release 1): the life-safety calendar, rounds on a phone, the year grid and the printable binder */
+.bld-cal { list-style: none; margin: 0; padding: 0; }
+.bld-cal-row { display: grid; grid-template-columns: 9rem minmax(0, 1fr) auto; gap: 8px 16px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.bld-pick-row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.bld-pick-extra { padding: 4px 0 4px 32px; }
+.bld-pick-extra input:not([type='checkbox']), .bld-pick-extra select { flex: 1 1 10rem; min-width: 0; }
+.bld-year { table-layout: fixed; }
+.bld-year th[scope='row'] { text-align: left; font-weight: 600; width: 34%; }
+.bld-cell { text-align: center; font-weight: 700; }
+.bld-cell.bld-done { color: var(--open); }
+.bld-cell.bld-late { color: var(--hold); background: var(--watch-tint); }
+.bld-cell.bld-missed, .bld-cell.bld-overdue { color: var(--closed); background: var(--alert-tint); }
+.bld-cell.bld-due { color: var(--quiet); }
+.bld-round { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.bld-stop { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); }
+.bld-stop.bld-found { box-shadow: 0 0 0 3px var(--accent-line); }
+.bld-stop-pass { border-left: 6px solid var(--open); }
+.bld-stop-fail, .bld-stop-missing { border-left: 6px solid var(--closed); }
+.bld-stop-skipped { opacity: 0.75; }
+.bld-stop-actions .btn { min-height: 48px; min-width: 6.5rem; flex: 1 1 6.5rem; }
+.binder-head h1 { margin: 0 0 4px; }
+.binder-section { margin-top: 24px; }
+.binder-section h2 { font-size: 1.15rem; border-bottom: 2px solid var(--line-strong); padding-bottom: 4px; }
+@media (max-width: 640px) { .bld-cal-row { grid-template-columns: 1fr; gap: 4px; } .bld-pick-extra { padding-left: 0; } }
+@media print {
+  .binder { font-size: 10.5pt; }
+  .binder .table-wrap { overflow: visible; }
+  .binder table { width: 100%; border-collapse: collapse; }
+  .binder th, .binder td { border-bottom: 1px solid var(--print-rule); padding: 3px 6px; vertical-align: top; }
+  .binder tr { break-inside: avoid; page-break-inside: avoid; }
+  .binder-section { break-inside: auto; }
+  .binder-section h2 { break-after: avoid; page-break-after: avoid; }
+  .back, .page-head.no-print, .week-filter.no-print { display: none !important; }
+}

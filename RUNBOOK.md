@@ -75,6 +75,14 @@ Water, boil water, sewer and street closure notices go at any hour; the others w
 **Linking the page from the municipal website.** The page is `https://<app address>/public/<web name>/bulk-pickup` (Bulk pickup, Settings shows it with Copy link). Put it on the website's trash or public works page as "Book a bulk pickup online", and in the newsletter and on the trash calendar. It works on a phone and needs no login. A QR code on the bulk pickup flyer at the office works too. Turning off "Residents can book online" leaves the page up with a call-us message.
 
 **Before turning it on.** Import the street list (Settings, Streets), check collection days, cutoff, stops a day, sizes and prices, and the rules, and add the year's holidays under Days with no pickup. Residents who said yes get a reminder the afternoon before; Twilio and Postmark must be set up for texts and emails (as for the rest of the app).
+## Buildings for a municipality (the Buildings add-on)
+
+1. Turn on Buildings for the municipality in the console (Apps). Its library of life-safety checks (extinguishers, sprinklers, fire alarm, exit lights, kitchen hood, elevator, boiler, backflow, generator, playground, HVAC, roof) is made at that moment, once. Changing or turning off a check later never brings the original back.
+2. A manager adds the vendors (Assets and fleet, Purchasing, Vendors), then each building with its rooms, then the items in it (Add items; several extinguishers in one go). Print the QR tags from the building page.
+3. Under Buildings, Checks, set the vendor for each vendor check and adjust how often to what the fire marshal and the insurer expect. The standards shown are references only.
+4. Enter what is already known: record the last vendor visits (with certificate dates for elevators and boilers) so the calendar starts from real dates. Anything without a record shows as No record yet.
+5. Certificate reminders run in the daily job (stage `building_cert_reminders`): the owners and managers get an Inbox message in "Building certificates" and a phone alert 60, 30 and 7 days before a certificate runs out, and once when it has expired. Each goes once (`building_cert_reminders`); a certificate replaced by a newer one is no longer reminded about.
+6. Vendor reports and certificates are filed in Documents, category "Building certificates and reports" (made the first time; Crew and Front desk can read it). They count toward the municipality's document storage.
 
 ## Tiered sign-in (2026.10.17)
 
