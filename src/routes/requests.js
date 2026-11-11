@@ -361,7 +361,10 @@ router.post('/', validate(createFields), async (req, res) => {
     Q.alertNew(t, out.id, { exceptUserId: req.auth.userId }).catch(() => {});
     Q.tellResident(t, out.id, 'received', { base: baseUrl(req) }).catch(() => {});
   }
-  res.status(out.repeat ? 200 : 201).json(out);
+  // The one STOP rule (lib/residents.js): ticking "text me" for a phone that texted STOP changes nothing, and the screen says so.
+  const c = req.body.contact || {};
+  const textsOff = c.texts_ok && c.phone ? await RES.textsOffNotice(pool, t, c.phone) : null;
+  res.status(out.repeat ? 200 : 201).json({ ...out, ...(textsOff ? { texts_off: textsOff } : {}) });
 });
 
 // ---------------------------------------------------------------- one request
@@ -698,7 +701,9 @@ publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
     Q.alertNew(t.id, out.id).catch(() => {});
     Q.tellResident(t.id, out.id, 'received', { base: baseUrl(req) }).catch(() => {});
   }
-  res.status(out.repeat ? 200 : 201).json({ ok: true, reference: out.reference, token: out.token, status: 'received', ...(out.repeat ? { joined: true } : {}) });
+  // The one STOP rule (lib/residents.js): ticking "text me" for a phone that texted STOP changes nothing, and the page says so.
+  const textsOff = b.texts_ok && b.phone ? await RES.textsOffNotice(pool, t.id, b.phone) : null;
+  res.status(out.repeat ? 200 : 201).json({ ok: true, reference: out.reference, token: out.token, status: 'received', ...(out.repeat ? { joined: true } : {}), ...(textsOff ? { texts_off: textsOff } : {}) });
 });
 
 publicRouter.get('/:slug/report/:token', async (req, res) => {

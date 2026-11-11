@@ -176,6 +176,7 @@ async function bookingDialog(onDone) {
     if (pay.value === 'credit') body.credit_ref = s('credit_ref');
     const r = await post('/solid-waste/bookings', body);
     toast(`Booked: reference ${r.reference}${r.sent.length ? `. Sent by ${r.sent.join(' and ')}.` : ''}`);
+    if (r.texts_off) toast(r.texts_off, 'error'); // the phone texted STOP: only a texted START turns texts back on
     await onDone();
     if (pay.value === 'link' && !r.sent.length) dialog('The link could not be sent', [h('p', null, 'Read this link to them, or try email:'), h('p', null, h('code', null, r.link))]);
   }, { submitText: 'Book pickup', wide: true });

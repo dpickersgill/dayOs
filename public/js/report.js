@@ -183,7 +183,9 @@ function done(out) {
   const copy = btn('Copy the status link', async () => { try { await navigator.clipboard.writeText(link); copy.textContent = 'Copied'; } catch (_) { copy.textContent = link; } });
   show(org(), h('h1', null, 'Thank you. We got your report.'), h('p', null, 'Your reference:'), h('p', { class: 'ref' }, out.reference),
     h('p', null, 'Keep this link to see what happens with it:'), h('p', null, h('a', { href: link }, 'Your report’s status')), copy,
-    S.texts || S.emails ? h('p', { class: 'muted' }, `We will send updates by ${[S.texts && 'text', S.emails && 'email'].filter(Boolean).join(' and ')}.`) : null,
+    // A phone that texted STOP gets no texts until it texts START: the page says so, in the municipality's words (texts_off).
+    (S.texts && !out.texts_off) || S.emails ? h('p', { class: 'muted' }, `We will send updates by ${[S.texts && !out.texts_off && 'text', S.emails && 'email'].filter(Boolean).join(' and ')}.`) : null,
+    out.texts_off ? h('p', { role: 'status' }, h('strong', null, out.texts_off)) : null,
     afterHours(), btn('Report something else', () => { Object.assign(S, { cat: null, street: '', house: '', cross: '', pos: null, files: [], desc: '', rid: null }); history.replaceState(null, '', location.pathname); what(); }));
 }
 

@@ -934,6 +934,56 @@ Residents book a bulk trash pickup for a collection day by a weekly cutoff and p
 - **Today**: `GET /solid-waste/today` gives "Bulk pickup today" on a collection day (stops, picked up, not out, not accepted, to go) and "Next bulk pickup" (booked of capacity, open, when booking closes). No resident details.
 - **Privacy**: `residents` is in `lib/personal.js` (erase blanks the name, phone, email, house number and unit); a STOP reply to Verdynt/OS's number turns off texts on every resident with that phone (START does not turn them back on: the resident says yes again on their next booking). Messages are logged without the resident's details.
 - **Demo**: `db/demo-municipal/40-trash.js` gives Riverbend the usual settings, ten weeks of past Mondays (mostly picked up, a few not out with a photo, one not accepted) and 22 stops next Monday, all paid at Borough Hall or with stickers.
+### Street notices and resident alerts (`src/routes/streetnotices.js`, `src/lib/streetnotices.js`, view `notices`)
+
+Part of Resident requests (`requests`; API `/street-notices`, public page word `alerts`). Staff pick the streets a water
+break or road work affects and text and email every resident who signed up there, in minutes.
+
+- **Sign-up** (`/alerts/<slug>`, `public/resident-alerts.html`): street from the street list, house number, unit, a cell
+  phone and/or email, name (optional) and topics: Water and sewer outages (always on), Street closures and paving, Trash
+  and recycling changes, Leaf collection, General news. One address per sign-up (`alert_signups`); the resident is
+  written to `residents` through `upsertResident` (`src/lib/residents.js`, the requests workstream's shared function;
+  this branch carries a copy). A phone is confirmed with a 6-digit code by text (15 minutes; 5 wrong tries per code,
+  counted before the compare; 5 codes an hour per phone), then a welcome text says how to stop. An email is confirmed
+  by a signed link (the page posts it, so a mail scanner opening the link does not confirm it). Nothing is sent to an
+  address that was never confirmed. A sign-up nobody confirms is deleted after 7 days. Rate limits per address:
+  `ALERTS_RATE_LIMIT` (10 sign-ups an hour, 30 code tries per 10 minutes).
+- **Stop**: STOP by text (`src/routes/twilioinbound.js` calls `textReply`) stops texts to that phone at every
+  municipality; START lifts only a text STOP. Every email has a manage link (`/alerts/<slug>/manage/<token>`, also
+  `List-Unsubscribe`): change topics, remove an address, stop all texts or emails. Every yes and no is a row in
+  `alert_consent_events`; the state per phone or email is `alert_addresses`. Texts also honor `sms.phoneSaidNo`.
+- **A notice**: type (Water outage, Boil water advisory, Sewer, Street closure, Paving, Trash schedule change, Leaf
+  collection, General) with a template per type; streets, each whole or a house-number range with odd, even or both
+  sides (`street_notice_areas`); a short text (320) and a longer version for email and the notice's page; start and
+  expected end. Blanks in curly brackets must be filled in before it is sent. A boil water advisory says "Only send when
+  your certified operator has issued the advisory" and requires the operator who issued it (an active login, recorded
+  as `issued_by_user_id` and `issued_by_name`); the app never suggests issuing one.
+- **Who gets it**: active sign-ups in the areas for the type's topic whose phone (code) or email (link) was confirmed
+  from that sign-up, one message per phone and email. A sign-up whose house number has no digits is in every range on
+  its street. Preview (`POST /street-notices/preview`, and on a draft) gives texts, emails, residents and how many said
+  stop; the send uses the same rule.
+- **Sending**: Send now or Schedule (`street_notice_updates`). The send queues one row per address
+  (`street_notice_deliveries`, unique per send and address, claimed before sending) and answers at once; the queue is
+  sent in the background and by the 5-minute guests job (RUNBOOK, "Street alert texts for a municipality"). Water, boil
+  water, sewer and street closure go at any hour; the others wait for 8 AM. Send an update ("Water is back on") goes to
+  the first send's list, checked again for STOP; End notice closes it with an optional last message. The notice shows
+  per send: texts and emails sent, still going out, could not be delivered, skipped (said stop); managers see the
+  failed addresses. An outage notice can open a work order (source `notice`, `work_orders.source` gains `notice`).
+- **The notice's page** (`/alerts/<slug>/<code>`): its words, streets, times and updates, "Issued by our certified water
+  operator" for a boil water advisory. No names, phones, emails or counts. Every text links to it.
+- **Who may**: managers and owners send; a manager can let Crew logins send (Street notices, Settings, `crew_senders`).
+  Front desk and Crew see the notices; managers and Front desk see who signed up. Settings also takes the
+  municipality's own texting number (`from_number`).
+- **Lists and Right-to-Know**: Residents signed up by street with counts. Export the list gives street, topics, by text,
+  by email, status, source and date, without name, phone, email, house number or unit; managers can export with
+  contact details (audited as `export_contacts`). Export notices is a public record with no resident in it. Import a
+  list (managers): CSV with a header row, the agreement confirmed and where it was given (`consent_note`), audited
+  with counts only; a phone or email that said stop stays stopped.
+- **Today**: `GET /street-notices/today`: Active street notices, Alert sign-ups this week.
+- **Privacy**: `residents`, `alert_signups`, `alert_addresses` and `street_notice_deliveries` are in
+  `src/lib/personal.js`; the delivery log's addresses are blanked after 13 months (`retention.js`), the counts stay.
+- **Demo**: `db/demo-municipal/50-notices.js`: 300 sign-ups on Riverbend's streets (555-01xx numbers, example.com
+  emails), 3 ended notices with follow-ups and an active water outage on two streets.
 
 ## Engineering notes
 

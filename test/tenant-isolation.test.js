@@ -98,6 +98,8 @@ const SIGNED = {
   'requests.js': { router: '/requests' }, // muni release 1: resident requests (test/muni-requests.test.js sweeps two municipalities)
   // Municipal edition (muni release 1): bulk trash pickup (Trash and recycling).
   'bulkpickup.js': { router: '/solid-waste' },
+  // Municipal edition: street notices and the resident alert list.
+  'streetnotices.js': { router: '/street-notices' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -114,6 +116,7 @@ const PUBLIC = {
   'requests.js': { publicRouter: '/public' }, // muni release 1: the report page and its status links, keyed by the web address and the request's token
   'streets.js': { publicRouter: '/public' }, // muni release 1: a municipality's street names, keyed by its web address
   'bulkpickup.js': { publicRouter: '/public' }, // muni release 1: the bulk pickup page and a resident's booking link
+  'streetnotices.js': { publicRouter: '/public' }, // muni release 1: alert sign-ups, a notice's page and the manage link, keyed by the municipality's web address and a signed link
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.
 const EXEMPT = {

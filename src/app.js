@@ -132,6 +132,7 @@ function createApp() {
   app.use('/api/v1/online-shop/brand', express.json({ limit: '1200kb' })); // logo and hero photo together
   app.use('/api/v1/platform/prospects/import', express.json({ limit: '2mb' })); // a research batch of ski areas
   app.use('/api/v1/patrol/places/import', express.json({ limit: '1mb' })); // a mountain's places as CSV, a few thousand rows
+  app.use('/api/v1/street-notices/residents/import', express.json({ limit: '2mb' })); // a borough's alert list as CSV, a few thousand rows
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
 
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).
@@ -199,6 +200,8 @@ function createApp() {
   // A municipality's bulk trash pickup page (muni release 1, Trash and recycling): /public/<municipality>/bulk-pickup, and
   // a resident's own booking at ?booking=<token>.
   app.get('/public/:slug/bulk-pickup', page('bulk-pickup.html'));
+  // Street alerts (muni release 1): sign up, a notice's page, the email link and the manage link in every alert.
+  app.get(['/alerts/:slug', '/alerts/:slug/:code', '/alerts/:slug/:kind/:token'], page('resident-alerts.html'));
 
   // Pages behind the follow-up email: /f/<token> (rate us, give, stop) and /give/<mountain> (give).
   app.get(['/f/:token', '/give/:slug'], page('give.html'));
@@ -278,6 +281,9 @@ function createApp() {
   api.post('/public/:slug/bulk-pickup/bookings', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many bookings from this address. Please call the office.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
+  // Street alert sign-ups text a code or email a link, so they are limited per address too (each code also per phone).
+  api.post('/public/:slug/alerts', rateLimit({ windowMs: 3_600_000, max: Number(process.env.ALERTS_RATE_LIMIT) || 10, message: 'Too many sign-ups from this address. Please call the municipal office.' }));
+  api.post(['/public/:slug/alerts/confirm', '/public/:slug/alerts/resend', '/public/:slug/alerts/email', '/public/:slug/alerts/manage/:token'], rateLimit({ windowMs: 600_000, max: Number(process.env.ALERTS_RATE_LIMIT) || 30, message: 'Too many tries from this address. Wait a few minutes and try again.' }));
   // The guest assistant costs money per question: 20 questions and 5 messages to the mountain an hour per address.
   api.post('/public/:slug/assistant/ask', rateLimit({ windowMs: 3_600_000, max: Number(process.env.ASSISTANT_GUEST_LIMIT) || 20, message: 'That is a lot of questions. Please call the mountain.' }));
   api.post('/public/:slug/assistant/contact', rateLimit({ windowMs: 3_600_000, max: 5, message: 'Too many messages from this address. Please call the mountain.' }));
@@ -321,6 +327,7 @@ function createApp() {
   // minute) caps one address across every mountain, so moving from mountain to mountain does not multiply the limit.
   api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
     rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter, require('./routes/requests').publicRouter, require('./routes/bulkpickup').publicRouter);
+  api.use('/public', require('./routes/streetnotices').publicRouter); // street alerts (muni release 1; the gate above checks Resident requests is on)
   // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
   api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
   // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
@@ -431,6 +438,7 @@ function createApp() {
   api.use('/reports', reports);
   api.use('/board', board);
   api.use('/calendar', require('./routes/mountaincal').router); // 2026.11.10: the Mountain calendar
+  api.use('/street-notices', require('./routes/streetnotices').router); // muni release 1: street notices and resident alerts
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports
 
   app.use('/api/v1', api);

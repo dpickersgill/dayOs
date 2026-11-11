@@ -200,6 +200,7 @@ async function showBooking(token, { just = false } = {}) {
       v.outcome === 'picked_up' ? h('p', null, 'Picked up. Thank you.') : null,
       !canceled && !v.outcome ? h('p', null, `Put items at the curb by ${clock(v.curb_by)} on ${v.day_label}.`) : null,
       !canceled && !v.outcome ? h('p', { class: 'muted small' }, v.can_cancel ? `You can cancel until ${v.cutoff_words}${v.pay_status === 'paid' && v.pay_method === 'card' ? ', with a full refund to your card' : ''}.` : `Changes closed ${v.cutoff_words}. To change anything, call ${v.office_name}${v.phone ? ` at ${v.phone}` : ''}.`) : null,
+      v.texts_off && !canceled && !v.outcome ? h('p', { role: 'status' }, h('strong', null, v.texts_off)) : null,
       h('p', { class: 'muted small' }, 'Keep this page’s link to come back to your booking.'),
       v.can_pay ? h('button', { type: 'button', class: 'btn primary big', onclick: payNow }, `Pay ${money(v.total_cents)} by card`) : null,
       v.can_cancel ? h('button', { type: 'button', class: 'btn big', onclick: cancelNow }, 'Cancel pickup') : null,

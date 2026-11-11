@@ -276,7 +276,9 @@ function newRequest(done) {
     };
     const out = await post('/requests', body);
     await sendPhoto(out.id, fd.get('photo'), 'before');
-    toast(`Request ${out.reference} saved`); await done();
+    toast(`Request ${out.reference} saved`);
+    if (out.texts_off) toast(out.texts_off, 'error'); // the phone texted STOP: only a texted START turns texts back on
+    await done();
   }, { submitText: 'Save request', wide: true });
 }
 

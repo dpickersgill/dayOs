@@ -228,7 +228,7 @@ async function tellResident(tenantId, requestId, kind, { base } = {}) {
       [tenantId, requestId, kind, channel, sent.ok ? 1 : 0, sent.ok ? null : String(sent.error || '').slice(0, 200), nowIn(t.timezone)]);
     if (Number(r.updates_by_text) && !already.has('sms') && await R.textsAllowed(pool, tenantId, res)) {
       const body = `${line} See it: ${link} Reply STOP to stop texts.`;
-      const sent = await require('./sms').send({ tenantId, to: res.phone, body, tag: `request-${kind}` });
+      const sent = await require('./sms').send({ tenantId, to: res.phone, body, from: await R.fromNumber(pool, tenantId), tag: `request-${kind}` }); // the municipality's own texting number when it has one
       await log('sms', sent);
       out.sms = sent.ok ? 'sent' : 'failed';
     }

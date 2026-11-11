@@ -27,7 +27,8 @@ const { card, todayRoute } = require('../lib/today');
 const { photoFacts, sniff } = require('../lib/exif');
 const { money } = require('../lib/format');
 const { toCsv, dollars } = require('../lib/csv');
-const { upsertResident } = require('../lib/residents');
+const RES = require('../lib/residents');
+const { upsertResident } = RES;
 const B = require('../lib/bulkpickup');
 
 const router = express.Router();
@@ -314,14 +315,20 @@ router.post('/bookings', office, validate(z.object({
   let sent = [];
   if (b.pay === 'link') sent = await B.tell(t.id, made.id, 'pay_link', base, { receipt: true, only: b.link_by });
   else sent = await B.tell(t.id, made.id, 'confirm', base, { receipt: true });
-  res.status(201).json({ id: made.id, reference: made.reference, total_cents: made.total, link: B.viewLink(base, t.slug, made.view_token), sent });
+  // The one STOP rule (lib/residents.js): ticking that they agree to texts does not undo a STOP the phone texted.
+  const textsOff = b.texts_ok && phone ? await RES.textsOffNotice(pool, t.id, phone) : null;
+  res.status(201).json({ id: made.id, reference: made.reference, total_cents: made.total, link: B.viewLink(base, t.slug, made.view_token), sent, ...(textsOff ? { texts_off: textsOff } : {}) });
 });
 
 router.post('/bookings/:id/send-link', office, validate(z.object({ by: z.enum(['text', 'email']) })), async (req, res) => {
   const b = await bookingOf(pool, req.auth.tenantId, paramId(req));
   if (!(b.pay_method === 'card' && b.pay_status === 'due' && b.status === 'booked')) throw conflict('Only a booking waiting for a card payment has a payment link');
   const sent = await B.tell(req.auth.tenantId, b.id, 'pay_link', baseUrl(req), { receipt: true, only: req.body.by });
-  if (!sent.length) throw conflict(req.body.by === 'text' ? 'The text could not be sent. They may not have agreed to texts, or their phone said STOP. Read them the link instead.' : 'The email could not be sent. Check the address, or read them the link instead.');
+  if (!sent.length) {
+    const r = b.resident_id ? await one(pool, 'SELECT phone FROM residents WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, b.resident_id]) : null;
+    const off = req.body.by === 'text' && r && r.phone ? await RES.textsOffNotice(pool, req.auth.tenantId, r.phone) : null;
+    throw conflict(req.body.by === 'text' ? (off ? `${off} Read them the link instead.` : 'The text could not be sent. They may not have agreed to texts. Read them the link instead.') : 'The email could not be sent. Check the address, or read them the link instead.');
+  }
   await audit(pool, req, 'bulk_send_link', 'bulk_bookings', b.id, { by: req.body.by });
   res.json({ sent });
 });
@@ -618,7 +625,7 @@ publicRouter.post('/:slug/bulk-pickup/bookings', validate(z.object({
 /** The resident's own booking, by its secret link: nothing about anyone else. */
 async function residentView(t, tok) {
   if (!/^[a-f0-9]{32}$/.test(String(tok))) return null;
-  const b = await one(pool, `SELECT b.*, s.name AS street, r.name FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
+  const b = await one(pool, `SELECT b.*, s.name AS street, r.name, r.phone AS r_phone FROM bulk_bookings b JOIN streets s ON s.tenant_id = b.tenant_id AND s.id = b.street_id
     LEFT JOIN residents r ON r.tenant_id = b.tenant_id AND r.id = b.resident_id WHERE b.tenant_id = ? AND b.view_token = ?`, [t.id, String(tok)]);
   if (!b) return null;
   const s = await B.settingsOf(t.id);
@@ -633,6 +640,8 @@ async function residentView(t, tok) {
       cutoff_at: cutoff, cutoff_words: B.cutoffWords(cutoff), can_cancel: before && ['booked', 'awaiting_payment'].includes(b.status) && !b.outcome,
       can_pay: b.pay_method === 'card' && b.pay_status === 'due' && ['booked', 'awaiting_payment'].includes(b.status) && await B.cardReady(t.id),
       outcome: b.outcome, outcome_reason: b.outcome_reason, town: t.name, phone: t.phone, office_name: s.office_name, curb_by: s.curb_by, rules: s.rules_text,
+      // The one STOP rule (lib/residents.js): they ticked "text me" but the phone texted STOP, so the page says how to turn texts back on.
+      texts_off: Number(b.texts_ok) && b.r_phone ? await RES.textsOffNotice(pool, t.id, b.r_phone) : null,
     },
   };
 }

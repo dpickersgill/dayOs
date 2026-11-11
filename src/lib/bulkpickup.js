@@ -233,7 +233,7 @@ async function tell(tenantId, bookingId, kind, base, { receipt = false, only = n
     for (const ch of await channelsFor(b, { receipt })) {
       if (only && ch !== only) continue;
       if (ch === 'text') {
-        const r = await require('./sms').send({ tenantId, to: b.phone, body: w.text, tag: `bulk-${kind}` });
+        const r = await require('./sms').send({ tenantId, to: b.phone, body: w.text, from: await require('./residents').fromNumber(pool, tenantId), tag: `bulk-${kind}` }); // the municipality's own texting number when it has one
         if (r.ok) sent.push('text');
       } else {
         const r = await require('./mailer').send({ tenantId, to: b.email, fromName: b.town, subject: w.subject, text: w.text, tag: `bulk-${kind}` });

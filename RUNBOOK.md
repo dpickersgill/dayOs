@@ -32,6 +32,32 @@
 
 5. Turning on Water, Sewer or Stormwater (here, or by a plan in Billing) gives the municipality that add-on's ready-made inspection checklists once (Valve exercise, Hydrant flush and inspection, Manhole inspection, Pump station round, Outfall dry-weather screening, Inlet inspection, Stormwater facility inspection). Turning an add-on off and on again never adds them twice, and a checklist the municipality changed or retired never comes back. Their map items (hydrants, manholes, pump stations, outfalls, inlets, basins) stay on the map when an add-on is turned off; only adding new ones of those kinds needs it on.
 6. A municipality with a GIS file of its valves and hydrants: there is no import yet. Put the main ones on the map from the office (Map, Add a point, tap), or have the crew add them by GPS as they exercise them; the tag column is what ties them to their paper records.
+## Street alert texts for a municipality (which number sends)
+
+Street notices, alert sign-up codes and welcome texts go through `src/lib/sms.js` on the one Twilio account that sends
+every Verdynt/OS text (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`). Which number they come from:
+
+- **By default, the shared number** (`TWILIO_FROM`, a number or a Messaging Service `MG...`). Nothing to set up per
+  municipality. Its STOP and START replies already reach `POST /api/v1/twilio/sms` (the "A message comes in" webhook,
+  see Text HELP set-up above and FEATURES.md): a STOP is written to every customer record and every municipality's alert
+  list with that phone (`alert_addresses`), so no one texts it again; START lifts only a stop that came by text. Twilio
+  itself also blocks the shared number from texting a phone after STOP, at every tenant.
+- **A number of the municipality's own** (optional, when a borough wants its alerts to come from one number residents
+  save). Buy a toll-free number on the same account, verify it the way Text HELP set-up steps 1 and 4 describe, with the
+  municipality as the business, use case category "Public Service Announcement" (or Customer Care), and sample messages
+  such as "Riverbend Borough: Water is off on Dayton Street for a water main repair. Details: https://<host>/alerts/<slug>/AB3CDE Reply STOP to stop texts."
+  Opt-in: residents sign up on `/alerts/<slug>`, confirm with a texted code and get a welcome text saying how to stop.
+  Set the number's (or its Messaging Service's) "A message comes in" webhook to `https://<PUBLIC_URL host>/api/v1/twilio/sms`,
+  never `/api/v1/public/sms/inbound` (that is the patrol help line and would take a STOP as a call for help). Then a
+  manager enters the number under Street notices, Settings, Texting number; the screen shows the webhook address too.
+  Clear it to go back to the shared number.
+
+Sending is in the background: a send writes one queued row per phone and email (`street_notice_deliveries`) and
+answers at once; the server that took the request sends them six at a time, and the 5-minute guests job
+(`/internal/jobs/guests`, `street_notices` in its answer) sends anything left and the scheduled notices that are due. A
+row a stopped server left half-sent is marked failed after 15 minutes rather than sent again. Twilio's own rate for the
+number applies on top (a toll-free number takes a few texts a second; a 2,000-resident notice takes some minutes).
+Water, boil water, sewer and street closure notices go at any hour; the others wait for 8 AM (`src/lib/quiet.js`).
 
 ## The demo borough
 

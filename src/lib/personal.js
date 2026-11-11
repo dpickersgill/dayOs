@@ -120,6 +120,11 @@ const REGISTRY = [
   // name on them, and their consent history stays so the municipality can show they said no. Bulk pickup bookings point
   // at the row, so it is blanked rather than deleted, and the bookings keep only the street and the day.
   { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', email: null, phone: null, house_number: null, unit: null, texts_ok: 0, emails_ok: 0 } } },
+  // Street alerts (muni release 1): the addresses a resident (residents, above) signed up for alerts at, and the alerts sent.
+  // A phone or email that said stop stays stopped.
+  { table: 'alert_signups', by: { email: ['email'], phone: ['phone'] }, erase: 'delete' },
+  { table: 'alert_addresses', by: { email: ['addr'], phone: ['addr'] }, erase: { keep: 'Kept so street alerts never go to this phone or email again after it said stop.' } },
+  { table: 'street_notice_deliveries', by: { email: ['to_addr'], phone: ['to_addr'] }, erase: { set: { to_addr: null } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
   { table: 'users', by: { person: ['person_id'] }, erase: { keep: 'Sign-ins are not anonymised here.' }, columns: ['id', 'email', 'username', 'role', 'active', 'created_at', 'access_ends_on'] },

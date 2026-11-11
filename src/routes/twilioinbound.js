@@ -5,6 +5,8 @@
 // A message that is exactly STOP (or one of Twilio's other opt-out words, nothing else in it) is written to the consent record of every customer with that phone number, at
 // every mountain: all mountains text from the one Verdynt/OS number, and Twilio stops all texts to that phone after a
 // STOP, so every mountain's record must say so. START (or UNSTOP) undoes only an opt-out that came from a text reply.
+// A municipality's residents follow the same rule through one path (lib/residents.js applyTextReply): a STOP turns texts
+// off for requests, bulk pickup and street alerts alike, and only START turns them back on.
 // Twilio itself sends the standard reply to STOP, START and HELP, so this answers with an empty reply.
 //
 // Every request must carry Twilio's signature (X-Twilio-Signature, made with TWILIO_AUTH_TOKEN); anything else is refused.
@@ -69,8 +71,6 @@ async function applyReply(phone, intent) {
     if (intent === 'stop' && status !== 'opted_out') { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_out', SOURCE, null); changed += 1; }
     if (intent === 'start' && status === 'opted_out' && source === SOURCE) { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_in', SOURCE, null); changed += 1; }
   }
-  // A municipality's residents (muni release 1) are kept apart from customers: the same STOP or START applies to them.
-  changed += await require('../lib/residents').applyTextReply(pool, phone, intent);
   return changed;
 }
 
@@ -80,7 +80,15 @@ router.post('/sms', express.urlencoded({ extended: false, limit: '20kb' }), asyn
   if (!signedByTwilio(req)) return res.status(403).type('text/plain').send('Not signed by Twilio');
   const intent = intentOf(req.body || {});
   if (intent) {
-    try { await applyReply(req.body.From, intent); } catch (err) { logFailure({ job: 'sms_reply', message: err.message }); return res.status(500).type('text/plain').send('Try again'); }
+    try {
+      // A municipality's residents (muni release 1) are kept apart from customers, and one path covers their requests, bulk
+      // pickups and street alerts (lib/residents.js). A reply to a municipality's own texting number counts there only;
+      // a reply to the shared number counts for every customer record and every municipality with that phone.
+      const RES = require('../lib/residents');
+      const own = await RES.tenantsOfNumber(pool, req.body.To);
+      if (!own.length) await applyReply(req.body.From, intent);
+      await RES.applyTextReply(pool, req.body.From, intent, { tenantIds: own });
+    } catch (err) { logFailure({ job: 'sms_reply', message: err.message }); return res.status(500).type('text/plain').send('Try again'); }
   }
   return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
