@@ -30,6 +30,9 @@
 3. Under Billing, pick Public Works and its add-ons, yearly. Only municipal plans are offered for a municipality, and ski plans for a ski area.
 4. The owner adds the crew (role Crew) and front desk (role Front desk) under Settings, Team and logins, imports the street list under Settings, Streets (paste one street per line), and connects Stripe under Settings, Payments for bulk pickup fees.
 
+5. Turning on Water, Sewer or Stormwater (here, or by a plan in Billing) gives the municipality that add-on's ready-made inspection checklists once (Valve exercise, Hydrant flush and inspection, Manhole inspection, Pump station round, Outfall dry-weather screening, Inlet inspection, Stormwater facility inspection). Turning an add-on off and on again never adds them twice, and a checklist the municipality changed or retired never comes back. Their map items (hydrants, manholes, pump stations, outfalls, inlets, basins) stay on the map when an add-on is turned off; only adding new ones of those kinds needs it on.
+6. A municipality with a GIS file of its valves and hydrants: there is no import yet. Put the main ones on the map from the office (Map, Add a point, tap), or have the crew add them by GPS as they exercise them; the tag column is what ties them to their paper records.
+
 ## The demo borough
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.

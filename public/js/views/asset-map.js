@@ -86,7 +86,7 @@ export async function drawMap(box, deep = '') {
       : f.geometry === 'line' ? L.polyline(pts, lineStyle(f))
         : L.polygon(pts, { ...lineStyle(f), weight: 3, fillOpacity: 0.2 });
     lyr.bindPopup(() => popup(f), { maxWidth: 300 });
-    if (f.geometry !== 'point') lyr.bindTooltip(title(f), { sticky: true });
+    if (f.geometry !== 'point') lyr.bindTooltip(`${title(f)}${f.open_orders ? `: ${f.open_orders} open work order${f.open_orders === 1 ? '' : 's'}` : ''}`, { sticky: true });
     return lyr;
   }
   function redraw(fit) {
