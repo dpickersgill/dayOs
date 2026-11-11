@@ -14,6 +14,8 @@ async function run(kind) {
     try { out.held_texts = await require('./sms').sendHeld(); } catch (err) { out.held_texts = { error: err.message }; }
     // Guest help alerts held by their gap (a flood's next push, the "no one on duty" summary) whose timer was lost.
     try { out.help_alerts = await require('../routes/dispatch').sendDueAlerts(); } catch (err) { out.help_alerts = { error: err.message }; }
+    // Street notices (muni release 1): scheduled sends that are due, and anything left in the send queue.
+    try { out.street_notices = await require('./streetnotices').tick(); } catch (err) { out.street_notices = { error: err.message }; }
     // The morning conditions draft (AI Operations add-on), at each mountain's own draft time.
     try { out.conditions_writer = await require('./conditionswriter').tick(); } catch (err) { out.conditions_writer = { error: err.message }; }
   }

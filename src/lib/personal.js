@@ -115,6 +115,12 @@ const REGISTRY = [
   { table: 'dispatch_sms_optouts', by: { phone: ['phone_key'] }, erase: { keep: 'Kept so the patrol help line never texts this phone again after it texted STOP.' } },
   // A patrol follow-up email: the address goes, the patrol record stays.
   { table: 'followups', group: 'patrol', by: { email: ['to_email'] }, erase: { set: { to_email: '' } } },
+  // Street alerts (muni release 1): a resident's contact (residents, shared with Resident requests), the addresses they
+  // signed up for alerts at, and the alerts sent. A phone or email that said stop stays stopped.
+  { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', phone: null, email: null, house_number: null, unit: null } } },
+  { table: 'alert_signups', by: { email: ['email'], phone: ['phone'] }, erase: 'delete' },
+  { table: 'alert_addresses', by: { email: ['addr'], phone: ['addr'] }, erase: { keep: 'Kept so street alerts never go to this phone or email again after it said stop.' } },
+  { table: 'street_notice_deliveries', by: { email: ['to_addr'], phone: ['to_addr'] }, erase: { set: { to_addr: null } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
   { table: 'users', by: { person: ['person_id'] }, erase: { keep: 'Sign-ins are not anonymised here.' }, columns: ['id', 'email', 'username', 'role', 'active', 'created_at', 'access_ends_on'] },

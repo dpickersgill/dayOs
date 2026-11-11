@@ -78,7 +78,10 @@ router.post('/sms', express.urlencoded({ extended: false, limit: '20kb' }), asyn
   if (!signedByTwilio(req)) return res.status(403).type('text/plain').send('Not signed by Twilio');
   const intent = intentOf(req.body || {});
   if (intent) {
-    try { await applyReply(req.body.From, intent); } catch (err) { logFailure({ job: 'sms_reply', message: err.message }); return res.status(500).type('text/plain').send('Try again'); }
+    try {
+      await applyReply(req.body.From, intent);
+      await require('../lib/streetnotices').textReply(req.body.From, intent); // a municipality's street alerts (muni release 1)
+    } catch (err) { logFailure({ job: 'sms_reply', message: err.message }); return res.status(500).type('text/plain').send('Try again'); }
   }
   return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
