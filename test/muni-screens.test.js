@@ -181,6 +181,9 @@ test('shared screens and help use municipal words for a municipality', skip(), a
   assert.ok(!/mountain/i.test(help.querySelector('h1').textContent + help.querySelector('.help-intro').textContent), help.textContent.slice(0, 200));
   const sec = await show('owner', 'help', '#/help/for-assets', ['for-assets']);
   assert.ok(!/snow gun|lift part/.test(sec.textContent), 'the Assets help section');
+  const shopHelp = await show('frontdesk', 'help', '#/help/shop-after', ['shop-after']);
+  assert.ok(!/Date changes and guest emails/.test(shopHelp.textContent), 'the online shop article is for ski areas');
+  for (const user of ['crew1', 'frontdesk']) assert.ok(!/Date changes and guest emails/.test((await show(user, 'help', '#/help', [])).textContent), `${user}: not listed`);
   const settingsHelp = await show('owner', 'help', '#/help/for-settings', ['for-settings']);
   assert.ok(!/the mountain.s details/.test(settingsHelp.textContent));
   const mfa = await show('owner', 'settings', '#/settings/profile', ['profile']);

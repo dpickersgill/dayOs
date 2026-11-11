@@ -229,13 +229,22 @@ async function tellResident(tenantId, requestId, kind, { base } = {}) {
     const line = `${t.name}: ${MSG[kind](t.name, r)}`;
     const log = (channel, sent) => pool.query('INSERT INTO request_messages (tenant_id, request_id, kind, channel, ok, error, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [tenantId, requestId, kind, channel, sent.ok ? 1 : 0, sent.ok ? null : String(sent.error || '').slice(0, 200), nowIn(t.timezone)]);
-    if (Number(r.updates_by_text) && !already.has('sms') && await R.phoneMayText(pool, tenantId, r.contact_phone) && (r.source !== 'web' || await PS.allow(tenantId, 'sms', r.contact_phone, `request-${kind}`))) {
+    // Only the "received" message of a report from the public page is counted against the daily limit (lib/publicsends.js):
+    // it is the one message nobody at the municipality chose to send. A skipped one is logged on the request for staff.
+    const capped = r.source === 'web' && kind === 'received';
+    const limited = async (channel, to) => {
+      if (!capped || await PS.allow(tenantId, channel, to, `request-${kind}`)) return false;
+      await log(channel, { ok: false, error: PS.skippedWords(channel) });
+      out[channel] = 'skipped';
+      return true;
+    };
+    if (Number(r.updates_by_text) && !already.has('sms') && await R.phoneMayText(pool, tenantId, r.contact_phone) && !(await limited('sms', r.contact_phone))) {
       const body = `${line} See it: ${link} Reply STOP to stop texts.`;
       const sent = await require('./sms').send({ tenantId, to: r.contact_phone, body, from: await R.fromNumber(pool, tenantId), tag: `request-${kind}` }); // the municipality's own texting number when it has one
       await log('sms', sent);
       out.sms = sent.ok ? 'sent' : 'failed';
     }
-    if (Number(r.updates_by_email) && !already.has('email') && await R.emailMayGet(pool, tenantId, r.contact_email) && (r.source !== 'web' || await PS.allow(tenantId, 'email', r.contact_email, `request-${kind}`))) {
+    if (Number(r.updates_by_email) && !already.has('email') && await R.emailMayGet(pool, tenantId, r.contact_email) && !(await limited('email', r.contact_email))) {
       const text = `${line}\n\nSee your report: ${link}\n\nYou get these emails because you asked for updates on this report. To stop them, open the link above and choose Stop updates.\n\n${t.name}`;
       const sent = await require('./mailer').send({ tenantId, to: r.contact_email, fromName: t.name, subject: `${t.name}: ${SUBJECT[kind]} (${r.reference})`, text, tag: 'resident-request' });
       await log('email', sent);

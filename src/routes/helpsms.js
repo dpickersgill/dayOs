@@ -121,6 +121,10 @@ router.put('/text-help', patrol, needs('manage_settings'), validate(z.object({ h
     // A patrol phone alone is fine (the guest page shows Call patrol); Text HELP is off until a help number is set.
     const taken = help ? await one(pool, 'SELECT tenant_id FROM patrol_help_lines WHERE help_number = ? AND tenant_id <> ?', [help, tenantId]) : null;
     if (taken) throw conflict('That number is already the help number of another mountain. Each mountain needs its own.');
+    // One number, one tenant (2026.11.19 review fix): never the shared Verdynt/OS number, and never a municipality's own
+    // texting number (lib/residents.js ownNumberProblem is the same rule the other way round).
+    if (help && require('../lib/sms').sharedNumbers().includes(help)) throw bad('That is the shared Verdynt/OS number. The help number must be a number of your own.');
+    if (help && await one(pool, 'SELECT tenant_id FROM street_notice_settings WHERE from_number = ?', [help])) throw conflict('That number already belongs to another organization. Each help number must be the mountain\'s own.');
     try {
       await pool.query(`INSERT INTO patrol_help_lines (tenant_id, help_number, patrol_phone, updated_by) VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE help_number = VALUES(help_number), patrol_phone = VALUES(patrol_phone), updated_by = VALUES(updated_by)`, [tenantId, help, phone, req.auth.userId]);

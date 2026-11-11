@@ -124,7 +124,7 @@ async function openRequest(id, after) {
     actions,
     h('section', null, h('h3', null, 'Timeline'), h('ul', { class: 'wo-notes' }, r.events.map((e) => h('li', null, h('span', { class: 'muted small' }, `${fmtDateTime(e.at)} ${e.author || ''}`), ' ', e.kind === 'note' ? h('em', null, e.body) : e.body))),
       h('div', { class: 'row' }, note, button('Add note', async () => { if (!note.value.trim()) return; await post(`/requests/${id}/notes`, { body: note.value.trim() }); await redo(); }, { small: true }))),
-    r.messages.length ? h('p', { class: 'muted small' }, 'Sent to the resident: ', r.messages.map((m) => `${m.kind} by ${m.channel === 'sms' ? 'text' : 'email'} ${m.ok ? fmtDateTime(m.at) : '(did not go)'}`).join('; ')) : null,
+    r.messages.length ? h('p', { class: 'muted small' }, 'Sent to the resident: ', r.messages.map((m) => `${m.kind} by ${m.channel === 'sms' ? 'text' : 'email'} ${m.ok ? fmtDateTime(m.at) : m.error && /daily limit/.test(m.error) ? `(${m.error})` : '(did not go)'}`).join('; ')) : null,
     h('p', { class: 'small' }, h('a', { href: r.status_link, target: '_blank', rel: 'noopener' }, 'The resident’s status page')),
   ], { wide: true });
 }

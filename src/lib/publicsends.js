@@ -3,11 +3,12 @@
 // Limits on what anyone can make the municipality send to one phone or email from a public page (review fix, 2026.11.19).
 // The report page and the bulk pickup page take a phone and email that nobody has checked, so without limits they could
 // be used to text or email a stranger again and again in the municipality's name.
-//   submits   at most 3 new reports or bookings an hour giving the same phone, and the same for the same email, at one
-//             municipality. More are refused with a plain message (submitAllowed throws 429).
+//   submits   at most 3 new reports an hour giving the same phone, and the same for the same email, at one municipality,
+//             and separately at most 3 bookings. More are refused with a plain message (submitAllowed throws 429).
 //   messages  at most 6 texts and 6 emails a day to one phone or email at one municipality, of the messages a public form
-//             set off (report status updates; bulk pickup confirmations, reminders and "not out"). More are skipped and
-//             logged (without the address), never queued for later (allow returns false).
+//             sends with no staff involved: the immediate confirmation of a report ("received") or an online booking.
+//             Messages caused by staff (scheduled, fixed, not out) and reminders are not counted. More are skipped, never
+//             queued for later (allow returns false), and the request or booking says so for staff.
 // Alert sign-up codes have their own limit (5 codes an hour per phone, routes/streetnotices.js); this does not change it.
 // public_sends keeps a keyed hash of the phone or email, never the address, and is cleared after 2 days (lib/retention.js).
 const crypto = require('crypto');
@@ -28,8 +29,9 @@ function destOf(channel, value) {
   return crypto.createHmac('sha256', config.linkSecret).update(`public-sends:${channel}:${v}`).digest('hex');
 }
 
-async function countSince(tenantId, dest, kind, hours) {
-  const r = await one(pool, `SELECT COUNT(*) AS n FROM public_sends WHERE tenant_id = ? AND dest = ? AND kind = ? AND created_at >= UTC_TIMESTAMP() - INTERVAL ${Number(hours)} HOUR`, [tenantId, dest, kind]);
+async function countSince(tenantId, dest, kind, hours, tag = null) {
+  const r = await one(pool, `SELECT COUNT(*) AS n FROM public_sends WHERE tenant_id = ? AND dest = ? AND kind = ?${tag ? ' AND tag = ?' : ''} AND created_at >= UTC_TIMESTAMP() - INTERVAL ${Number(hours)} HOUR`,
+    tag ? [tenantId, dest, kind, tag] : [tenantId, dest, kind]);
   return Number(r.n);
 }
 const record = (tenantId, kind, channel, dest, tag) => pool.query('INSERT INTO public_sends (tenant_id, kind, channel, dest, tag) VALUES (?, ?, ?, ?, ?)', [tenantId, kind, channel, dest, tag ? String(tag).slice(0, 40) : null]);
@@ -41,7 +43,7 @@ const record = (tenantId, kind, channel, dest, tag) => pool.query('INSERT INTO p
 async function submitAllowed(tenantId, { phone, email }, what = 'reports') {
   const dests = [['sms', destOf('sms', phone)], ['email', destOf('email', email)]].filter((d) => d[1]);
   for (const [channel, dest] of dests) {
-    if (await countSince(tenantId, dest, 'submit', 1) >= SUBMITS_PER_HOUR) {
+    if (await countSince(tenantId, dest, 'submit', 1, what) >= SUBMITS_PER_HOUR) {
       throw new AppError(429, `Too many ${what} with this ${channel === 'sms' ? 'phone number' : 'email address'} in the last hour. Please try again later, or call the office.`);
     }
   }
@@ -70,4 +72,7 @@ async function purge() {
   return r.affectedRows;
 }
 
-module.exports = { submitAllowed, allow, purge, destOf, SUBMITS_PER_HOUR, MESSAGES_PER_DAY };
+/** What staff see on the request or booking when a message was skipped for the limit. */
+const skippedWords = (channel) => (channel === 'sms' ? 'Text not sent: daily limit for this phone' : 'Email not sent: daily limit for this email');
+
+module.exports = { submitAllowed, allow, purge, destOf, skippedWords, SUBMITS_PER_HOUR, MESSAGES_PER_DAY };

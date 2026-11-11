@@ -466,11 +466,32 @@ function kick() {
 const idle = () => running || Promise.resolve(null);
 
 /** The 5-minute job: scheduled sends that are due are queued, then the queue is sent. */
+/** Is this login one of the municipality's certified operators now (Street notices, Settings), and still active? */
+async function operatorCertified(db, tenantId, userId) {
+  if (!userId) return false;
+  const s = await one(db, 'SELECT certified_operators FROM street_notice_settings WHERE tenant_id = ?', [tenantId]);
+  const ids = String((s && s.certified_operators) || '').split(',').map(Number);
+  if (!ids.includes(Number(userId))) return false;
+  return Boolean(await one(db, 'SELECT id FROM users WHERE tenant_id = ? AND id = ? AND active = 1', [tenantId, userId]));
+}
+const NOT_CERTIFIED = (name) => `${name || 'The operator named on this advisory'} is no longer one of your certified operators, so it was not sent. Pick a certified operator, then send it again.`;
+
 async function tick() {
-  const due = await rows(pool, "SELECT tenant_id, id FROM street_notice_updates WHERE status = 'scheduled' AND send_at <= UTC_TIMESTAMP() ORDER BY id LIMIT 200");
+  const due = await rows(pool, `SELECT u.tenant_id, u.id, u.kind, n.id AS notice_id, n.type, n.issued_by_user_id, n.issued_by_name FROM street_notice_updates u
+    JOIN street_notices n ON n.tenant_id = u.tenant_id AND n.id = u.notice_id WHERE u.status = 'scheduled' AND u.send_at <= UTC_TIMESTAMP() ORDER BY u.id LIMIT 200`);
   let queued = 0;
   for (const u of due) {
-    try { if (await queueUpdate(Number(u.tenant_id), Number(u.id))) queued += 1; } catch (err) { logFailure({ job: 'street_notices', tenant: Number(u.tenant_id), message: err.message }); }
+    try {
+      // A boil water advisory goes out at its scheduled time only if the operator named on it is still certified. If not,
+      // it goes back to a draft and says why on the notice.
+      if (u.kind === 'first' && TYPE[u.type] && TYPE[u.type].operator && !(await operatorCertified(pool, Number(u.tenant_id), u.issued_by_user_id))) {
+        await pool.query("UPDATE street_notice_updates SET status = 'cancelled' WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [u.tenant_id, u.id]);
+        await pool.query("UPDATE street_notices SET status = 'draft', held_note = ? WHERE tenant_id = ? AND id = ? AND status = 'scheduled'", [NOT_CERTIFIED(u.issued_by_name).slice(0, 255), u.tenant_id, u.notice_id]);
+        logFailure({ job: 'street_notices', tenant: Number(u.tenant_id), message: `scheduled boil water advisory ${u.notice_id} held: operator no longer certified` });
+        continue;
+      }
+      if (await queueUpdate(Number(u.tenant_id), Number(u.id))) queued += 1;
+    } catch (err) { logFailure({ job: 'street_notices', tenant: Number(u.tenant_id), message: err.message }); }
   }
   const sent = await kick();
   return { queued, ...(sent || {}) };
@@ -487,7 +508,7 @@ async function purge(days) {
 }
 
 module.exports = {
-  TOPICS, TOPIC_KEYS, TYPES, TYPE, TYPE_KEYS, OPERATOR_RULE, blanksIn, houseNo, areaWords, areasWords, areasOf, areaSql,
+  TOPICS, TOPIC_KEYS, TYPES, TYPE, TYPE_KEYS, OPERATOR_RULE, operatorCertified, NOT_CERTIFIED, blanksIn, houseNo, areaWords, areasWords, areasOf, areaSql,
   phoneAddr, emailAddr, addrKey, addressRow, confirmAddress, stopAddress, recordAnswer, textReply,
   tokenFor, readToken, manageToken, signupRef, emailToken, publicLink, manageLink,
   audienceOf, followupAudience, countsOf, queueUpdate, sendAfterFor, smsBody, emailOf, drain, kick, idle, tick, purge, forget,

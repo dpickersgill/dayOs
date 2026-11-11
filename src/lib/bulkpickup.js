@@ -235,8 +235,13 @@ async function tell(tenantId, bookingId, kind, base, { receipt = false, only = n
     const sent = [];
     for (const ch of await channelsFor(b, { receipt })) {
       if (only && ch !== only) continue;
-      // A booking made on the public page: at most 6 texts and 6 emails a day to one phone or email (lib/publicsends.js).
-      if (b.source === 'online' && !(await PS.allow(tenantId, ch === 'text' ? 'sms' : 'email', ch === 'text' ? b.phone : b.email, `bulk-${kind}`))) continue;
+      // The confirmation of a booking made on the public page, with no staff involved, counts against the daily limit
+      // (lib/publicsends.js); reminders and messages caused by staff do not. A skipped one is noted on the booking for staff.
+      const channel = ch === 'text' ? 'sms' : 'email';
+      if (b.source === 'online' && kind === 'confirm' && !(await PS.allow(tenantId, channel, ch === 'text' ? b.phone : b.email, `bulk-${kind}`))) {
+        await pool.query('UPDATE bulk_bookings SET message_note = ? WHERE tenant_id = ? AND id = ?', [PS.skippedWords(channel), tenantId, b.id]);
+        continue;
+      }
       if (ch === 'text') {
         // Every text says who sent it (the town's name leads) and how to stop.
         const r = await require('./sms').send({ tenantId, to: b.phone, body: `${w.text} Reply STOP to stop texts.`, from: await require('./residents').fromNumber(pool, tenantId), tag: `bulk-${kind}` }); // the municipality's own texting number when it has one

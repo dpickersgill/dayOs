@@ -208,6 +208,7 @@ async function detailDialog(id, onDone) {
     b.outcome ? h('p', null, state(...OUTCOME[b.outcome]), b.outcome_at ? ` ${fmtDateTime(b.outcome_at)}` : '', b.outcome_reason ? `: ${b.outcome_reason}` : '', b.notified_via ? h('span', { class: 'muted small' }, b.notified_via === 'none' ? ' Resident not told (they did not ask).' : ` Resident told by ${b.notified_via.replace(',', ' and ')}.`) : null) : null,
     b.decision ? h('p', null, `Decision: ${{ no_refund: 'no refund', refund: `refund ${money(b.decision_cents)}`, credit: `credit ${money(b.decision_cents)}${b.credit_used ? ' (used)' : ''}` }[b.decision]}${b.decision_note ? `. ${b.decision_note}` : ''}`) : null,
     b.cancel_reason ? h('p', { class: 'muted' }, b.cancel_reason) : null,
+    b.message_note ? h('p', { class: 'warn-note' }, b.message_note) : null,
     b.photos.length ? photos : null,
     b.link ? h('p', { class: 'muted small' }, 'Resident’s link: ', h('code', null, b.link)) : null,
     h('p', { class: 'muted small' }, `Booked ${fmtInstant(b.created_at)}`),

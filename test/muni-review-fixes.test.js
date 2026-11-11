@@ -458,3 +458,77 @@ test('6: CSV exports keep coordinates and other plain numbers as numbers; formul
   assert.match(csv, /,40\.130123,-75\.514321,/, csv);
   assert.ok(!csv.includes("'-75"), 'no quote mark before a negative longitude');
 });
+
+// ================================================================ re-review (2026.11.19)
+test('A: a ski area cannot take the shared number or a municipality\'s own number as its Text HELP number', async () => {
+  const M = await createMuniTenant(base, { slug: `rf-a1-${suffix}` });
+  const own = `+1484${String(Date.now() + 11).slice(-7)}`;
+  ok(await platform('PUT', `/tenants/${M.id}/texting-number`, { from_number: own }));
+  ok(await platform('POST', '/tenants', { slug: `rf-a1-ski-${suffix}`, name: `Help Ski ${suffix}`, billing: 'comped', owner: { email: `gm@rf-a1-ski-${suffix}.test`, password: 'correct-horse-battery', first_name: 'G', last_name: 'M' } }), 201);
+  const tok = await withoutMail(async () => (await api('POST', '/auth/login', { body: { tenant: `rf-a1-ski-${suffix}`, login: `gm@rf-a1-ski-${suffix}.test`, password: 'correct-horse-battery' } })).body.token);
+  for (const shared of ['+16105550000', '(610) 555-0002']) {
+    const r = await api('PUT', '/patrol/text-help', { token: tok, body: { help_number: shared } });
+    assert.equal(r.status, 400, shared); assert.match(r.body.error, /shared Verdynt\/OS number/);
+  }
+  const taken = await api('PUT', '/patrol/text-help', { token: tok, body: { help_number: own } });
+  assert.equal(taken.status, 409); assert.match(taken.body.error, /already belongs to another organization/);
+  ok(await api('PUT', '/patrol/text-help', { token: tok, body: { help_number: `+1267${String(Date.now() + 13).slice(-7)}` } }));
+});
+
+test('B: only a public form\'s own confirmation counts toward the daily limit; reports and bookings have separate hourly limits; a skip shows to staff', async () => {
+  const S = A.streets;
+  const page = ok(await api('GET', `/public/${A.slug}/report`));
+  const phone = newPhone();
+  const report = () => api('POST', `/public/${A.slug}/report`, { body: { category_id: page.categories[0].id, street_id: S['Main Street'], description: 'Sign down', phone, texts_ok: true } });
+  for (let i = 0; i < 3; i += 1) ok(await report(), 201);
+  assert.equal((await report()).status, 429, 'a fourth report this hour');
+  // A booking with the same phone is its own limit.
+  const opts = ok(await api('GET', '/solid-waste/options', { token: A.token }));
+  const day = opts.days.find((d) => d.available).date; const small = opts.sizes.find((x) => x.name === 'Small').id;
+  const book = (house) => api('POST', `/public/${A.slug}/bulk-pickup/bookings`, { body: { collection_date: day, street_id: S['Main Street'], house_number: house, items: [{ size_id: small, quantity: 1 }], pay: 'stickers', name: 'Robin Real', phone, texts_ok: true } });
+  const b1 = ok(await book('801'), 201);
+  // 3 report confirmations and 1 booking confirmation so far today. Staff actions on a report are not counted.
+  const [first] = await q('SELECT id FROM requests WHERE tenant_id = ? AND contact_phone = ? ORDER BY id LIMIT 1', [A.id, phone]);
+  for (let i = 0; i < 3; i += 1) {
+    const [r] = await q('SELECT id FROM requests WHERE tenant_id = ? AND contact_phone = ? ORDER BY id LIMIT 1 OFFSET ?', [A.id, phone, i]);
+    ok(await api('POST', `/requests/${r.id}/refer`, { token: A.token, body: { referred_to: 'PennDOT' } }));
+  }
+  const closedTexts = textsTo(phone).filter((t) => /is closed/.test(t.Body)).length;
+  assert.equal(closedTexts, 3, 'staff-caused messages still go');
+  // Two more confirmations reach six; the seventh confirmation is skipped and staff see why.
+  await pool.query("DELETE FROM public_sends WHERE tenant_id = ? AND kind = 'submit'", [A.id]);
+  ok(await report(), 201); ok(await book('802'), 201);
+  const before = textsTo(phone).length;
+  const last = ok(await report(), 201);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(textsTo(phone).length, before, 'the seventh confirmation was not sent');
+  const [lr] = await q('SELECT id FROM requests WHERE tenant_id = ? AND reference = ?', [A.id, last.reference]);
+  const d = ok(await api('GET', `/requests/${lr.id}`, { token: A.token }));
+  assert.ok(d.messages.some((m) => m.channel === 'sms' && !m.ok && m.error === 'Text not sent: daily limit for this phone'), JSON.stringify(d.messages));
+  const b3 = ok(await book('803'), 201);
+  const [bk] = await q('SELECT id FROM bulk_bookings WHERE tenant_id = ? AND reference = ?', [A.id, b3.reference]);
+  assert.equal(ok(await api('GET', `/solid-waste/bookings/${bk.id}`, { token: A.token })).message_note, 'Text not sent: daily limit for this phone');
+  assert.ok(b1 && first);
+});
+
+test('C: a boil water advisory is refused at send, and held at its scheduled time, once its operator is no longer certified', async () => {
+  const S = A.streets;
+  const op = await A.addLogin('staff');
+  const body = { type: 'boil_water', title: 'Boil water: Bridge Street', sms_text: 'Boil water advisory for Bridge Street.', areas: [{ street_id: S['Bridge Street'] }], issued_by_user_id: op.id };
+  ok(await api('PUT', '/street-notices/settings', { token: A.token, body: { crew_senders: [], certified_operators: [op.id] } }));
+  const now = ok(await api('POST', '/street-notices', { token: A.token, body }), 201);
+  const later = ok(await api('POST', '/street-notices', { token: A.token, body: { ...body, title: 'Boil water: Bridge Street, later' } }), 201);
+  ok(await api('POST', `/street-notices/${later.id}/send`, { token: A.token, body: { confirm: true, send_at: '2099-01-01T08:00' } }));
+  ok(await api('PUT', '/street-notices/settings', { token: A.token, body: { crew_senders: [], certified_operators: [] } }));
+  const r = await api('POST', `/street-notices/${now.id}/send`, { token: A.token, body: { confirm: true } });
+  assert.equal(r.status, 400); assert.match(r.body.error, /no longer one of your certified operators/);
+  assert.equal((await q('SELECT status FROM street_notices WHERE id = ?', [now.id]))[0].status, 'draft');
+  // The scheduled one comes due: the job holds it as a draft and says why.
+  await pool.query("UPDATE street_notice_updates SET send_at = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE tenant_id = ? AND notice_id = ? AND status = 'scheduled'", [A.id, later.id]);
+  ok(await api('POST', '/internal/jobs/guests', { headers: { 'x-jobs-key': process.env.JOBS_KEY } }));
+  const held = ok(await api('GET', `/street-notices/${later.id}`, { token: A.token }));
+  assert.equal(held.status, 'draft');
+  assert.match(held.held_note, /no longer one of your certified operators/);
+  assert.equal((await q('SELECT COUNT(*) AS n FROM street_notice_deliveries WHERE notice_id = ?', [later.id]))[0].n, 0, 'nothing was sent');
+  for (const id of [now.id, later.id]) ok(await api('DELETE', `/street-notices/${id}`, { token: A.token }));
+});

@@ -449,6 +449,8 @@ router.post('/:id/send', anyone, validate(sendBody), async (req, res) => {
     const blanks = SN.blanksIn(n.sms_text, n.body || '');
     if (blanks.length) throw bad(`Fill in the blanks in the message first: ${blanks.join(', ')}`);
     if (SN.TYPE[n.type].operator && !n.issued_by_user_id) throw bad(`Pick the certified operator who issued this boil water advisory. ${SN.OPERATOR_RULE}`);
+    // Checked again now: the operator may have been taken off the certified list since the draft was saved.
+    if (SN.TYPE[n.type].operator && !(await SN.operatorCertified(conn, t, n.issued_by_user_id))) throw bad(SN.NOT_CERTIFIED(n.issued_by_name), [{ path: 'issued_by_user_id', label: 'Issued by', message: 'Pick a certified operator' }]);
     const areas = await SN.areasOf(conn, t, n.id);
     if (!areas.length) throw bad('Pick at least one street');
     let wo = null;
@@ -456,7 +458,7 @@ router.post('/:id/send', anyone, validate(sendBody), async (req, res) => {
     const [u] = await conn.query('INSERT INTO street_notice_updates (tenant_id, notice_id, kind, sms_text, body, status, send_at, base_url, created_by) VALUES (?, ?, \'first\', ?, ?, ?, ?, ?, ?)',
       [t, n.id, n.sms_text, n.body || null, sendAt ? 'scheduled' : 'queued', sendAt, baseUrl(req).slice(0, 200), req.auth.userId]);
     // Marked at once, so a second press of Send finds it already gone.
-    await conn.query('UPDATE street_notices SET status = ?, sent_at = ?, work_order_id = COALESCE(?, work_order_id) WHERE tenant_id = ? AND id = ?', [sendAt ? 'scheduled' : 'active', sendAt ? null : sentNow(), wo, t, n.id]);
+    await conn.query('UPDATE street_notices SET status = ?, sent_at = ?, work_order_id = COALESCE(?, work_order_id), held_note = NULL WHERE tenant_id = ? AND id = ?', [sendAt ? 'scheduled' : 'active', sendAt ? null : sentNow(), wo, t, n.id]);
     await audit(conn, req, sendAt ? 'schedule' : 'send', 'street_notices', n.id, { send_at_utc: sendAt, work_order_id: wo });
     return { updateId: u.insertId, wo };
   });

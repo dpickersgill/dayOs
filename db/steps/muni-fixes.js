@@ -7,6 +7,7 @@
 //                                                  a phone or email on it is confirmed (code or link)
 //   street_notice_settings.certified_operators     the logins a manager marked as certified water operators (boil water)
 //   street_notice_settings unique from_number      a texting number belongs to one municipality only
+//   bulk_bookings.message_note                     "Text not sent: daily limit for this phone", for staff
 //   public_sends                                   per-destination counts for messages the public pages trigger (a keyed
 //                                                  hash of the phone or email, never the address itself)
 
@@ -47,6 +48,8 @@ module.exports = ({ tableExists, columnExists }) => [
       ON k.from_number = a.from_number SET a.from_number = NULL WHERE a.tenant_id <> k.keep`],
   ['street_notice_settings unique from_number', (c) => indexExists(c, 'street_notice_settings', 'uq_street_notice_settings_from'),
     'ALTER TABLE street_notice_settings ADD UNIQUE KEY uq_street_notice_settings_from (from_number)'],
+  ['bulk_bookings.message_note', (c) => columnExists(c, 'bulk_bookings', 'message_note'), 'ALTER TABLE bulk_bookings ADD COLUMN message_note VARCHAR(200) NULL'],
+  ['street_notices.held_note', (c) => columnExists(c, 'street_notices', 'held_note'), 'ALTER TABLE street_notices ADD COLUMN held_note VARCHAR(255) NULL'],
   ['public_sends', (c) => tableExists(c, 'public_sends'), `CREATE TABLE public_sends (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,

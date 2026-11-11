@@ -156,6 +156,7 @@ async function detail(id) {
       h('p', null, state(...(STATUS[n.status] || [n.status, 'neutral'])), ' ', h('strong', null, n.type_label), n.code && n.status !== 'draft' ? h('span', { class: 'muted' }, ` Notice ${n.code}`) : null),
       h('p', null, h('strong', null, 'Streets: '), n.streets),
       n.starts_at || n.ends_expected_at ? h('p', null, [n.starts_at && `Starts ${sayWhen(n.starts_at)}`, n.ends_expected_at && `Expected to end ${sayWhen(n.ends_expected_at)}`].filter(Boolean).join('. ')) : null,
+      n.held_note && n.status === 'draft' ? h('p', { class: 'warn-note' }, n.held_note) : null,
       n.issued_by_name ? h('p', null, h('strong', null, 'Issued by: '), n.issued_by_name, h('span', { class: 'muted' }, ' (certified operator)')) : null,
       h('h3', null, 'Text message'), h('pre', { class: 'msg-body' }, n.sms_text),
       n.body ? h('details', null, h('summary', null, 'Longer version'), h('pre', { class: 'msg-body' }, n.body)) : null,

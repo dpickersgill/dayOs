@@ -54,7 +54,7 @@ function staffShape(b, items, req) {
     items_note: b.items_note, source: b.source, status: b.status, pay_method: b.pay_method, pay_status: b.pay_status, total_cents: b.total_cents, paid_cents: b.paid_cents,
     refunded_cents: b.refunded_cents, outcome: b.outcome, outcome_reason: b.outcome_reason, outcome_at: b.outcome_at, outcome_photo_id: b.outcome_photo_id,
     notified_via: b.notified_via, decision: b.decision, decision_cents: b.decision_cents, decision_note: b.decision_note, credit_used: Boolean(b.credit_used_by_id),
-    reminded: Boolean(b.reminded_at), created_at: b.created_at, cancel_reason: b.cancel_reason,
+    reminded: Boolean(b.reminded_at), created_at: b.created_at, cancel_reason: b.cancel_reason, message_note: b.message_note || null,
   };
   if (isOffice(req)) Object.assign(out, { name: b.name, phone: b.phone, email: b.email, texts_ok: Boolean(b.texts_ok), emails_ok: Boolean(b.emails_ok) });
   return out;
