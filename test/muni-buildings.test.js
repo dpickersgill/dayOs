@@ -395,6 +395,40 @@ test('another municipality reaches none of it', async () => {
   assert.equal((await api('GET', '/buildings/calendar', { token: other.token })).body.plans.length, 0);
 });
 
+// ---------------------------------------------------------------- readings, choices and yes or no
+test('library checks use the shared checklist item types: a backflow test keeps its device type and test values, and a "no" fails by itself', async () => {
+  const lib = (await api('GET', '/buildings/library', { token: muni.token })).body.data;
+  const backflow = lib.find((x) => x.code === 'backflow_annual').items;
+  assert.deepEqual(backflow.find((i) => i.key === 'device_type'), { key: 'device_type', label: 'Device type', type: 'choice', options: ['Reduced pressure (RPZ)', 'Double check (DC)', 'Pressure vacuum breaker (PVB)'] });
+  assert.deepEqual(backflow.find((i) => i.key === 'passed'), { key: 'passed', label: 'Did the tester pass the device?', type: 'yesno', fail_on: 'no' });
+  const valves = lib.find((x) => x.code === 'sprinkler_quarterly').items.find((i) => i.key === 'valves');
+  assert.equal(valves.type, 'choice'); assert.deepEqual(valves.fail_options, ['Partly closed', 'Closed']);
+  const gen = lib.find((x) => x.code === 'generator_monthly').items;
+  assert.deepEqual(['run_minutes', 'load_pct', 'fuel_pct'].map((k) => gen.find((i) => i.key === k).type), ['number', 'number', 'number']);
+  assert.equal(lib.find((x) => x.code === 'playground_monthly').items.find((i) => i.key === 'surfacing_in').type, 'number');
+  // Every library step is a step the shared rules accept (lib/checkrules.js), so Assets and fleet can edit and answer it.
+  const CR = require('../src/lib/checkrules');
+  for (const t of lib) for (const i of t.items) assert.ok(CR.stepSchema.safeParse(i).success, `${t.code} ${i.key}`);
+
+  const plant = await api('POST', '/buildings', { token: muni.token, body: { name: 'Water Plant', type: 'other' } });
+  is(plant, 201);
+  const dev = await api('POST', `/buildings/${plant.body.id}/equipment`, { token: muni.token, body: { name: 'Plant backflow preventer', kind: 'backflow' } });
+  is(dev, 201);
+  const plan = (await api('GET', `/buildings/${plant.body.id}`, { token: muni.token })).body.plans.find((p) => p.asset_id === dev.body.ids[0]);
+  const answers = (passed) => [{ key: 'device_type', value: 'Reduced pressure (RPZ)' }, { key: 'check1', value: 6.4 }, { key: 'check2', value: 2.1 }, { key: 'relief', value: 3 }, { key: 'passed', value: passed }, { key: 'tag', result: 'pass' }];
+  is(await api('POST', '/buildings/visits', { token: crew.token, body: { vendor_id: S.vendor, visit_on: today, items: [{ plan_id: plan.plan_id, result: 'pass', answers: [...answers('yes').slice(0, 1), { key: 'device_type', value: 'Gate valve' }] }] } }), 400, 'a choice outside the list, or a missing item');
+  const ok = await api('POST', '/buildings/visits', { token: crew.token, body: { vendor_id: S.vendor, visit_on: today, technician: 'T. Banks', items: [{ plan_id: plan.plan_id, result: 'pass', answers: answers('yes') }] } });
+  is(ok, 201); assert.equal(ok.body.work_orders.length, 0);
+  const [kept] = await q('SELECT result, items FROM asset_inspections WHERE tenant_id = ? AND asset_id = ? ORDER BY id DESC LIMIT 1', [muni.id, dev.body.ids[0]]);
+  const items = JSON.parse(kept.items);
+  assert.equal(kept.result, 'pass');
+  assert.deepEqual(items.map((i) => [i.key, i.type, i.value ?? i.result]), [['device_type', 'choice', 'Reduced pressure (RPZ)'], ['check1', 'number', 6.4], ['check2', 'number', 2.1], ['relief', 'number', 3], ['passed', 'yesno', 'yes'], ['tag', 'pass', 'pass']]);
+  // The tester did not pass the device: the check fails by itself and a work order opens.
+  const bad = await api('POST', '/buildings/visits', { token: crew.token, body: { vendor_id: S.vendor, visit_on: today, technician: 'T. Banks', items: [{ plan_id: plan.plan_id, result: 'pass', answers: answers('no') }] } });
+  is(bad, 201); assert.equal(bad.body.work_orders.length, 1);
+  assert.equal(bad.body.items[0].result, 'fail');
+});
+
 // ---------------------------------------------------------------- demo
 test('the demo borough gets its buildings, history, two vendor visits with certificates and one open deficiency, once', async () => {
   const path = require('path'); const { execFileSync } = require('child_process');

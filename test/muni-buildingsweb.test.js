@@ -167,7 +167,7 @@ test('a round on a phone: one tap passes an item, a check with readings asks for
   await mods.ui.closeAllDialogs();
   button(gen, 'Check').click(); await settle();
   dlg = [...document.querySelectorAll('.dialog')].pop();
-  assert.ok(dlg.textContent.includes('Run time under load (minutes)') && dlg.textContent.includes('at least 30'));
+  assert.ok(dlg.textContent.includes('Run time under load') && dlg.textContent.includes('at least 30 minutes'), 'the shared answer sheet, with the reading\'s rule');
   clean(dlg, 'readings dialog');
   await mods.ui.closeAllDialogs();
   button(ext, 'Pass').click(); await settle(); await sleep(150); await settle();

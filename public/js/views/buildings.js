@@ -8,6 +8,7 @@
 import { get, post, patch, uploadFile, sendBytes, openFile, download, fetchBlob } from '../api.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, fail, formDialog, dialog, confirmDialog, val, num, todayStr, addDays, fmtDay, empty, errorBox, loading, hashParam } from '../ui.js';
 import { cameraSupported, scanWithCamera } from '../readers.js';
+import { answerSheet, resultChips } from '../checksteps.js';
 
 const STATE = { overdue: ['Overdue', 'bad'], never: ['No record yet', 'warn'], week: ['Due this week', 'warn'], month: ['Due this month', 'neutral'], ok: ['On track', 'good'] };
 const CERT = { expired: ['Expired', 'bad'], soon: ['Runs out within 30 days', 'warn'], watch: ['Runs out within 60 days', 'neutral'], ok: ['Current', 'good'] };
@@ -183,7 +184,11 @@ async function visitDialog(buildingId, done) {
   const notes = h('textarea', { name: 'notes', rows: 2, maxlength: 1000 });
   const bFilter = select([['', 'Every building'], ...buildings], buildingId || '', { 'aria-label': 'Building' });
   const staffToo = h('input', { type: 'checkbox' });
-  const picked = new Map(); // plan id -> { box, result, note, cert, num }
+  const picked = new Map(); // plan id -> { box, result, note, cert, no, extra, sheet }
+  // The checklist of each library check, so a check with readings (a backflow test's values, a sprinkler's pressures)
+  // can keep them with the visit.
+  const itemsOf = new Map((await get('/buildings/library')).data.map((t) => [t.id, t.items || []]));
+  const hasReadings = (p) => (itemsOf.get(p.task_id) || []).some((x) => x.type && x.type !== 'pass');
   const list = h('div', { class: 'stack tight bld-pick' });
   const findings = h('textarea', { rows: 3, placeholder: 'One finding on each line. Each becomes a work order.' });
   const fileIn = h('input', { type: 'file', accept: '.pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx' });
@@ -194,9 +199,13 @@ async function visitDialog(buildingId, done) {
       const cert = p.certificate ? input({ type: 'date', 'aria-label': `New certificate expires, ${p.asset}` }) : null;
       const no = p.certificate ? input({ maxlength: 60, placeholder: 'Certificate number', 'aria-label': `Certificate number, ${p.asset}` }) : null;
       const box = h('input', { type: 'checkbox', 'aria-label': `${p.task}, ${p.asset}` });
-      const extra = h('div', { class: 'row bld-pick-extra', hidden: true }, result, note, cert ? field('New certificate expires', cert) : null, no);
+      const sheet = hasReadings(p) ? answerSheet(itemsOf.get(p.task_id), resultChips) : null;
+      const readings = sheet ? h('details', { class: 'wide' }, h('summary', null, 'Readings from the report'),
+        h('p', { class: 'muted small' }, 'Enter the values from the vendor’s report so they are kept with the check. Leave them all blank to record only the result.'),
+        h('div', { class: 'ins-sheet' }, sheet.el)) : null;
+      const extra = h('div', { class: 'row bld-pick-extra', hidden: true }, result, note, cert ? field('New certificate expires', cert) : null, no, readings);
       box.addEventListener('change', () => { extra.hidden = !box.checked; });
-      picked.set(p.plan_id, { box, result, note, cert, no, extra });
+      picked.set(p.plan_id, { box, result, note, cert, no, extra, sheet, label: `${p.task}, ${p.asset}` });
     }
     const x = picked.get(p.plan_id);
     return h('div', { class: 'bld-pick-row' }, h('label', { class: 'check' }, x.box, h('span', null, h('b', null, p.task), ` · ${p.asset}${tagText(p.asset_tag)}`, h('span', { class: 'muted small' }, ` ${where(p)} · `, chip(STATE, p.state)))), x.extra);
@@ -212,10 +221,17 @@ async function visitDialog(buildingId, done) {
     h('h3', null, 'What the visit covered'), h('div', { class: 'row' }, bFilter, h('label', { class: 'check' }, staffToo, ' Show staff checks too')), list,
     field('Findings', findings, 'Things the vendor found that are not a failed item, such as a blocked exit. Each opens a work order.'),
     field('Report or certificate (optional)', fileIn, 'A PDF or a photo of the paper. It is filed in Documents under each building.')), async (fd) => {
-    const items = [...picked.entries()].filter(([, x]) => x.box.checked).map(([plan, x]) => ({
-      plan_id: plan, result: x.result.value, note: x.note.value.trim() || null,
-      ...(x.cert && x.cert.value ? { certificate: { expires_on: x.cert.value, number: x.no.value.trim() || null } } : {}),
-    }));
+    const items = [...picked.entries()].filter(([, x]) => x.box.checked).map(([plan, x]) => {
+      // Readings are all or nothing: once one is entered, every item on that checklist is answered.
+      const filled = x.sheet && x.result.value !== 'na' ? x.sheet.answers.filter((a) => !a.missing()) : [];
+      if (filled.length && filled.length < x.sheet.answers.length) throw new Error(`${x.label}: answer every item in Readings from the report, or clear them all`);
+      if (filled.length && x.sheet.answers.some((a) => a.needsNote())) throw new Error(`${x.label}: say what is wrong with each item that failed`);
+      return {
+        plan_id: plan, result: x.result.value, note: x.note.value.trim() || null,
+        ...(filled.length ? { answers: x.sheet.answers.map((a) => a.get()) } : {}),
+        ...(x.cert && x.cert.value ? { certificate: { expires_on: x.cert.value, number: x.no.value.trim() || null } } : {}),
+      };
+    });
     if (!items.length) throw new Error('Tick at least one item the visit covered');
     const first = cal.plans.find((p) => p.plan_id === items[0].plan_id);
     const defs = findings.value.split('\n').map((x) => x.trim()).filter((x) => x.length >= 3).map((description) => ({ description, building_id: Number(bFilter.value) || first.building_id }));
@@ -503,19 +519,22 @@ function failDialog(s, roundId, send, done) {
   }, { submitText: 'Save and open a work order' });
 }
 
-/** A check with readings or dates (the generator run, the playground surfacing): every item answered. */
+/**
+ * A check with readings, dates, choices or yes-or-no items (the generator run, the playground surfacing): every item
+ * answered on the same answer sheet Assets and fleet uses for its inspections (checksteps.js).
+ */
 function checklistDialog(s, send, done) {
-  const rows = s.steps.map((x) => {
-    if (x.type === 'number') return field(`${x.label}${x.unit ? ` (${x.unit})` : ''}`, input({ type: 'number', step: 'any', name: `v_${x.key}`, required: true, inputmode: 'decimal' }), x.min != null || x.max != null ? `Allowed: ${[x.min != null ? `at least ${x.min}` : null, x.max != null ? `at most ${x.max}` : null].filter(Boolean).join(', ')}` : null);
-    if (x.type === 'date') return field(x.label, input({ type: 'date', name: `v_${x.key}`, required: true }));
-    return field(x.label, select([['pass', 'Pass'], ['fail', 'Fail'], ['na', 'Not applicable']], 'pass', { name: `r_${x.key}` }));
-  });
-  formDialog(`${s.task}: ${s.asset}`, h('div', { class: 'stack' }, ...rows, field('Note', h('textarea', { name: 'note', rows: 2, maxlength: 500 }), 'Needed when anything fails.')), async (fd) => {
-    const answers = s.steps.map((x) => (x.type === 'number' ? { key: x.key, value: Number(fd.get(`v_${x.key}`)) } : x.type === 'date' ? { key: x.key, value: String(fd.get(`v_${x.key}`)) } : { key: x.key, result: String(fd.get(`r_${x.key}`)), note: String(fd.get(`r_${x.key}`)) === 'fail' ? val(fd, 'note') : null }));
-    const out = await send({ result: 'pass', answers, note: val(fd, 'note') });
-    toast(out.result === 'fail' ? 'Saved. Something was outside its range, so a work order opened.' : 'Saved');
+  const sheet = answerSheet(s.steps, resultChips);
+  formDialog(`${s.task}: ${s.asset}`, h('div', { class: 'stack ins-sheet' }, sheet.el,
+    h('div', { class: 'row' }, button('Mark the rest as pass', () => sheet.markRestPass(), { small: true }))), async () => {
+    const missing = sheet.answers.filter((a) => a.missing());
+    if (missing.length) { missing[0].focus(); throw new Error(`Answer every item (${missing.length} left)`); }
+    const noNote = sheet.answers.filter((a) => a.needsNote());
+    if (noNote.length) { noNote[0].focus(); throw new Error('Say what is wrong with each item that failed'); }
+    const out = await send({ result: 'pass', answers: sheet.answers.map((a) => a.get()) });
+    toast(out.result === 'fail' ? 'Saved. Something failed or was outside its range, so a work order opened.' : 'Saved');
     done();
-  }, { submitText: 'Save' });
+  }, { submitText: 'Save', wide: true });
 }
 
 // ---------------------------------------------------------------- the binder

@@ -118,7 +118,10 @@ module.exports = async function buildingsDemo(conn, tenantId, helpers = {}) {
   const plans = await q(`SELECT p.pm_task_id, p.asset_id, t.code, t.who, t.interval_days, t.template_id, a.name AS asset FROM building_plans p JOIN life_safety_tasks t ON t.tenant_id = p.tenant_id AND t.id = p.task_id JOIN ops_assets a ON a.tenant_id = p.tenant_id AND a.id = p.asset_id WHERE p.tenant_id = ?`, [t]);
   const tpl = new Map((await q('SELECT id, name, items FROM inspection_templates WHERE tenant_id = ?', [t])).map((x) => [x.id, { name: x.name, items: JSON.parse(x.items) }]));
   const passItems = (tid, values = {}) => (tpl.get(tid) ? tpl.get(tid).items : []).map((s) => (s.type === 'number' ? { key: s.key, label: s.label, type: 'number', result: 'pass', value: values[s.key] ?? null, unit: s.unit || null, note: null }
-    : s.type === 'date' ? { key: s.key, label: s.label, type: 'date', result: 'pass', value: addDays(today, 900), note: null } : { key: s.key, label: s.label, type: 'pass', result: 'pass', note: null }));
+    : s.type === 'date' ? { key: s.key, label: s.label, type: 'date', result: 'pass', value: addDays(today, 900), note: null }
+      : s.type === 'choice' ? { key: s.key, label: s.label, type: 'choice', result: 'pass', value: values[s.key] ?? (s.options || []).find((o) => !(s.fail_options || []).includes(o)) ?? null, note: null, auto: false }
+        : s.type === 'yesno' ? { key: s.key, label: s.label, type: 'yesno', result: 'pass', value: s.fail_on === 'yes' ? 'no' : 'yes', note: null, auto: false }
+          : { key: s.key, label: s.label, type: 'pass', result: 'pass', note: null }));
   const record = async (p, on, inspector, values) => {
     const ins = (await q('INSERT INTO asset_inspections (tenant_id, asset_id, template_id, template_name, result, items, inspector, user_id, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [t, p.asset_id, p.template_id, (tpl.get(p.template_id) || {}).name || 'Check', 'pass', JSON.stringify(passItems(p.template_id, values)), inspector, userId, `${on} 10:30:00`])).insertId;
@@ -195,7 +198,9 @@ module.exports = async function buildingsDemo(conn, tenantId, helpers = {}) {
   const covered = new Set([...v1list, ...v2list].map((p) => p.pm_task_id));
   for (const p of plans.filter((x) => x.who === 'vendor' && !covered.has(x.pm_task_id))) {
     if (p.code === 'playground_annual' && p.asset === 'Veterans Park playground') continue; // one park still has no record: shows on the calendar
-    await record(p, addDays(today, -Math.min(Number(p.interval_days) - 5, 120 + jitter(p.pm_task_id, 150))), 'Vendor (demo history)');
+    // A backflow test keeps its test values: the device type and the pressure drop across each check valve.
+    await record(p, addDays(today, -Math.min(Number(p.interval_days) - 5, 120 + jitter(p.pm_task_id, 150))), 'Vendor (demo history)',
+      p.code === 'backflow_annual' ? { device_type: 'Reduced pressure (RPZ)', check1: 6.2, check2: 2.4, relief: 3.1 } : {});
   }
 
   // One deficiency still open: a failed exit light found on last month's round at the garage.

@@ -56,7 +56,8 @@ const LIBRARY = [
   ['ext_annual', 'Fire extinguisher annual maintenance', 'fire_extinguisher', 'vendor', 365, 'NFPA 10', null, [
     ['maintenance', 'Annual maintenance done and tag updated'], ['hydro_due', 'Next hydrostatic test due', { type: 'date' }]]],
   ['sprinkler_quarterly', 'Sprinkler system quarterly inspection', 'sprinkler', 'vendor', 92, 'NFPA 25', null, [
-    ['gauges', 'Gauges read normal'], ['static_psi', 'Static pressure', { type: 'number', unit: 'psi' }], ['valves', 'Control valves open and secured'],
+    ['gauges', 'Gauges read normal'], ['static_psi', 'Static pressure', { type: 'number', unit: 'psi' }],
+    ['valves', 'Control valve position', { type: 'choice', options: ['Open', 'Partly closed', 'Closed'], fail_options: ['Partly closed', 'Closed'] }], ['valves_secured', 'Control valves locked, sealed or supervised'],
     ['alarm', 'Waterflow alarm device works'], ['fdc', 'Fire department connection clear and capped'], ['heads', 'Heads clean, not painted or blocked'], ['spares', 'Spare heads and wrench in the cabinet']]],
   ['sprinkler_annual', 'Sprinkler system annual test', 'sprinkler', 'vendor', 365, 'NFPA 25', null, [
     ['main_drain', 'Main drain test done'], ['residual_psi', 'Main drain residual pressure', { type: 'number', unit: 'psi' }], ['alarm_test', 'Waterflow alarm tested'], ['valves_operated', 'Control valves operated']]],
@@ -77,8 +78,10 @@ const LIBRARY = [
     ['inspected', 'Inspected by a commissioned boiler inspector'], ['safety_valve', 'Safety valve tested'], ['lwco', 'Low-water cutoff tested'],
     ['controls', 'Gauges and controls work'], ['posted', 'Certificate posted near the boiler']]],
   ['backflow_annual', 'Backflow preventer annual test', 'backflow', 'vendor', 365, 'Annual test by a certified tester', null, [
+    ['device_type', 'Device type', { type: 'choice', options: ['Reduced pressure (RPZ)', 'Double check (DC)', 'Pressure vacuum breaker (PVB)'] }],
     ['check1', 'Check valve 1', { type: 'number', unit: 'psid' }], ['check2', 'Check valve 2', { type: 'number', unit: 'psid' }],
-    ['relief', 'Relief valve opened at (reduced pressure devices)', { type: 'number', unit: 'psid' }], ['passed', 'The tester passed the device'], ['tag', 'Test tag on the device']]],
+    ['relief', 'Relief valve opened at (reduced pressure devices)', { type: 'number', unit: 'psid' }],
+    ['passed', 'Did the tester pass the device?', { type: 'yesno', fail_on: 'no' }], ['tag', 'Test tag on the device']]],
   ['generator_monthly', 'Emergency generator monthly exercise', 'generator', 'staff', 31, 'NFPA 110', null, [
     ['run_minutes', 'Run time under load', { type: 'number', unit: 'minutes', min: 30 }], ['load_pct', 'Load', { type: 'number', unit: '%' }],
     ['fuel_pct', 'Fuel level', { type: 'number', unit: '%' }], ['transfer', 'Transfer switch moved the load'], ['alarms', 'No alarms or warnings'], ['leaks', 'No leaks'], ['battery', 'Battery and charger normal']]],
@@ -98,7 +101,10 @@ const LIBRARY = [
     ['equipment', 'Rooftop equipment secured'], ['inside', 'No stains or leaks inside']]],
 ];
 
-const stepOf = ([key, label, rule]) => ({ key, label, type: (rule && rule.type) || 'pass', ...(rule && rule.unit ? { unit: rule.unit } : {}), ...(rule && rule.min != null ? { min: rule.min } : {}), ...(rule && rule.max != null ? { max: rule.max } : {}), ...(rule && rule.within_days != null ? { within_days: rule.within_days } : {}) });
+// A step in the shape the checklist rules use for every checklist (lib/checkrules.js): pass or fail, a reading with its
+// unit and range, a date, one of a list (options, fail_options) or yes or no (fail_on).
+const stepOf = ([key, label, rule]) => ({ key, label, type: (rule && rule.type) || 'pass', ...(rule && rule.unit ? { unit: rule.unit } : {}), ...(rule && rule.min != null ? { min: rule.min } : {}), ...(rule && rule.max != null ? { max: rule.max } : {}), ...(rule && rule.within_days != null ? { within_days: rule.within_days } : {}),
+  ...(rule && rule.options ? { options: rule.options } : {}), ...(rule && rule.fail_options ? { fail_options: rule.fail_options } : {}), ...(rule && rule.fail_on ? { fail_on: rule.fail_on } : {}) });
 
 const seeded = new Set(); // tenants whose library is known to be seeded (this server)
 
