@@ -248,6 +248,12 @@ router.get('/features/:id/run-hours', async (req, res) => {
 // Photos of a map item, kept as taken with their fingerprint (routes/assetphotos.js).
 router.post('/features/:id/photos', photos.raw, async (req, res) => photos.upload(req, res, { type: 'feature', id: paramId(req) }));
 
+/** What a small map needs (a work order's mini map, a program's map): the tile layers, where it opens, and the systems' colors. */
+router.get('/view', async (req, res) => {
+  const { org, on } = await appsOf(req.auth.tenantId);
+  res.json({ layers: config.map.layers, max_zoom: config.map.maxZoom, center: await centerOf(req.auth.tenantId), systems: MF.SYSTEMS, kinds: MF.kindsFor(org, on) });
+});
+
 /** A manager sets where every map opens for this mountain (the same view the patrol and park maps use). */
 router.put('/view', manager, validate(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), zoom: z.number().int().min(1).max(22) })), async (req, res) => {
   await pool.query('UPDATE tenants SET map_lat = ?, map_lng = ?, map_zoom = ? WHERE id = ?', [req.body.lat, req.body.lng, req.body.zoom, req.auth.tenantId]);

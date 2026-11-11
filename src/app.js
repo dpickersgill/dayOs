@@ -338,6 +338,8 @@ function createApp() {
   // The municipal edition (muni release 1). The street list is mounted ahead of any other /requests router, so a route
   // like /requests/:id never reads "streets" as an id.
   api.use('/requests/streets', require('./routes/streets').router);
+  // The Water, Sewer and Stormwater add-ons' Today cards (their maps, inspections and programs are in Assets and fleet).
+  { const U = require('./routes/utilities'); api.use('/water', U.water); api.use('/sewer', U.sewer); api.use('/stormwater', U.stormwater); }
   api.use('/messages', messagesRoutes.router);
   api.use('/online-shop', shopRoutes.router);
   api.use('/online-shop', shopAdmin.router);

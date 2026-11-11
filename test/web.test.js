@@ -3707,3 +3707,107 @@ test('attractions: a patrol case picks its attraction, statistics count it, and 
   assert.ok([...topDialog().querySelectorAll('[name=department] option')].some((x) => x.value === 'attractions' && x.textContent === 'Attractions'));
   await closeOverlays();
 });
+
+// ---------------------------------------------------------------- muni release 1: asset management for water, sewer and stormwater
+/** A pretend Leaflet that records what is drawn, with every layer kind the asset screens use. */
+function fakeLeafletAll() {
+  const made = { maps: [], layers: [] };
+  const layer = (kind, at, opts) => {
+    const k = { kind, at, opts, handlers: {}, dragging: { enable() {}, disable() {} },
+      addTo(m) { k.map = m; made.layers.push(k); return k; }, remove() { k.removed = true; }, on(ev, f) { k.handlers[ev] = f; return k; },
+      bindPopup(fn) { k.popup = fn; return k; }, bindTooltip(t) { k.tooltip = t; return k; }, openPopup() { return k; },
+      setLatLng(a) { k.at = a; return k; }, setRadius() { return k; }, getLatLng() { return { lat: at[0], lng: at[1] }; }, clearLayers() { k.cleared = (k.cleared || 0) + 1; },
+      getBounds() { const [[s, w], [n, e]] = at; return { contains: ([la, ln]) => la >= s && la <= n && ln >= w && ln <= e, getSouth: () => s, getWest: () => w, getNorth: () => n, getEast: () => e }; } };
+    return k;
+  };
+  const L = {
+    made,
+    map(el) {
+      const m = { el, handlers: {}, view: null, setView(c, z) { m.view = { c, z }; return m; }, on(ev, fn) { (m.handlers[ev] = m.handlers[ev] || []).push(fn); return m; },
+        click(lat, lng) { (m.handlers.click || []).forEach((f) => f({ latlng: { lat, lng } })); }, invalidateSize() {}, remove() { m.removed = true; }, closePopup() {},
+        getCenter() { return { lat: m.view.c[0], lng: m.view.c[1] }; }, getZoom() { return m.view.z; }, fitBounds(b) { m.bounds = b; } };
+      made.maps.push(m);
+      return m;
+    },
+    tileLayer() { return { addTo() { return this; } }; }, control: { layers() { return { addTo() {} }; } }, divIcon(o) { return o; },
+    marker: (a, o) => layer('marker', a, o), circleMarker: (a, o) => layer('circleMarker', a, o), circle: (a, o) => layer('circle', a, o),
+    polyline: (a, o) => layer('polyline', a, o), polygon: (a, o) => layer('polygon', a, o), layerGroup: () => layer('group', null, {}),
+    rectangle: (b, o) => layer('rectangle', [[Math.min(b[0].lat, b[1].lat), Math.min(b[0].lng, b[1].lng)], [Math.max(b[0].lat, b[1].lat), Math.max(b[0].lng, b[1].lng)]], o),
+    latLngBounds(a, b) { return b ? [a, b] : a; },
+  };
+  return L;
+}
+
+test('municipal assets: risk on the overview, the new checklist kinds, a map item\'s panel, and a program done from a phone', skip(), async () => {
+  await closeOverlays();
+  const { createMuniTenant } = require('./helpers/muni');
+  const M = await createMuniTenant(base, { modules: { water: true, sewer: true, stormwater: true } });
+  const tok = M.token;
+  const muni = { org_type: 'municipality', tenant_name: 'Web Borough', modules: ['assets', 'workforce', 'documents', 'messages', 'requests', 'water', 'sewer', 'stormwater'] };
+  const v1 = ok(await api('POST', '/assets/map/features', { token: tok, body: { kind: 'valve', points: [[40.1, -75.6]], tag: 'V-1', condition_score: 4, criticality: 5 } }));
+  ok(await api('POST', '/assets/map/features', { token: tok, body: { kind: 'valve', points: [[40.1005, -75.6]], tag: 'V-2' } }));
+  const st = ok(await api('POST', '/assets/map/features', { token: tok, body: { kind: 'lift_station', points: [[40.11, -75.61]], name: 'Mill Street pump station' } }));
+  const tpls = ok(await api('GET', '/assets/templates', { token: tok })).data;
+  const round = tpls.find((t) => t.name === 'Pump station round');
+  ok(await api('POST', `/assets/map/features/${st.id}/inspections`, { token: tok, body: { template_id: round.id, items: [{ key: 'pump1_hours', value: 10 }, { key: 'pump2_hours', value: 20 }, { key: 'wet_well', value: 'Normal' }, { key: 'alarms', result: 'pass' }, { key: 'generator_fuel', value: 90 }, { key: 'odor', value: 'no' }, { key: 'check_valves', result: 'pass' }, { key: 'security', result: 'pass' }] } }));
+  window.L = fakeLeafletAll();
+  try {
+    // Overview: the highest risk list. Settings: a checklist with the new kinds of step.
+    let root = await renderView('assets', 'owner', tok, muni);
+    clean(root, 'muni assets overview');
+    assert.match(root.querySelector('[data-list=risk]').textContent, /Very high risk \(20\)/);
+    await openTab(root, 'Assets'); clean(root, 'muni register');
+    await openTab(root, 'Settings'); clean(root, 'muni asset settings');
+    clickBtn(root, 'Add a checklist'); await settle();
+    let dlg = topDialog();
+    clean(dlg, 'add checklist');
+    typeInto(dlg, 'name', 'Web hydrant check');
+    const kind = dlg.querySelector('select[aria-label="Kind of answer"]');
+    kind.value = 'choice'; kind.dispatchEvent(new window.Event('change'));
+    dlg.querySelector('input[aria-label="What to check"]').value = 'Paint';
+    dlg.querySelector('input[aria-label="Choices, separated by commas"]').value = 'Good, Faded, Gone';
+    dlg.querySelector('input[aria-label="Choices that fail, separated by commas"]').value = 'Gone';
+    await submitForm(dlg.querySelector('[name=name]'));
+    const made = ok(await api('GET', '/assets/templates', { token: tok })).data.find((t) => t.name === 'Web hydrant check');
+    assert.deepEqual(made.items[0].options, ['Good', 'Faded', 'Gone']); assert.deepEqual(made.items[0].fail_options, ['Gone']);
+
+    // The map item's panel, opened from its marker's popup: scores, run hours, Inspect with the pack checklist.
+    root = await renderView('assets', 'owner', tok, muni, ['map']);
+    clean(root, 'muni map');
+    const marker = window.L.made.layers.find((l) => l.kind === 'marker' && l.opts && l.opts.title === 'Mill Street pump station');
+    assert.ok(marker, 'the station is on the map');
+    const pop = marker.popup();
+    [...pop.querySelectorAll('button')].find((b) => b.textContent === 'Open').click(); await settle();
+    dlg = topDialog();
+    clean(dlg, 'station panel');
+    assert.match(dlg.textContent, /Run hours by month/);
+    clickBtn(dlg, 'Inspect'); await settle();
+    const sheet = document.querySelector('.dialog.sheet');
+    clean(sheet, 'station round sheet');
+    assert.equal(sheet.querySelector('select').selectedOptions[0].textContent, 'Pump station round');
+    await closeOverlays();
+
+    // A program: the list, then one program on a phone, inspecting a valve with chips and numbers.
+    const valve = tpls.find((t) => t.name === 'Valve exercise');
+    const prog = ok(await api('POST', '/assets/programs', { token: tok, body: { name: 'Web zone 3 valves', template_id: valve.id, due_on: today, targets: { pick: { kinds: ['valve'] } } } }));
+    root = await renderView('asset-programs', 'owner', tok, muni);
+    clean(root, 'programs list');
+    assert.match(root.textContent, /Web zone 3 valves/);
+    root = await renderView('asset-programs', 'owner', tok, muni, [String(prog.id)]);
+    clean(root, 'program page');
+    assert.match(root.textContent, /0 of 2 done/);
+    [...root.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Inspect V-1' || b.getAttribute('aria-label') === 'Inspect Valve V-1').click(); await settle();
+    const ins = document.querySelector('.dialog.sheet');
+    clean(ins, 'program inspection sheet');
+    for (const [i, v] of [[0, '18'], [1, '18']]) { const f = ins.querySelector(`#ins-${i}-l`).closest('.ins-item').querySelector('input[type=number]'); f.value = v; }
+    ins.querySelector('#ins-2 [data-value="Right to close"]').click();
+    ins.querySelector('#ins-3 [data-value=yes]').click();
+    ins.querySelector('#ins-4 [data-value=Good]').click();
+    ins.querySelector('#ins-5 [data-value="3"]').click();
+    ins.querySelector('[data-act=save-inspection]').click(); await settle();
+    const p = ok(await api('GET', `/assets/programs/${prog.id}`, { token: tok }));
+    assert.equal(p.progress.done, 1);
+    assert.equal(ok(await api('GET', `/assets/map/features/${v1.id}`, { token: tok })).condition_score, 3, 'the valve exercise set the condition');
+    await closeOverlays();
+  } finally { delete window.L; }
+});

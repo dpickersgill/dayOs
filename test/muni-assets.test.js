@@ -438,3 +438,16 @@ test('the work orders Today card and the asset page still work for a ski area wi
   const tpl = (await templatesOf({ token: skiToken })).find((t) => t.name === 'General pre-use');
   is(await api('POST', '/assets/programs', { token: skiToken, body: { name: `Pre-season ${suffix}`, template_id: tpl.id, targets: { assets: [pump.body.id] } } }), 201);
 });
+
+test('the Water, Sewer and Stormwater Today cards: open work orders and high risk on their own map items, only with the add-on on', async () => {
+  const water = (await api('GET', '/water/today', { token: crewA.token })).body.cards;
+  const wo = water.find((c) => c.title === 'Water work orders');
+  assert.ok(wo && wo.count >= 1 && wo.href === '#/works', JSON.stringify(water));
+  const sewer = (await api('GET', '/sewer/today', { token: A.token })).body.cards;
+  assert.ok(sewer.some((c) => c.title === 'Sewer: high risk' || c.title === 'Sewer work orders'), JSON.stringify(sewer));
+  // Nothing in the stormwater system needs anyone: an empty list.
+  const fresh = await createMuniTenant(base, { modules: { stormwater: true } });
+  assert.deepEqual((await api('GET', '/stormwater/today', { token: fresh.token })).body, { cards: [] });
+  is(await api('GET', '/water/today', { token: fresh.token }), 403, 'the Water add-on is off');
+  is(await api('GET', '/water/today', { token: skiToken }), 403, 'never for a ski area');
+});
