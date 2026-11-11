@@ -91,6 +91,9 @@ const REGISTRY = [
   { table: 'family_tokens', by: { email: ['email'] }, erase: 'delete' },
   { table: 'group_enquiries', by: { email: ['email'], phone: ['phone'] }, erase: { set: { contact_name: 'Former customer', email: '', phone: null, note: null } } },
   { table: 'lost_reports', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former customer', email: null, phone: null } } },
+  // A municipality's residents (muni release 1): their contact and address. Bulk pickup bookings point at the row, so erasing
+  // blanks it rather than deleting it, and the bookings keep only the street and the day.
+  { table: 'residents', by: { email: ['email'], phone: ['phone'] }, erase: { set: { name: 'Former resident', phone: null, email: null, house_number: null, unit: null, texts_ok: 0, emails_ok: 0 } } },
   // Messages sent, and the do-not-mail list.
   { table: 'message_log', by: { person: ['person_id'], email: ['to_addr'], phone: ['to_addr'] }, erase: { set: { to_addr: '' } } },
   { table: 'email_suppressions', by: { email: ['email'] }, erase: { keep: 'The address stays on the do-not-email list so the mountain never emails it again.' } },

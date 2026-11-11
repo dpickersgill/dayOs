@@ -158,6 +158,8 @@ jobs.post('/guests', jobAuth, async (req, res) => {
     const out = await require('../lib/guesttick').tick();
     // Staff injury notices whose email could not go out are tried again every 5 minutes (OSHA's 8 and 24 hours).
     out.staff_injury_notices = await require('../lib/staffinjury').retryDue(baseUrl(req)).catch((e) => ({ error: e.message }));
+    // A municipality's bulk pickup reminders, the afternoon before collection day (muni release 1).
+    out.bulk_reminders = await require('../lib/bulkpickup').remindDue(baseUrl(req)).catch((e) => ({ error: e.message }));
     res.json(out);
   } finally {
     await conn.query("SELECT RELEASE_LOCK('summitops_guests_job')").catch(() => {});

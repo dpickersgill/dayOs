@@ -4,11 +4,12 @@ import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
-const appOn = (key) => ALWAYS_ON.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
+// A section whose screen has another app's name (Bulk pickup is the Trash and recycling app) says so with module.
+const appOn = (key, module) => ALWAYS_ON.includes(key) || !ctx.me.modules || ctx.me.modules.includes(module || key);
 const roleOk = (who) => who === null || who === undefined || can(...who);
 
 const sectionOf = (key) => SECTIONS.find((s) => s.key === key);
-const sectionOpen = (s) => appOn(s.key) && roleOk(s.who);
+const sectionOpen = (s) => appOn(s.key, s.module) && roleOk(s.who);
 // A school director sees the ski school's manager articles too.
 const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && (roleOk(a.who) || (a.app === 'school' && schoolCan('director'))); };
 const visible = () => ARTICLES.filter(articleOpen);
@@ -170,7 +171,7 @@ function article(root, id) {
       a.steps && a.steps.length ? h('ol', null, a.steps.map((t) => h('li', null, t))) : null,
       a.tips && a.tips.length ? h('div', { class: 'help-tips' }, h('h2', null, 'Good to know'), h('ul', null, a.tips.map((t) => h('li', null, t)))) : null,
       related.length ? h('div', { class: 'help-related' }, h('h2', null, 'Related'), h('ul', null, related.map((r) => articleLink(r)))) : null,
-      a.app !== 'start' && appOn(a.app) ? h('p', null, h('a', { class: 'btn small', href: `#/${a.app}` }, `Open ${s.label}`)) : null),
+      a.app !== 'start' && appOn(a.app, s.module) ? h('p', null, h('a', { class: 'btn small', href: `#/${a.app}` }, `Open ${s.label}`)) : null),
     stuck());
 }
 

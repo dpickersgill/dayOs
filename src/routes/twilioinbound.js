@@ -69,6 +69,12 @@ async function applyReply(phone, intent) {
     if (intent === 'stop' && status !== 'opted_out') { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_out', SOURCE, null); changed += 1; }
     if (intent === 'start' && status === 'opted_out' && source === SOURCE) { await recordConsent(pool, p.tenant_id, p.id, 'sms', 'opted_in', SOURCE, null); changed += 1; }
   }
+  // A municipality's residents (muni release 1) are not customer records: a STOP turns texts off on every resident with this
+  // phone, at every municipality. START does not turn them back on: the resident says yes again on their next booking.
+  if (intent === 'stop') {
+    const [r] = await pool.query("UPDATE residents SET texts_ok = 0 WHERE texts_ok = 1 AND phone IS NOT NULL AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', ''), 10) = ?", [key]);
+    changed += r.affectedRows;
+  }
   return changed;
 }
 
