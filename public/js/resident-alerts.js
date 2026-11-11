@@ -4,7 +4,7 @@
 //   /alerts/<town>/manage/<token>   the link in every alert: topics, remove an address, stop texts or emails
 //   /alerts/<town>/email/<token>    the link in the confirmation email (confirmed when this page posts it)
 // Nothing here shows anyone else's name, phone, email or house number.
-import { h, clear } from './ui.js';
+import { h, clear, appendAll } from './ui.js';
 
 const parts = location.pathname.split('/').filter(Boolean).map((p) => decodeURIComponent(p));
 const slug = parts[1] || '';
@@ -142,7 +142,7 @@ async function managePage(token) {
   function draw() {
     const anyText = v.signups.some((s) => s.texts === 'on');
     const anyMail = v.signups.some((s) => s.emails === 'on');
-    clear(root).append(h('h1', null, `Your ${v.municipality} alerts`),
+    appendAll(clear(root), h('h1', null, `Your ${v.municipality} alerts`),
       v.signups.length ? null : h('p', null, 'You have no addresses signed up now.'),
       ...v.signups.map((s) => {
         const boxes = v.topics.map((t) => ({ t, ...check(`m-${s.id}-${t.key}`, t.always ? `${t.label} (always on)` : t.label, s.topics.includes(t.key), t.always ? { disabled: true } : {}) }));
@@ -172,7 +172,7 @@ async function noticePage(code) {
   document.title = `${n.municipality}: ${n.title}`;
   const tz = n.timezone;
   const times = [n.starts_at && `Starts ${whenLocal(n.starts_at)}`, n.ends_expected_at && `Expected to end ${whenLocal(n.ends_expected_at)}`].filter(Boolean);
-  clear(root).append(
+  appendAll(clear(root),
     h('p', { class: 'muted' }, `${n.municipality}: ${n.type_label}`),
     h('h1', null, n.title),
     h('div', { class: `alert-card ${n.status === 'ended' ? 'alert-ended' : 'alert-live'}` },

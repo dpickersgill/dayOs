@@ -48,7 +48,7 @@ const VIEWS = [
   // The municipal edition (muni release 1). Each opens with its app (VIEW_MODULE) on; Crew is the staff role, Front desk
   // the counter role. The owning workstreams replace the stub files.
   ['requests', 'Requests', () => can('counter', 'staff'), () => import('./views/requests.js')],
-  ['notices', 'Street notices', () => can('counter'), () => import('./views/street-notices.js')],
+  ['notices', 'Street notices', () => can('counter', 'staff'), () => import('./views/street-notices.js')],
   ['works', 'Work orders', () => can('staff'), () => import('./views/works.js')],
   ['assetprograms', 'Programs', () => can('staff'), () => import('./views/asset-programs.js')],
   ['bulk', 'Bulk pickup', () => can('counter', 'staff'), () => import('./views/bulk-pickup.js')],
