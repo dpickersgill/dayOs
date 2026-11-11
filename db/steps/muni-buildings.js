@@ -40,14 +40,14 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_buildings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_buildings_location FOREIGN KEY (tenant_id, location_id) REFERENCES asset_locations(tenant_id, id),
     CONSTRAINT fk_buildings_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_settings', (c) => tableExists(c, 'building_settings'), `CREATE TABLE building_settings (
     tenant_id         BIGINT UNSIGNED NOT NULL PRIMARY KEY,
     library_seeded_at DATETIME NULL,
     doc_category_id   BIGINT UNSIGNED NULL,
     thread_id         BIGINT UNSIGNED NULL,
     CONSTRAINT fk_bset_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['life_safety_tasks', (c) => tableExists(c, 'life_safety_tasks'), `CREATE TABLE life_safety_tasks (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -71,7 +71,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_lst_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_lst_template FOREIGN KEY (tenant_id, template_id) REFERENCES inspection_templates(tenant_id, id),
     CONSTRAINT fk_lst_vendor FOREIGN KEY (tenant_id, vendor_id) REFERENCES vendors(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_plans', (c) => tableExists(c, 'building_plans'), `CREATE TABLE building_plans (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -85,7 +85,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bplan_pm FOREIGN KEY (tenant_id, pm_task_id) REFERENCES pm_tasks(tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT fk_bplan_task FOREIGN KEY (tenant_id, task_id) REFERENCES life_safety_tasks(tenant_id, id),
     CONSTRAINT fk_bplan_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_visits', (c) => tableExists(c, 'building_visits'), `CREATE TABLE building_visits (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -100,7 +100,7 @@ module.exports = ({ tableExists }) => [
     KEY ix_bvisit_on (tenant_id, visit_on),
     CONSTRAINT fk_bvisit_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bvisit_vendor FOREIGN KEY (tenant_id, vendor_id) REFERENCES vendors(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_certificates', (c) => tableExists(c, 'building_certificates'), `CREATE TABLE building_certificates (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -118,7 +118,7 @@ module.exports = ({ tableExists }) => [
     KEY ix_bcert_expires (tenant_id, expires_on),
     CONSTRAINT fk_bcert_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bcert_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_visit_items', (c) => tableExists(c, 'building_visit_items'), `CREATE TABLE building_visit_items (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id      BIGINT UNSIGNED NOT NULL,
@@ -138,7 +138,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bvitem_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bvitem_visit FOREIGN KEY (tenant_id, visit_id) REFERENCES building_visits(tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT fk_bvitem_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_cert_reminders', (c) => tableExists(c, 'building_cert_reminders'), `CREATE TABLE building_cert_reminders (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id      BIGINT UNSIGNED NOT NULL,
@@ -150,7 +150,7 @@ module.exports = ({ tableExists }) => [
     UNIQUE KEY uq_bcrem_once (tenant_id, certificate_id, days),
     CONSTRAINT fk_bcrem_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bcrem_cert FOREIGN KEY (tenant_id, certificate_id) REFERENCES building_certificates(tenant_id, id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_rounds', (c) => tableExists(c, 'building_rounds'), `CREATE TABLE building_rounds (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -164,7 +164,7 @@ module.exports = ({ tableExists }) => [
     KEY ix_bround_building (tenant_id, building_id, started_at),
     CONSTRAINT fk_bround_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bround_building FOREIGN KEY (tenant_id, building_id) REFERENCES buildings(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_round_stops', (c) => tableExists(c, 'building_round_stops'), `CREATE TABLE building_round_stops (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -185,7 +185,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bstop_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bstop_round FOREIGN KEY (tenant_id, round_id) REFERENCES building_rounds(tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT fk_bstop_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES ops_assets(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_photos', (c) => tableExists(c, 'building_photos'), `CREATE TABLE building_photos (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -204,7 +204,7 @@ module.exports = ({ tableExists }) => [
     KEY ix_bphoto_stop (tenant_id, stop_id),
     CONSTRAINT fk_bphoto_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bphoto_building FOREIGN KEY (tenant_id, building_id) REFERENCES buildings(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_deficiencies', (c) => tableExists(c, 'building_deficiencies'), `CREATE TABLE building_deficiencies (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -223,7 +223,7 @@ module.exports = ({ tableExists }) => [
     KEY ix_bdef_wo (tenant_id, work_order_id),
     CONSTRAINT fk_bdef_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bdef_building FOREIGN KEY (tenant_id, building_id) REFERENCES buildings(tenant_id, id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   ['building_documents', (c) => tableExists(c, 'building_documents'), `CREATE TABLE building_documents (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,
@@ -237,7 +237,7 @@ module.exports = ({ tableExists }) => [
     CONSTRAINT fk_bdoc_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
     CONSTRAINT fk_bdoc_building FOREIGN KEY (tenant_id, building_id) REFERENCES buildings(tenant_id, id),
     CONSTRAINT fk_bdoc_document FOREIGN KEY (tenant_id, document_id) REFERENCES documents(tenant_id, id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`],
+  ) ENGINE=InnoDB`],
   // The foundation seeded the Buildings add-on as "each permit's binder" (code enforcement); release 1's Buildings is the
   // municipality's own properties and their life-safety inspections, so the plan says that.
   ['billing_plans muni-buildings blurb', async (c) => {

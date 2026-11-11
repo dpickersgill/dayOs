@@ -396,9 +396,10 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
       crew: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'staff'"),
       desk: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'counter'"),
       streets: await one('SELECT COUNT(*) AS n FROM streets WHERE tenant_id = ?'),
-      assets: await one('SELECT COUNT(*) AS n FROM ops_assets WHERE tenant_id = ?'),
-      plans: await one('SELECT COUNT(*) AS n FROM pm_tasks WHERE tenant_id = ?'),
-      open: await one("SELECT COUNT(*) AS n FROM work_orders WHERE tenant_id = ? AND status NOT IN ('done','cancelled')"),
+      // The foundation's own rows: each feature's demo file (db/demo-municipal/) adds its own, counted by its own test.
+      assets: await one("SELECT COUNT(*) AS n FROM ops_assets a WHERE a.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM asset_locations l JOIN buildings b ON b.tenant_id = l.tenant_id AND (b.location_id = l.id OR b.location_id = l.parent_id) WHERE l.tenant_id = a.tenant_id AND l.id = a.location_id)"),
+      plans: await one('SELECT COUNT(*) AS n FROM pm_tasks m WHERE m.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM building_plans p WHERE p.tenant_id = m.tenant_id AND p.pm_task_id = m.id)'),
+      open: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status NOT IN ('done','cancelled') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id)"),
       done: await one("SELECT COUNT(*) AS n FROM work_orders WHERE tenant_id = ? AND status = 'done'"),
     };
   };
@@ -413,6 +414,7 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
   const me = (await api('GET', '/auth/me', { token: login.body.token })).body;
   for (const k of ['requests', 'water', 'sewer', 'stormwater', 'solidwaste', 'buildings', 'assets']) assert.ok(me.modules.includes(k), k);
   const today = await api('GET', '/ops/work-orders/today', { token: login.body.token });
-  assert.equal(today.body.cards.find((c) => c.title === 'Open work orders').count, 6);
+  const [[fromBuildings]] = await pool.query("SELECT COUNT(*) AS n FROM building_deficiencies d JOIN work_orders w ON w.tenant_id = d.tenant_id AND w.id = d.work_order_id WHERE d.tenant_id = ? AND w.status NOT IN ('done','cancelled')", [t.id]);
+  assert.equal(today.body.cards.find((c) => c.title === 'Open work orders').count, 6 + Number(fromBuildings.n), 'the foundation\'s six, and the Buildings demo\'s open deficiency');
   assert.equal((await api('GET', `/public/${demo}/streets`)).body.streets.length, 40);
 });

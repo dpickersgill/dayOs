@@ -34,6 +34,15 @@
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`.
 
+## Buildings for a municipality (the Buildings add-on)
+
+1. Turn on Buildings for the municipality in the console (Apps). Its library of life-safety checks (extinguishers, sprinklers, fire alarm, exit lights, kitchen hood, elevator, boiler, backflow, generator, playground, HVAC, roof) is made at that moment, once. Changing or turning off a check later never brings the original back.
+2. A manager adds the vendors (Assets and fleet, Purchasing, Vendors), then each building with its rooms, then the items in it (Add items; several extinguishers in one go). Print the QR tags from the building page.
+3. Under Buildings, Checks, set the vendor for each vendor check and adjust how often to what the fire marshal and the insurer expect. The standards shown are references only.
+4. Enter what is already known: record the last vendor visits (with certificate dates for elevators and boilers) so the calendar starts from real dates. Anything without a record shows as No record yet.
+5. Certificate reminders run in the daily job (stage `building_cert_reminders`): the owners and managers get an Inbox message in "Building certificates" and a phone alert 60, 30 and 7 days before a certificate runs out, and once when it has expired. Each goes once (`building_cert_reminders`); a certificate replaced by a newer one is no longer reminded about.
+6. Vendor reports and certificates are filed in Documents, category "Building certificates and reports" (made the first time; Crew and Front desk can read it). They count toward the municipality's document storage.
+
 ## Tiered sign-in (2026.10.17)
 
 Who signs in how:

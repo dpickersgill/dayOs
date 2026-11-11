@@ -49,11 +49,12 @@ const BUILDINGS = [
   ['Water Street Pump House', 'pump_house', '8', 'Water', 1988, 600, [], [['fire_extinguisher', 'Pump house extinguisher', null, 1], ['backflow', 'Pump house backflow preventer', null, 1]]],
 ];
 
-module.exports = async function buildingsDemo(conn, tenantId) {
+module.exports = async function buildingsDemo(conn, tenantId, helpers = {}) {
+  const log = helpers.log || (() => {});
   const t = Number(tenantId);
   const q = async (sql, params) => (await conn.query(sql, params))[0];
   const one = async (sql, params) => (await q(sql, params))[0];
-  if (await one('SELECT id FROM buildings WHERE tenant_id = ? LIMIT 1', [t])) return { skipped: 'buildings already there' };
+  if (await one('SELECT id FROM buildings WHERE tenant_id = ? LIMIT 1', [t])) { log('buildings already there'); return { skipped: 'buildings already there' }; }
   const tz = (await one('SELECT timezone FROM tenants WHERE id = ?', [t])).timezone;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const B = require('../../src/lib/buildings');
@@ -114,7 +115,7 @@ module.exports = async function buildingsDemo(conn, tenantId) {
   await B.syncPlans(conn, t);
 
   // Twelve months of history. Staff monthly checks done mid-month, a few late; vendor work on its schedule.
-  const plans = await q(`SELECT p.pm_task_id, p.asset_id, t.code, t.who, t.interval_days, t.template_id FROM building_plans p JOIN life_safety_tasks t ON t.tenant_id = p.tenant_id AND t.id = p.task_id WHERE p.tenant_id = ?`, [t]);
+  const plans = await q(`SELECT p.pm_task_id, p.asset_id, t.code, t.who, t.interval_days, t.template_id, a.name AS asset FROM building_plans p JOIN life_safety_tasks t ON t.tenant_id = p.tenant_id AND t.id = p.task_id JOIN ops_assets a ON a.tenant_id = p.tenant_id AND a.id = p.asset_id WHERE p.tenant_id = ?`, [t]);
   const tpl = new Map((await q('SELECT id, name, items FROM inspection_templates WHERE tenant_id = ?', [t])).map((x) => [x.id, { name: x.name, items: JSON.parse(x.items) }]));
   const passItems = (tid, values = {}) => (tpl.get(tid) ? tpl.get(tid).items : []).map((s) => (s.type === 'number' ? { key: s.key, label: s.label, type: 'number', result: 'pass', value: values[s.key] ?? null, unit: s.unit || null, note: null }
     : s.type === 'date' ? { key: s.key, label: s.label, type: 'date', result: 'pass', value: addDays(today, 900), note: null } : { key: s.key, label: s.label, type: 'pass', result: 'pass', note: null }));
@@ -129,10 +130,14 @@ module.exports = async function buildingsDemo(conn, tenantId) {
   const jitter = (seed, n) => crypto.createHash('sha1').update(String(seed)).digest()[0] % n;
   for (const p of plans.filter((x) => x.who === 'staff')) {
     if (p.interval_days <= 31) {
+      // Each item has its own day of the month (offset), checked every 30 days, so the next ones fall due over the coming
+      // three weeks. A few garage extinguisher checks ran late (14 and 9 days past due); the pump house missed last month,
+      // so it shows as overdue.
+      const offset = jitter(`off-${p.asset_id}`, 20);
       for (let m = 12; m >= 1; m -= 1) {
-        // About the same day each month; the garage's checks ran late twice (14 and 9 days past due).
-        let on = addDays(today, -30 * m + jitter(`${p.pm_task_id}-${m}`, 5));
-        if ((m === 7 || m === 3) && p.code === 'ext_monthly' && jitter(p.asset_id, 3) === 0) on = addDays(on, m === 7 ? 14 : 9);
+        if (m === 1 && /^Pump house/.test(p.asset)) continue;
+        let on = addDays(today, -30 * m + offset);
+        if ((m === 7 || m === 3) && p.code === 'ext_monthly' && /^Garage extinguisher [25]$/.test(p.asset)) on = addDays(on, m === 7 ? 14 : 9);
         if (on >= today) continue;
         await record(p, on, custodian, p.code === 'generator_monthly' ? { run_minutes: 35, load_pct: 40 + jitter(m, 15), fuel_pct: 70 + jitter(m + 1, 25) } : p.code === 'playground_monthly' ? { surfacing_in: 10 + jitter(m, 3) } : {});
       }
@@ -189,7 +194,7 @@ module.exports = async function buildingsDemo(conn, tenantId) {
   // Every other vendor check: done some time in the last year (the library's rare one-offs stay without a record).
   const covered = new Set([...v1list, ...v2list].map((p) => p.pm_task_id));
   for (const p of plans.filter((x) => x.who === 'vendor' && !covered.has(x.pm_task_id))) {
-    if (p.code === 'playground_annual' && jitter(p.asset_id, 2) === 0) continue; // one park still has no record: shows on the calendar
+    if (p.code === 'playground_annual' && p.asset === 'Veterans Park playground') continue; // one park still has no record: shows on the calendar
     await record(p, addDays(today, -Math.min(Number(p.interval_days) - 5, 120 + jitter(p.pm_task_id, 150))), 'Vendor (demo history)');
   }
 
@@ -207,6 +212,7 @@ module.exports = async function buildingsDemo(conn, tenantId) {
     await q("INSERT INTO building_deficiencies (tenant_id, building_id, asset_id, description, found_on, source, inspection_id, work_order_id) VALUES (?, ?, ?, ?, ?, 'round', ?, ?)",
       [t, exitPlan.building_id, exitPlan.asset_id, 'Two emergency light heads by the bay door went dark during the 30-second test', on, ins, wo]);
   }
+  log(`${Object.keys(ids).length} buildings, ${plans.length} life-safety service plans, 2 vendor visits, 1 open deficiency`);
   return { buildings: Object.keys(ids).length, plans: plans.length };
 };
 

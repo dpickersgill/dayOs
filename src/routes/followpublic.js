@@ -116,6 +116,7 @@ jobs.post('/daily', jobAuth, async (req, res) => {
     out.patrol_day_reminders = await stage('patrol_day_reminders', () => require('./patrolduty').remindAll());
     out.patrol_short_weekend = await stage('patrol_short_weekend', () => require('./patrolcrews').shortAlertAll());
     out.patrol_stock_flags = await stage('patrol_stock_flags', () => require('./patrolmeds').flagAll());
+    out.building_cert_reminders = await stage('building_cert_reminders', () => require('../lib/buildings').remindAll()); // muni release 1: certificates 60, 30 and 7 days ahead
     out.staff_injury_notices = await stage('staff_injury_notices', () => require('../lib/staffinjury').retryDue(base)); // notices that could not be sent (2026.11.11)
     // One weather breaker for the day records, the snapshots and the brief (lib/wxrun.js): a weather service that hangs
     // costs at most 3 lookups of 10 seconds for the whole job, not 10 seconds per mountain. Stage limits: DEPLOY.md.
