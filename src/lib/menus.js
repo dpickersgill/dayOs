@@ -210,7 +210,19 @@ function linksIn(menu) {
   return Object.fromEntries(menu.apps.filter((k) => LINKS[k]).map((k) => [k, { label: LINKS[k].label, href: LINKS[k].href, app: LINKS[k].app, icon: LINKS[k].icon }]));
 }
 
+// A municipality (muni release 1): four roles, each with a fixed short menu of the municipal apps. The ski menus, the patrol
+// director's and position menus do not apply; the menu shows only the apps the person may open with the apps turned on.
+const MUNI_ROLES = ['owner', 'manager', 'staff', 'counter'];
+const MUNI_STANDARD = {
+  owner: { apps: ['requests', 'works', 'assets', 'workforce'], start: 'dashboard' },
+  manager: { apps: ['requests', 'works', 'assets', 'workforce'], start: 'dashboard' },
+  staff: { apps: ['works', 'requests', 'assets'], start: 'dashboard' },
+  counter: { apps: ['requests', 'bulk', 'notices'], start: 'dashboard' },
+};
+/** A municipality's menu for this role, or null for a role a municipality does not have. */
+const muniMenuFor = (role) => (MUNI_STANDARD[role] ? copy(MUNI_STANDARD[role]) : null);
+
 /** The kinds of work a person's positions stand for, in order, without repeats: ['park'], ['lifts', 'grooming']. */
 const kindsOf = (positions) => [...new Set((positions || []).map(positionKind).filter(Boolean))];
 
-module.exports = { APPS, KEYS, HOME, ALWAYS, ROLE_APPS, ROLES, STANDARD, LINKS, DIRECTOR, POSITION_ROLES, POSITION_APPS, KIND_MENUS, isPositionKey, canOpen, positionKind, standardFor, withoutHome, withAlways, check, parse, menuFor, rowFor, linksIn, kindsOf };
+module.exports = { APPS, KEYS, HOME, ALWAYS, ROLE_APPS, ROLES, STANDARD, LINKS, DIRECTOR, POSITION_ROLES, POSITION_APPS, KIND_MENUS, isPositionKey, canOpen, positionKind, standardFor, withoutHome, withAlways, check, parse, menuFor, rowFor, linksIn, kindsOf, MUNI_ROLES, MUNI_STANDARD, muniMenuFor };

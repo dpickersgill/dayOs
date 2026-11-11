@@ -1,7 +1,7 @@
 // Settings, The mountain: Mountain details (name, phone, address, time zone, receipt footer, the weekly report),
 // Shared computers, and the Assistant.
 import { get, put } from '../api.js';
-import { h, clear, ctx, appendAll, input, select, button, money, dialog, table, state, empty, errorBox, fmtDateTime } from '../ui.js';
+import { h, clear, ctx, appendAll, input, select, button, money, dialog, table, state, empty, errorBox, fmtDateTime, isMuni } from '../ui.js';
 import { terminalsPanel } from './security.js';
 import { card, row, toggle, formTracker } from './settings-kit.js';
 
@@ -19,13 +19,14 @@ const ZONES = [['America/New_York', 'Eastern'], ['America/Detroit', 'Eastern (Mi
 async function mountainPage(root) {
   const t = await get('/tenant/profile');
   const isOwner = ctx.me.role === 'owner';
+  const muni = isMuni(); // a municipality: no receipts and no weekly sales report (muni release 1)
   const f = formTracker(async (changed) => {
     const body = {};
-    if (changed(name)) { if (name.value.trim().length < 2) throw new Error('The mountain needs a name'); body.name = name.value.trim(); }
+    if (changed(name)) { if (name.value.trim().length < 2) throw new Error(muni ? 'The municipality needs a name' : 'The mountain needs a name'); body.name = name.value.trim(); }
     if (changed(phone)) body.phone = phone.value.trim() || null;
     if (changed(address)) body.address = address.value.trim() || null;
-    if (changed(footer)) body.receipt_footer = footer.value.trim() || null;
-    if (changed(weekly)) body.weekly_report = weekly.checked;
+    if (!muni && changed(footer)) body.receipt_footer = footer.value.trim() || null;
+    if (!muni && changed(weekly)) body.weekly_report = weekly.checked;
     if (isOwner && changed(zone)) body.timezone = zone.value;
     await put('/tenant/profile', body);
     if (body.timezone) { ctx.tz = body.timezone; ctx.me.timezone = body.timezone; }
@@ -40,6 +41,19 @@ async function mountainPage(root) {
   const clockNow = h('span', { class: 'set-hint' });
   const showClock = () => { try { clockNow.textContent = `It is ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zone.value, timeZoneName: 'short' })} there now.`; } catch (_) { clockNow.textContent = ''; } };
   zone.addEventListener('change', showClock); showClock();
+  if (muni) {
+    root.append(
+      card('The municipality', [
+        row('Municipality name', name, 'Shown to residents on emails, texts and your public pages.', { wide: true }),
+        row('Phone', phone, 'Shown on your public pages, for residents who would rather call.'),
+        row('Address', address, 'The municipal building. Shown on your public pages, and at the foot of every email to residents (the law requires a postal address there).', { wide: true }),
+      ], { id: 'details' }),
+      card('Time zone', [
+        row('The municipality’s clock', h('div', { class: 'stack tight' }, zone, clockNow), isOwner ? 'Every time on your records is on the municipality’s clock. Check it shows the right local time.' : 'Only the owner can change this.', { wide: true }),
+      ], { id: 'timezone' }),
+      f.bar);
+    return undefined;
+  }
   root.append(
     card('The mountain', [
       row('Mountain name', name, 'Shown to guests on receipts, emails and your public pages.', { wide: true }),

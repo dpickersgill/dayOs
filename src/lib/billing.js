@@ -85,24 +85,32 @@ async function publicBlocked(tenantId, method) {
 }
 
 // ---------------------------------------------------------------- plans
-const parsePlan = (p) => ({ ...p, id: Number(p.id), active: Boolean(p.active), modules: p.modules ? p.modules.split(',').filter(Boolean) : [] });
-const plans = async (db = pool) => (await rows(db, 'SELECT * FROM billing_plans ORDER BY kind, sort, monthly_cents, id')).map(parsePlan);
+const parsePlan = (p) => ({ ...p, id: Number(p.id), active: Boolean(p.active), org_type: p.org_type || 'mountain', modules: p.modules ? p.modules.split(',').filter(Boolean) : [] });
+/**
+ * Every plan and add-on, or (orgType 'mountain' or 'municipality') only those sold to that kind of tenant: a ski area never
+ * sees a municipal plan, and a municipality sees only municipal ones (muni release 1).
+ */
+const plans = async (db = pool, orgType = null) => (await rows(db, `SELECT * FROM billing_plans ${orgType ? 'WHERE org_type = ?' : ''} ORDER BY kind, sort, monthly_cents, id`, orgType ? [orgType] : [])).map(parsePlan);
+/** The plans for one tenant's kind. */
+const plansFor = async (tenantId, db = pool) => plans(db, await M.orgTypeOf(tenantId));
 const ids = (csv) => String(csv || '').split(',').filter(Boolean).map(Number);
 
-/** The apps a plan and its add-ons give, with what they need. */
-function modulesFor(plan, addons) {
+/** The apps a plan and its add-ons give, with what they need. org: the tenant's kind (its apps only). */
+function modulesFor(plan, addons, org = 'mountain') {
   const keys = new Set([...(plan ? plan.modules : []), ...addons.flatMap((a) => a.modules)]);
   // An app brings what it needs (Sell needs Products and prices), so a plan never switches on half an app.
   for (let grew = true; grew;) { grew = false; for (const m of M.MODULES) if (keys.has(m.key)) for (const need of m.needs || []) if (!keys.has(need)) { keys.add(need); grew = true; } }
-  return M.settle(Object.fromEntries(M.KEYS.map((k) => [k, keys.has(k)])));
+  return M.settle(Object.fromEntries(M.KEYS.map((k) => [k, keys.has(k)])), org);
 }
 
 /** Turn the mountain's apps to match its plan and add-ons. */
 async function applyModules(conn, tenantId, b) {
-  const all = await plans(conn);
+  const t = await one(conn, 'SELECT org_type FROM tenants WHERE id = ?', [tenantId]);
+  const org = t && t.org_type === 'municipality' ? 'municipality' : 'mountain';
+  const all = await plans(conn, org);
   const plan = all.find((p) => p.id === Number(b.plan_id));
   if (!plan) return null;
-  const on = modulesFor(plan, all.filter((p) => ids(b.addons).includes(p.id)));
+  const on = modulesFor(plan, all.filter((p) => ids(b.addons).includes(p.id)), org);
   for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [tenantId, k, on.includes(k) ? 1 : 0]);
   M.invalidate(tenantId);
   return on;
@@ -160,7 +168,8 @@ async function syncPlan(p) {
 
 /** The Stripe prices for a mountain's plan, add-ons and interval, synced first if needed. */
 async function lineItems(b) {
-  const all = await plans();
+  // Only the plans sold to this tenant's kind, so a ski area can never be billed for a municipal plan or the other way.
+  const all = b.tenant_id ? await plansFor(b.tenant_id) : await plans();
   const chosen = [all.find((p) => p.id === Number(b.plan_id)), ...all.filter((p) => ids(b.addons).includes(p.id))].filter(Boolean).map(withSeason);
   if (!chosen.length || !chosen[0] || chosen[0].kind !== 'plan') throw new AppError(400, 'Choose a plan first');
   const [col, centsCol, amountCol] = priceKey(b);
@@ -250,7 +259,7 @@ async function remindAll(base = '') {
 }
 
 module.exports = { remindAll,
-  TRIAL_DAYS, GRACE_DAYS, standing, standingOf, invalidate, gate, publicBlocked, plans, parsePlan, ids, modulesFor, applyModules, event,
+  TRIAL_DAYS, GRACE_DAYS, standing, standingOf, invalidate, gate, publicBlocked, plans, plansFor, parsePlan, ids, modulesFor, applyModules, event,
   startTrial, syncPlan, lineItems, customerFor, trialEnd, dateOf,
   SEASON_MONTHS, seasonCents, inSummer, nextNovember, pauseUntilNovember, seasonAll,
 };

@@ -29,7 +29,7 @@ async function rowOf(db, t) {
 router.get('/billing', managers, async (req, res) => {
   const t = req.auth.tenantId;
   const b = await one(pool, 'SELECT * FROM tenant_billing WHERE tenant_id = ?', [t]);
-  const all = await B.plans();
+  const all = await B.plansFor(t); // a ski area's plans, or a municipality's (muni release 1)
   const standing = await B.standingOf(t);
   let invoices = [];
   if (b && b.stripe_customer_id && stripe.enabled()) {
@@ -48,14 +48,14 @@ router.get('/billing', managers, async (req, res) => {
       period_end: b.period_end, cancel_at_period_end: Boolean(Number(b.cancel_at_period_end)), has_customer: Boolean(b.stripe_customer_id), season_paused_until: B.dateOf(b.season_paused_until),
     } : null,
     plans: all.filter((p) => p.active && p.kind === 'plan'), addons: all.filter((p) => p.active && p.kind === 'addon'),
-    invoices, events, can_pay: req.auth.role === 'owner', stripe: stripe.enabled(), grace_days: B.GRACE_DAYS,
+    org_type: await require('../lib/modules').orgTypeOf(t), invoices, events, can_pay: req.auth.role === 'owner', stripe: stripe.enabled(), grace_days: B.GRACE_DAYS,
   });
 });
 
 const choiceBody = z.object({ plan_id: z.number().int().positive(), addons: z.array(z.number().int().positive()).max(20).default([]), interval: z.enum(['month', 'year', 'season']).default('month'), billing_email: z.string().trim().email().max(255).nullable().optional() });
 
-async function checkChoice(db, b) {
-  const all = await B.plans(db);
+async function checkChoice(db, b, tenantId) {
+  const all = await B.plansFor(tenantId, db);
   const plan = all.find((p) => p.id === b.plan_id && p.kind === 'plan' && p.active);
   if (!plan) throw bad('Choose one of the plans');
   for (const a of b.addons) if (!all.some((p) => p.id === a && p.kind === 'addon' && p.active)) throw bad('Unknown add-on');
@@ -71,7 +71,7 @@ async function checkChoice(db, b) {
  */
 router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (req, res) => {
   const t = req.auth.tenantId; const c = req.body;
-  await checkChoice(pool, c);
+  await checkChoice(pool, c, t);
   const b = await rowOf(pool, t);
   if (b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status)) {
     if (!stripe.enabled()) throw conflict('Payments are not set up yet');

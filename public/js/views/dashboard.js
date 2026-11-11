@@ -1,11 +1,12 @@
 import { get, poll, put, post, patch, del } from '../api.js';
 import { icon } from '../icons.js';
 import { liftWord } from '../liftstatus.js';
-import { ctx, h, svg, can, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, confirmDialog } from '../ui.js';
+import { ctx, h, svg, can, clear, money, state, input, field, select, button, todayStr, fmtDate, fmtDateLong, fmtTime, fmtDateTime, label, empty, errorBox, loading, toast, fail, isManager, isMuni, confirmDialog } from '../ui.js';
 
 const ROLES = [['counter', 'Counter'], ['instructor', 'Instructors'], ['patrol', 'Patrol'], ['staff', 'Staff'], ['manager', 'Managers and owners']];
 
 export async function render(root) {
+  if (isMuni()) { await renderMuni(root); return; }
   const date = input({ type: 'date', value: todayStr(), 'aria-label': 'Day' });
   const alertsBox = h('div', { class: 'board-alerts' });
   const grid = h('div', { class: 'board-grid' });
@@ -336,3 +337,48 @@ const TILES = {
     return h('div', { class: 'stack tight' }, form, list);
   },
 };
+
+// ---------------------------------------------------------------- Today for a municipality (muni release 1)
+// One card per thing to look at today, from each app that is on: every municipal app's route file answers
+// GET /<its prefix>/today with { cards: [{ title, count, text, href }] } (lib/today.js). Work orders and service plans come
+// from GET /ops/work-orders/today. An app whose endpoint is not there yet, or fails, is left out without a word.
+export const MUNI_TODAY = [
+  ['assets', '/ops/work-orders/today', () => can('staff')],
+  ['requests', '/requests/today', () => true],
+  ['requests', '/street-notices/today', () => true],
+  ['solidwaste', '/solid-waste/today', () => true],
+  ['water', '/water/today', () => true],
+  ['sewer', '/sewer/today', () => true],
+  ['stormwater', '/stormwater/today', () => true],
+  ['buildings', '/buildings/today', () => true],
+];
+
+/** A greeting for the time of day at the municipality. */
+function greeting() {
+  let hour = 9;
+  try { hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: ctx.tz, hour: 'numeric', hourCycle: 'h23' }).format(new Date())); } catch (_) { /* the morning one */ }
+  return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+}
+
+/** One Today card: a count when there is one, a line of text, and the page it opens. */
+export function todayCard(c) {
+  const body = [
+    c.count === null || c.count === undefined ? null : h('div', { class: 'figures' }, h('div', { class: 'figure' }, h('strong', null, String(c.count)))),
+    c.text ? h('p', null, c.text) : null,
+    c.href ? h('p', null, h('a', { href: c.href }, 'Open')) : null,
+  ];
+  return h('section', { class: 'bd-tile bd-muni' }, h('header', null, h('h2', null, c.title)), ...body);
+}
+
+async function renderMuni(root) {
+  const grid = h('div', { class: 'board-grid', 'data-today': 'municipal' }, loading());
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Today'),
+    h('p', { class: 'muted', id: 'dash-sub' }, `${greeting()}. ${fmtDateLong(todayStr())} at ${ctx.me.tenant_name}.`))), grid);
+  const on = ctx.me.modules || [];
+  const asks = MUNI_TODAY.filter(([module, , may]) => on.includes(module) && may());
+  const answers = await Promise.all(asks.map(([, path]) => get(path).then((r) => (r && Array.isArray(r.cards) ? r.cards : [])).catch(() => [])));
+  const cards = answers.flat().filter((c) => c && c.title);
+  clear(grid);
+  if (!cards.length) { grid.append(empty('Nothing needs you today.')); return; }
+  grid.append(...cards.map(todayCard));
+}

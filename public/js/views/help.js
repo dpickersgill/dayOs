@@ -1,5 +1,5 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
-import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label, backTo, hashParam } from '../ui.js';
+import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label, backTo, hashParam, isMuni, orgWord } from '../ui.js';
 import { get, post, session } from '../api.js';
 import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
 
@@ -64,7 +64,7 @@ function home(root) {
     if (!yes) return;
     const b = h('button', { type: 'button', class: 'btn small' }, 'Ask the assistant');
     b.addEventListener('click', () => m.openAssistant({ page: 'help', question: q.value.trim() || undefined }));
-    askRow.append(b, h('span', { class: 'muted small' }, ' Type a question and it answers from these articles and your mountain\'s setup.'));
+    askRow.append(b, h('span', { class: 'muted small' }, ` Type a question and it answers from these articles and your ${orgWord()}'s setup.`));
     askRow.hidden = false;
   })).catch(() => {});
   q.addEventListener('input', draw);
@@ -88,7 +88,7 @@ const longDate = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, 
 
 /** Help > What's new: each release, newest first, with only the changes for this person's role and apps. Opening it clears the badge. */
 async function whatsNew(root) {
-  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, "What's new"), h('p', { class: 'muted' }, 'Changes to Verdynt/OS, newest first. You see the ones for your role and the apps your mountain has.'))));
+  root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, "What's new"), h('p', { class: 'muted' }, `Changes to Verdynt/OS, newest first. You see the ones for your role and the apps your ${orgWord()} has.`))));
   let w;
   try { w = await get('/whats-new'); } catch (err) { root.append(errorBox(err)); return; }
   // Highlight what arrived since this person last looked (someone who never looked: the newest release).
@@ -110,7 +110,7 @@ async function whatsNew(root) {
 /** Help > Coming to Verdynt/OS: the roadmap, for owners and managers. Not on the website. */
 async function coming(root) {
   root.append(back('#/help', 'All help'), h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Coming to Verdynt/OS'),
-    h('p', { class: 'muted' }, 'What we are building now, next and later. Plans change with what mountains ask for, so the order can move.'))));
+    h('p', { class: 'muted' }, isMuni() ? 'What we are building now, next and later. Plans change with what our customers ask for, so the order can move.' : 'What we are building now, next and later. Plans change with what mountains ask for, so the order can move.'))));
   if (!isManager()) { root.append(empty('The roadmap is for owners and managers.')); return; }
   let r;
   try { r = await get('/whats-new/roadmap'); } catch (err) { root.append(errorBox(err)); return; }
@@ -121,7 +121,7 @@ async function coming(root) {
       const sec = it.app ? sectionOf(it.app) : null;
       return h('li', null, h('b', null, it.title), sec ? h('span', { class: 'roadmap-app muted small' }, sec.label) : null, h('p', null, it.text));
     }))))),
-  h('aside', { class: 'help-stuck' }, h('b', null, 'Something you need? '), 'Tell us what would help your mountain most. What mountains ask for moves up the list.'),
+  h('aside', { class: 'help-stuck' }, h('b', null, 'Something you need? '), isMuni() ? 'Tell us what would help your municipality most. What our customers ask for moves up the list.' : 'Tell us what would help your mountain most. What mountains ask for moves up the list.'),
   r.updated ? h('p', { class: 'version-line muted small' }, `Last updated ${longDate(r.updated)}`) : null);
 }
 

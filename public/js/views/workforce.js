@@ -2,8 +2,8 @@
 // the staff list with a page for each person. Setup (positions, certifications, templates, the time clock kiosk) is in
 // Settings, Staff and schedule (settingsPages below).
 import { get } from '../api.js';
-import { h, clear, select, button, toast, tabs, todayStr, addDays, weekStart, label, empty, errorBox, ctx } from '../ui.js';
-import { hm, spanShort, minutes, hrs, dayShort, dayLong, weekLabel, weekDays, DEPARTMENTS, fullName } from './workforce-common.js';
+import { h, clear, select, button, toast, tabs, todayStr, addDays, weekStart, label, empty, errorBox, ctx, isMuni } from '../ui.js';
+import { hm, spanShort, minutes, hrs, dayShort, dayLong, weekLabel, weekDays, departmentsFor, fullName } from './workforce-common.js';
 import { shiftDialog, copyWeek, templatesDialog, publishWeek, staffingNeeds } from './workforce-shift.js';
 import { drawHours } from './workforce-hours.js';
 import { drawStaff, personPage } from './workforce-staff.js';
@@ -78,10 +78,10 @@ async function drawSchedule(box) {
           button('Add shift', () => add(days.includes(today) ? today : start, null), { kind: 'primary' }),
           button('Copy last week', () => copyWeek(start, load)),
           button('Templates', () => templatesDialog(start, load)),
-          button('Staffing needs', () => staffingNeeds(start, today)),
+          isMuni() ? null : button('Staffing needs', () => staffingNeeds(start, today)), // forecast from ticket sales: ski areas only
           drafts ? button(`Publish ${drafts} draft${drafts === 1 ? '' : 's'}`, () => publishWeek(start, drafts, load), { kind: 'primary' }) : null)),
       h('div', { class: 'week-filter' },
-        (() => { const s = select([['', 'All departments'], ...DEPARTMENTS.map((d) => [d, label(d)])], dept, { 'aria-label': 'Department' }); s.addEventListener('change', () => { dept = s.value; draw(all, staff); }); return s; })(),
+        (() => { const s = select([['', 'All departments'], ...departmentsFor().map((d) => [d, label(d)])], dept, { 'aria-label': 'Department' }); s.addEventListener('change', () => { dept = s.value; draw(all, staff); }); return s; })(),
         h('p', { class: 'muted' }, shifts.length ? [`${shifts.length} shift${shifts.length === 1 ? '' : 's'}`, unfilled.length ? `${unfilled.length} unfilled` : 'all filled', drafts ? `${drafts} not published yet` : 'all published'].join(', ') : '')));
 
     if (!all.length) {

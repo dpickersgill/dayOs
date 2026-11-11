@@ -15,6 +15,11 @@ import { watchPasswords } from './showpw.js';
 const app = document.getElementById('app');
 let session = '';
 let apps = [];
+// A tenant is a ski area (mountain) or a municipality (muni release 1): each kind has its own apps and plans.
+const ORG_NAMES = { mountain: 'Ski area', municipality: 'Municipality' };
+const orgName = (o) => ORG_NAMES[o || 'mountain'] || ORG_NAMES.mountain;
+/** The apps offered to this kind of tenant (the console never offers a ski app to a municipality, or the reverse). */
+const appsFor = (org) => apps.filter((a) => (a.orgs || ['mountain']).includes(org || 'mountain'));
 let me = { name: '', operator: false }; // who is signed in, and whether with their own login (not the platform key)
 
 async function call(method, path, body, retried = false) {
@@ -162,9 +167,10 @@ async function home() {
       if (!data.length) { body.append(empty('No mountain matches that.')); return; }
       body.append(table([
       { head: 'Mountain', cell: (t) => h('span', null, h('b', null, t.name), h('span', { class: 'muted' }, ` ${t.slug}`)) },
+      { head: 'Type', cell: (t) => orgName(t.org_type) },
       { head: 'Status', cell: (t) => t.status === 'active' ? badge('Active', 'ok') : t.data_deleted_at ? badge('Deleted, records kept', 'bad') : t.delete_due_at ? badge('Closed, due for deletion', 'bad') : t.delete_after ? badge(`Closed, export until ${String(t.delete_after).slice(0, 10)}`, 'bad') : badge('Paused', 'warn') },
       { head: 'Billing', cell: (t) => billBadge(t.billing) },
-      { head: 'Apps', cell: (t) => `${t.modules.length} of ${apps.length} on` },
+      { head: 'Apps', cell: (t) => `${t.modules.length} of ${appsFor(t.org_type).length} on` },
       { head: 'Logins', num: true, cell: (t) => String(t.users) },
       { head: 'Time zone', cell: (t) => h('span', { class: 'stack tight' }, t.timezone, t.zone_warning ? h('small', { class: 'cover-why' }, t.zone_warning) : null) },
       { head: 'Storage', cell: (t) => `${t.storage_used_mb} of ${t.storage_cap_mb} MB` },
@@ -179,20 +185,21 @@ async function home() {
 async function manage(id) {
   const t = await call('GET', `/tenants/${id}`).catch((e) => { fail(e); return null; });
   if (!t) return;
-  const state = Object.fromEntries(apps.map((a) => [a.key, t.modules.includes(a.key)]));
+  const offered = appsFor(t.org_type); // only the apps for this kind of tenant
+  const state = Object.fromEntries(offered.map((a) => [a.key, t.modules.includes(a.key)]));
   const list = h('div', { class: 'stack tight' });
   const boxes = new Map();
   const draw = () => {
     clear(list);
-    for (const a of apps) {
+    for (const a of offered) {
       const cb = h('input', { type: 'checkbox', checked: state[a.key] ? 'checked' : null });
       cb.checked = state[a.key];
       cb.addEventListener('change', async () => {
         cb.disabled = true;
         try {
           const out = await call('PUT', `/tenants/${id}/modules`, { modules: { [a.key]: cb.checked } });
-          for (const x of apps) state[x.key] = out.modules.includes(x.key);
-          const moved = apps.filter((x) => x.key !== a.key && (x.needs || []).includes(a.key) || (a.needs || []).includes(x.key)).map((x) => x.label);
+          for (const x of offered) state[x.key] = out.modules.includes(x.key);
+          const moved = offered.filter((x) => x.key !== a.key && (x.needs || []).includes(a.key) || (a.needs || []).includes(x.key)).map((x) => x.label);
           toast(`${a.label} turned ${state[a.key] ? 'on' : 'off'}${moved.length ? `, along with what it depends on (${moved.join(', ')})` : ''}.`);
         } catch (ex) { cb.checked = !cb.checked; fail(ex); }
         draw();
@@ -223,7 +230,7 @@ async function manage(id) {
   };
   drawAccess();
   const dlg = dialog(t.name, h('div', { class: 'stack' }, access,
-    h('p', { class: 'muted' }, `${t.slug}. Added ${String(t.created_at).slice(0, 10)}. ${closedText(t, paused)}`),
+    h('p', { class: 'muted' }, `${t.slug}. ${orgName(t.org_type)}. Added ${String(t.created_at).slice(0, 10)}. ${closedText(t, paused)}`),
     h('div', { class: 'row' },
       t.data_deleted_at ? null : button(paused ? 'Resume mountain' : 'Pause mountain', () => confirmDialog(paused ? 'Resume this mountain?' : 'Pause this mountain?', paused ? 'People can sign in again.' : 'Everyone is signed out and its public pages stop working. Nothing is deleted.', paused ? 'Resume' : 'Pause', async () => { await call('PATCH', `/tenants/${id}`, { status: paused ? 'active' : 'suspended' }); dlg.close(); home(); manage(id); }, { danger: !paused })),
       button('Rename or set storage', () => editBasics(t, () => { dlg.close(); home(); manage(id); }), { small: true }),
@@ -305,17 +312,29 @@ function addMountain(pre = {}, after) {
     email: input({ name: 'email', type: 'email', required: true, value: pre.email || '' }), pw: input({ name: 'pw', type: 'password', autocomplete: 'new-password', required: true }),
     cap: input({ name: 'cap', type: 'number', min: 10, max: 100000, value: 500 }),
     billing: h('select', { name: 'billing' }, h('option', { value: 'trial' }, '14-day free trial, then they pay'), h('option', { value: 'comped' }, 'Free (no charge)')),
+    // Ski area or municipality: chosen once, here. It decides the apps and plans it can have, and cannot change later.
+    org: h('select', { name: 'org_type' }, h('option', { value: 'mountain' }, 'Ski area'), h('option', { value: 'municipality' }, 'Municipality')),
   };
   const picks = new Map();
-  const checks = apps.map((a) => { const cb = h('input', { type: 'checkbox' }); cb.checked = true; picks.set(a.key, cb); return h('label', { class: 'check' }, cb, a.label); });
+  const checksBox = h('fieldset', { class: 'stack tight' });
+  // A ski area starts with every app ticked (as before); a municipality with its core apps, its add-ons left off.
+  const drawChecks = () => {
+    picks.clear();
+    const org = f.org.value;
+    const checks = appsFor(org).map((a) => { const cb = h('input', { type: 'checkbox' }); cb.checked = org === 'mountain' ? true : !(a.addon_by_org ? a.addon_by_org[org] : a.addon); picks.set(a.key, cb); return h('label', { class: 'check' }, cb, a.label); });
+    clear(checksBox).append(h('legend', null, 'Apps to turn on'), ...checks);
+  };
+  drawChecks();
+  f.org.addEventListener('change', drawChecks);
   f.name.addEventListener('input', () => { if (!f.slug.dataset.touched) f.slug.value = f.name.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); });
   f.slug.addEventListener('input', () => { f.slug.dataset.touched = '1'; });
   formDialog('Add a mountain', h('div', { class: 'stack' },
+    field('Type', f.org, 'A ski area, or a borough, township or authority. It cannot be changed after the tenant is added.'),
     field('Mountain name', f.name), field('Web name', f.slug, 'Lowercase letters, numbers and dashes. People type this to sign in.'), field('Time zone', f.tz, 'The mountain\u2019s own clock: every time on its records uses it'),
     h('div', { class: 'grid2' }, field('Owner first name', f.first), field('Owner last name', f.last)), field('Owner email', f.email), field('Owner password', f.pw, 'At least 12 characters.'),
-    field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), h('fieldset', { class: 'stack tight' }, h('legend', null, 'Apps to turn on'), ...checks)), async () => {
+    field('Document storage limit (MB)', f.cap), field('Billing', f.billing, 'You can change this later on the mountain\'s Manage page.'), checksBox), async () => {
     const modules = Object.fromEntries([...picks].map(([k, cb]) => [k, cb.checked]));
-    const made = await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value,
+    const made = await call('POST', '/tenants', { slug: f.slug.value.trim(), name: f.name.value.trim(), timezone: f.tz.value.trim(), storage_cap_mb: Number(f.cap.value), modules, billing: f.billing.value, org_type: f.org.value,
       owner: { email: f.email.value.trim(), password: f.pw.value, first_name: f.first.value.trim(), last_name: f.last.value.trim() } });
     toast('Mountain added.'); if (after) await after(made); home();
   }, { submitText: 'Add mountain', wide: true });
@@ -369,6 +388,7 @@ async function billingPlans() {
   const synced = (p) => (p.stripe_product && (!p.monthly_cents || (p.stripe_month && Number(p.stripe_month_cents) === p.monthly_cents)) && (!p.yearly_cents || (p.stripe_year && Number(p.stripe_year_cents) === p.yearly_cents && p.stripe_season && Number(p.stripe_season_cents) === Math.round(p.yearly_cents / 6))));
   const list = (kind) => (rowsOf(kind).length ? table([
     { head: 'Name', cell: (p) => h('span', null, h('b', null, p.name), h('span', { class: 'muted' }, ` ${p.code}`), p.active ? null : h('span', null, ' ', badge('Hidden', 'warn'))) },
+    { head: 'Sold to', cell: (p) => (p.org_type === 'municipality' ? 'Municipalities' : 'Ski areas') },
     { head: 'Monthly', num: true, cell: (p) => (p.monthly_cents ? dollars(p.monthly_cents) : '') },
     { head: 'Yearly', num: true, cell: (p) => (p.yearly_cents ? dollars(p.yearly_cents) : '') },
     { head: kind === 'plan' ? 'Apps' : 'App', cell: (p) => p.modules.map(appName).join(', ') },
@@ -397,17 +417,28 @@ function planForm(p, r, done) {
   if (isNew) f.name.addEventListener('input', () => { if (!f.code.dataset.touched) f.code.value = f.name.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); });
   f.code.addEventListener('input', () => { f.code.dataset.touched = '1'; });
   const have = new Set(p.modules || []);
-  const picks = r.modules.map((m) => { const cb = h('input', { type: addon ? 'radio' : 'checkbox', name: 'apps', value: m.key }); cb.checked = have.has(m.key); return h('label', { class: 'check' }, cb, m.label); });
+  // Who the plan is sold to: chosen for a new plan, fixed after. Only that kind's apps can be in it.
+  const org = h('select', { name: 'org_type', disabled: !isNew }, h('option', { value: 'mountain' }, 'Ski areas'), h('option', { value: 'municipality' }, 'Municipalities'));
+  org.value = p.org_type || 'mountain';
+  let picks = [];
+  const pickBox = h('fieldset', { class: 'stack tight' });
+  const drawPicks = () => {
+    picks = appsFor(org.value).map((m) => { const cb = h('input', { type: addon ? 'radio' : 'checkbox', name: 'apps', value: m.key }); cb.checked = have.has(m.key); return h('label', { class: 'check' }, cb, m.label); });
+    clear(pickBox).append(h('legend', null, addon ? 'The app this add-on turns on' : 'Apps in this plan'), ...picks);
+  };
+  drawPicks();
+  org.addEventListener('change', drawPicks);
   const cents = (el) => Math.round(Number(el.value || 0) * 100);
   formDialog(isNew ? (addon ? 'Add an add-on' : 'Add a plan') : `Edit ${p.name}`, h('div', { class: 'stack' },
     field('Name', f.name, 'What mountains see, such as Base, Full mountain or Patrol only'), field('Code', f.code, isNew ? 'Lowercase letters, numbers and dashes. It cannot change later.' : 'Cannot change.'),
     field('Short description', f.blurb), h('div', { class: 'grid2' }, field('Monthly price ($)', f.monthly, 'Leave empty if not offered monthly'), field('Yearly price ($)', f.yearly, 'Leave empty if not offered yearly')),
     field('Order on the page', f.sort, 'Lower numbers show first'), h('label', { class: 'check' }, f.active, 'Show to mountains'),
-    h('fieldset', { class: 'stack tight' }, h('legend', null, addon ? 'The app this add-on turns on' : 'Apps in this plan'), ...picks)), async () => {
+    field('Sold to', org, isNew ? 'Ski area plans are on the website\u2019s Pricing page; municipal plans only on a municipality\u2019s Billing page.' : 'Cannot change.'),
+    pickBox), async () => {
     const modules = picks.map((l) => l.querySelector('input')).filter((cb) => cb.checked).map((cb) => cb.value);
     if (!cents(f.monthly) && !cents(f.yearly)) throw new Error('Give a monthly or yearly price');
     const body = { name: f.name.value.trim(), blurb: f.blurb.value.trim() || null, monthly_cents: cents(f.monthly), yearly_cents: cents(f.yearly), sort: Number(f.sort.value || 0), active: f.active.checked, modules };
-    if (isNew) await call('POST', '/billing/plans', { ...body, code: f.code.value.trim(), kind: p.kind });
+    if (isNew) await call('POST', '/billing/plans', { ...body, code: f.code.value.trim(), kind: p.kind, org_type: org.value });
     else await call('PATCH', `/billing/plans/${p.id}`, body);
     toast('Saved.'); await done();
   }, { submitText: 'Save', wide: true });
@@ -451,6 +482,7 @@ async function billingForm(t, done) {
   let r;
   try { r = await call('GET', '/billing/plans'); } catch (ex) { fail(ex); return; }
   const b = t.billing || {};
+  r = { ...r, data: r.data.filter((p) => (p.org_type || 'mountain') === (t.org_type || 'mountain')) }; // only this kind's plans
   const opt = (v, text, on) => { const o = h('option', { value: String(v) }, text); o.selected = Boolean(on); return o; };
   const plan = h('select', { name: 'plan' }, opt('', 'None chosen', !b.plan_id), ...r.data.filter((p) => p.kind === 'plan' && (p.active || Number(b.plan_id) === p.id)).map((p) => opt(p.id, `${p.name} (${dollars(p.monthly_cents)}/mo, ${dollars(p.yearly_cents)}/yr)`, Number(b.plan_id) === p.id)));
   const interval = h('select', { name: 'interval' }, opt('month', 'Monthly', !['year', 'season'].includes(b.billing_interval)), opt('year', 'Yearly', b.billing_interval === 'year'), opt('season', 'Over the season (Nov to Apr)', b.billing_interval === 'season'));

@@ -184,6 +184,10 @@ export function seasonFor(date) {
 }
 
 export const isManager = () => ['owner', 'manager'].includes(ctx.me && ctx.me.role);
+// The municipal edition (muni release 1): is the signed-in person's tenant a municipality (a borough, township or
+// authority) rather than a ski area? Shared screens say orgWord() ("mountain" or "municipality") where they name it.
+export const isMuni = () => Boolean(ctx.me && ctx.me.org_type === 'municipality');
+export const orgWord = () => (isMuni() ? 'municipality' : 'mountain');
 // Someone on the patrol roster can use Patrol whatever their login role (a lift operator who also patrols).
 export const can = (...roles) => isManager() || roles.includes(ctx.me && ctx.me.role) || Boolean(roles.includes('patrol') && ctx.me && ctx.me.on_patrol);
 // The ski school access level (2026.11.9, src/lib/schoolaccess.js): schoolCan('director') or schoolCan('supervisor').

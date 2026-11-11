@@ -4,7 +4,7 @@
 // Deep links: #/assets/map/f<id> opens one item; #/assets/map/a<assetId> shows an asset's items, or starts putting it on.
 
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, button, toast, formDialog, confirmDialog, field, input, select, val, num, label, isManager, can, errorBox, fail, appendAll } from '../ui.js';
+import { h, clear, button, toast, formDialog, confirmDialog, field, input, select, val, num, label, isManager, can, errorBox, fail, appendAll, isMuni } from '../ui.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 
 const GOOD_M = 8; const OK_M = 15; const STEP_M = 6;
@@ -38,7 +38,7 @@ export async function drawMap(box, deep = '') {
 
   const search = input({ type: 'search', placeholder: 'Find a valve, line or asset', 'aria-label': 'Find on the map' });
   const banner = h('div', { class: 'park-banner', role: 'status', hidden: true });
-  const mapEl = h('div', { class: 'map-box tall park-map', role: 'application', 'aria-label': 'Map of the mountain’s pipes, lines and equipment' });
+  const mapEl = h('div', { class: 'map-box tall park-map', role: 'application', 'aria-label': isMuni() ? 'Map of the municipality’s pipes, lines and equipment' : 'Map of the mountain’s pipes, lines and equipment' });
   const layersEl = h('div', { class: 'amap-layers' });
   const listEl = h('div', { class: 'park-list' });
   const tools = h('div', { class: 'row' },

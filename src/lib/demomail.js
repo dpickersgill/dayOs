@@ -52,7 +52,7 @@ const zoneOk = (tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }
 const dayName = (d, tz) => new Date(d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: zoneOk(tz || 'America/New_York') });
 
 async function fromPrice() {
-  const r = await one(pool, "SELECT MIN(monthly_cents) AS c FROM billing_plans WHERE kind = 'plan' AND active = 1 AND code NOT IN ('patrol-only', 'school-only')").catch(() => null);
+  const r = await one(pool, "SELECT MIN(monthly_cents) AS c FROM billing_plans WHERE kind = 'plan' AND active = 1 AND org_type = 'mountain' AND code NOT IN ('patrol-only', 'school-only')").catch(() => null);
   return r && r.c ? `$${Math.round(Number(r.c) / 100)}` : null;
 }
 

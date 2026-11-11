@@ -5,10 +5,16 @@
 //
 // Pages: #/settings/<page>. #/settings on its own opens Your profile and sign-in on a computer, and the list on a phone.
 import { get } from '../api.js';
-import { h, clear, ctx, isManager, schoolCan, errorBox, loading, confirmDialog, backTo } from '../ui.js';
+import { h, clear, ctx, isManager, isMuni, schoolCan, errorBox, loading, confirmDialog, backTo } from '../ui.js';
 import { hasUnsaved } from './settings-kit.js';
 
 const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
+// A municipality (muni release 1): the same groups, its own names, and only the pages that apply to it. The ski apps'
+// pages (Sell, Lessons, Waivers, Patrol and the rest) never show there.
+const MUNI_GROUPS = { you: 'You', mountain: 'The municipality', apps: 'Apps' };
+const MUNI_PAGES = ['profile', 'brief', 'mountain', 'team', 'billing', 'payments', 'workforce', 'messages', 'streets'];
+const MUNI_TITLES = { mountain: ['Municipality details', 'The name, phone and address residents see, and the municipality’s time zone.'], team: ['Team and logins', 'Who can sign in, and who must use two-step sign-in.'], payments: ['Payments', 'The Stripe account residents’ card payments go into.'] };
+const groupsNow = () => (isMuni() ? MUNI_GROUPS : GROUPS);
 
 // [key, group, name in the list and title, one line under the title, loader of the page's own module]
 const PAGES = [
@@ -52,8 +58,10 @@ async function briefFor() { try { return (await get('/brief/prefs')).eligible; }
 async function visiblePages(who) {
   const apps = await import('./settings-apps.js');
   const out = [];
-  for (const p of PAGES) {
+  for (const p0 of PAGES) {
+    const p = isMuni() && MUNI_TITLES[p0[0]] ? [p0[0], p0[1], ...MUNI_TITLES[p0[0]], p0[4]] : p0;
     const [key, group] = p;
+    if (isMuni() && !MUNI_PAGES.includes(key)) continue;
     if (key === 'brief') { if (await briefFor()) out.push(p); continue; } // only for people whose role gets one
     if (group === 'you') { out.push(p); continue; }
     if (ctx.me.role === 'area') continue;
@@ -101,7 +109,7 @@ export async function render(root, params = []) {
   const was = backTo();
   const back = guarded(h('a', { class: 'set-backapp', href: was ? was.hash : ctx.me.menu && ctx.me.menu.start ? `#/${ctx.me.menu.start}` : '#/', title: was ? `Back to ${was.name}` : null }, h('span', { 'aria-hidden': 'true' }, '‹'), 'Back to the app'));
   const nav = h('nav', { class: 'set-nav', 'aria-label': 'Settings' }, back, h('p', { class: 'set-nav-title', role: 'heading', 'aria-level': '2' }, 'Settings'),
-    Object.entries(GROUPS).map(([g, name]) => {
+    Object.entries(groupsNow()).map(([g, name]) => {
       const mine = pages.filter((p) => p[1] === g);
       if (!mine.length) return null;
       return h('div', { class: 'set-group' }, h('p', { class: 'set-group-name' }, name),
@@ -121,7 +129,7 @@ async function renderPage(content, [key, group, title, line, load], who) {
   const head = h('header', { class: 'page-head set-head' },
     h('div', { class: 'set-head-text' },
       h('a', { class: 'set-back', href: '#/settings' }, h('span', { 'aria-hidden': 'true' }, '‹ '), 'Settings'),
-      h('nav', { class: 'set-crumbs', 'aria-label': 'Breadcrumb' }, h('ol', null, h('li', null, h('a', { href: '#/settings' }, 'Settings')), h('li', null, GROUPS[group]))),
+      h('nav', { class: 'set-crumbs', 'aria-label': 'Breadcrumb' }, h('ol', null, h('li', null, h('a', { href: '#/settings' }, 'Settings')), h('li', null, groupsNow()[group]))),
       h('h1', null, title),
       h('p', { class: 'set-line' }, line)),
     app ? h('a', { class: 'set-open', href: `#/${app[0]}` }, `Open ${app[1]}`) : null);

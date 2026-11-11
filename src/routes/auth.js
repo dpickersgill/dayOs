@@ -66,6 +66,7 @@ router.post(
       slug,
       name: z.string().min(2).max(255),
       timezone: z.string().default('America/New_York'),
+      org_type: z.enum(['mountain', 'municipality']).default('mountain'), // a ski area or a municipality, never changed afterwards
       owner: z.object({ email: z.string().email().max(255), password, first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100) }),
     }),
   ),
@@ -85,7 +86,7 @@ router.post(
     await PWR.refuseWeak(owner.password, { email: owner.email, tenantSlug: s, tenantName: name });
     const hash = await bcrypt.hash(owner.password, 12);
     const created = await tx(async (conn) => {
-      const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone) VALUES (?, ?, ?)', [s, name, timezone]);
+      const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, org_type) VALUES (?, ?, ?, ?)', [s, name, timezone, req.body.org_type]);
       const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, owner.first_name, owner.last_name, owner.email]);
       const [u] = await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, owner.email, UN.suggestUsername(owner), hash, 'owner']);
       return { tenant_id: t.insertId, user_id: u.insertId };
@@ -486,7 +487,7 @@ router.get('/auth/me', authenticate, async (req, res) => {
   const user = await one(
     pool,
     `SELECT u.id, u.email, u.username, u.must_change_password, u.role, u.staff_id, u.totp_enabled, u.access_ends_on, (u.pin_hash IS NOT NULL) AS pin_set, u.device_key_epoch,
-       t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, t.role_menus, ${TIER_SQL}
+       t.slug AS tenant, t.name AS tenant_name, t.timezone, t.sandbox_expires_at, t.role_menus, t.org_type, ${TIER_SQL}
      FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?`,
     [req.auth.userId, req.auth.tenantId],
   );
@@ -509,10 +510,12 @@ router.get('/auth/me', authenticate, async (req, res) => {
   // staff member gets their positions' menu and Today buttons (Park crew: the terrain park, not the lifts).
   const positions = user.staff_id && menus.POSITION_ROLES.includes(user.role) ? await staffPositions(req.auth.tenantId, user.staff_id) : [];
   const who = { patrolLead: Boolean(Number(user.patrol_lead)), positions };
-  const menu = menus.menuFor(user.role, user.role_menus, user.school_access, who);
+  // A municipality has its own fixed menus (muni release 1); a ski area's menus are as before.
+  const muni = user.org_type === 'municipality';
+  const menu = muni ? menus.muniMenuFor(user.role) : menus.menuFor(user.role, user.role_menus, user.school_access, who);
   const pick = ({ id, email, username, role, staff_id: staffId, tenant, tenant_name: tenantName, timezone }) => ({ id, email, username, role, staff_id: staffId, tenant, tenant_name: tenantName, timezone });
   res.json({
-    ...pick(user), billing, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox, modules,
+    ...pick(user), org_type: muni ? 'municipality' : 'mountain', billing, must_change_password: Boolean(user.must_change_password), login_name: user.email || user.username, on_patrol: Boolean(req.auth.onPatrol), sandbox, modules,
     mfa_enabled: strong, app_enabled: Boolean(user.totp_enabled), passkeys: await passkeys.count('user', user.id), pin_set: Boolean(Number(user.pin_set)),
     mfa_required_by_mountain: Boolean(Number(user.require_mfa)), mfa_required: Boolean(rule), mfa_rule: rule, mfa_enrollment_required: Boolean(rule && !strong), mfa_starts_on: soon,
     access_ends_on: user.access_ends_on ? String(user.access_ends_on).slice(0, 10) : null,
@@ -526,7 +529,7 @@ router.get('/auth/me', authenticate, async (req, res) => {
     menu,
     // The shortcuts in that menu (a page inside an app, such as Patrol's Records requests), and which menu it is: the
     // role's, 'patrol_director' or 'pos:<id>'. work: the kinds of work of their positions (park, lifts, grooming...).
-    menu_links: menus.linksIn(menu), menu_row: menus.rowFor(user.role, user.role_menus, who),
+    menu_links: muni ? {} : menus.linksIn(menu), menu_row: muni ? (menu ? user.role : null) : menus.rowFor(user.role, user.role_menus, who),
     positions: positions.map((p) => p.name), work: menus.kindsOf(positions), patrol_lead: who.patrolLead,
     // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
     school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,
@@ -788,6 +791,18 @@ router.get('/users', authenticate, adminOnly, async (req, res) => {
   res.json({ data });
 });
 
+/**
+ * A municipality has four roles (muni release 1): owner, manager, staff (Crew) and counter (Front desk). Patrol, instructor
+ * and the ski area login are ski roles, refused for a municipality.
+ */
+async function muniRole(tenantId, role) {
+  if (!role || menus.MUNI_ROLES.includes(role)) return;
+  if ((await require('../lib/modules').orgTypeOf(tenantId)) !== 'municipality') return;
+  const err = bad('That role is not offered for a municipality. Choose Manager, Crew or Front desk.');
+  err.details = { code: 'role_not_offered', role };
+  throw err;
+}
+
 /** Owner / manager creates logins for their own mountain's staff. Only the owner can create managers. */
 router.post(
   '/users',
@@ -808,6 +823,7 @@ router.post(
   async (req, res) => {
     const t = req.auth.tenantId;
     const { email, password: pw, role, person_id, staff_id, temporary } = req.body;
+    await muniRole(t, role);
     if (role === 'manager' && req.auth.role !== 'owner') throw forbidden('Only the owner can create managers');
     if (role === 'manager') stepUpCheck(req, 'add a manager');
     if (NEEDS_EMAIL.includes(role) && !email) throw bad('Managers and ski area logins need an email, for security notices and getting back into their account');
@@ -887,6 +903,7 @@ router.patch(
   ),
   async (req, res) => {
     const target = await loadTarget(req);
+    if (req.body.role) await muniRole(req.auth.tenantId, req.body.role);
     if ((req.body.role && req.body.role !== target.role) || req.body.active === false) stepUpCheck(req, req.body.role ? 'change what this login can do' : 'switch this login off');
     const cur = await one(pool, 'SELECT u.email, u.username, u.access_ends_on, t.name AS tenant_name FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ?', [target.id]);
     // A new email is where "Forgot password?" sends the code, and an end date can switch a login off: both need the second

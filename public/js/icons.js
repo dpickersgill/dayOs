@@ -47,6 +47,14 @@ const PATHS = {
   close: 'M6 6l12 12M18 6L6 18',
   swap: 'M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
   ask: 'M5 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6l-5 4v-4H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM12 6.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z',
+  // The municipal edition's apps (muni release 1).
+  requests: 'M9 3h6v3H9zM8 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-2M9 14l2 2 4-4',
+  notices: 'M3 10v4a1 1 0 0 0 1 1h2l6 4V5L6 9H4a1 1 0 0 0-1 1zM16 9a3.5 3.5 0 0 1 0 6M19 6a7.5 7.5 0 0 1 0 12',
+  works: 'M4 6h16M4 12h10M4 18h7M17 15l2 2 3-4',
+  assetprograms: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5',
+  bulk: 'M2 6h12v10H2zM14 9h4l3 3v4h-7M6 18.5a1.5 1.5 0 1 0 0 .01M17 18.5a1.5 1.5 0 1 0 0 .01',
+  buildings: 'M4 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4',
+  streets: 'M8 3 5 21M16 3l3 18M12 4v3M12 10v3M12 16v3',
 };
 
 export function icon(name, size = 20) {

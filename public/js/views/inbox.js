@@ -3,7 +3,7 @@
 // show as cards that open the record. New messages arrive by checking every few seconds while the page is open.
 
 import { get, poll, post, patch, del } from '../api.js';
-import { h, clear, button, formDialog, confirmDialog, toast, empty, errorBox, input, field, fmtDate, fmtTime } from '../ui.js';
+import { h, clear, button, formDialog, confirmDialog, toast, empty, errorBox, input, field, fmtDate, fmtTime, orgWord } from '../ui.js';
 import { linkCard, linksIn, LINK_TYPES } from '../share.js';
 
 const ONE = /^\d+$/;
@@ -184,7 +184,7 @@ async function openThread(box, id, onChange) {
 /** New message: pick one person (a one-to-one conversation) or several (a group, with an optional name). */
 async function newConversation() {
   const { data: people } = await get('/inbox/people');
-  if (!people.length) { toast('Nobody else signs in at this mountain yet. Add staff logins under Account.'); return; }
+  if (!people.length) { toast(`Nobody else signs in at this ${orgWord()} yet. Add staff logins under Settings, Team and logins.`); return; }
   const picked = new Set();
   const q = input({ type: 'search', placeholder: 'Find a person', 'aria-label': 'Find a person' });
   const list = h('div', { class: 'pick-list' });

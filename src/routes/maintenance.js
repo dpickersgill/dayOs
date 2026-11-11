@@ -9,6 +9,7 @@ const { partialOf, z, dateStr, dateTimeStr, validate, paramId, normDateTime, set
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const O = require('../lib/ops');
+const { card, todayRoute } = require('../lib/today');
 
 const router = express.Router();
 const crew = requireRole('staff', 'manager', 'patrol');
@@ -152,6 +153,28 @@ router.get('/work-orders', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 200, 500);
   res.json({ data: await rows(pool, `${ORDER_SQL} WHERE ${where.join(' AND ')} ORDER BY FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.opened_at DESC LIMIT ?`, [...params, limit]) });
 });
+
+/**
+ * The Today cards for work orders and service plans (muni release 1, lib/today.js): open, overdue, done today, and service
+ * plans due within a week. A municipality's Today screen reads this; a mountain may too.
+ */
+router.get('/work-orders/today', todayRoute(async (req) => {
+  const t = req.auth.tenantId;
+  const today = todayIn(await tenantTz(t));
+  const week = require('../lib/util').addDays(today, 7);
+  const c = await one(pool, `SELECT SUM(status NOT IN ('done','cancelled')) AS open_n, SUM(status NOT IN ('done','cancelled') AND due_date < ?) AS overdue,
+      SUM(status NOT IN ('done','cancelled') AND priority = 'urgent') AS urgent, SUM(status = 'done' AND completed_at >= ? AND completed_at < ?) AS done_today
+    FROM work_orders WHERE tenant_id = ?`, [today, `${today} 00:00:00`, `${require('../lib/util').addDays(today, 1)} 00:00:00`, t]);
+  const plans = (await rows(pool, `${PM_SQL} WHERE t.tenant_id = ? AND t.active = 1`, [t])).map((x) => O.pmStatus(x, meters(x), today));
+  const due = plans.filter((p) => p.state === 'overdue' || p.state === 'soon' || (p.due_on && p.due_on <= week)).length;
+  const n = (v) => Number(v || 0);
+  return [
+    card({ title: 'Open work orders', count: n(c.open_n), text: n(c.urgent) ? `${n(c.urgent)} urgent` : 'None urgent', href: '#/works' }),
+    card({ title: 'Overdue work orders', count: n(c.overdue), text: n(c.overdue) ? 'Past their due date and still open' : 'Nothing past its due date', href: '#/works?overdue=1' }),
+    card({ title: 'Done today', count: n(c.done_today), text: n(c.done_today) === 1 ? 'Work order completed today' : 'Work orders completed today', href: '#/works?tab=done' }),
+    card({ title: 'Service plans due this week', count: due, text: due ? 'Overdue, or due in the next 7 days' : 'Nothing due in the next 7 days', href: '#/works?tab=plans' }),
+  ];
+}));
 
 router.get('/work-orders/:id', async (req, res) => {
   const id = paramId(req);

@@ -1,7 +1,7 @@
 // Messages (managers): write an email or text, see who it would reach, send a test, send it, and read what happened.
 // Only people who agreed (their consent history) are ever reached, and every message carries a way to stop.
 import { get, post, put, del } from '../api.js';
-import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, fmtDateTime, empty, errorBox, ctx } from '../ui.js';
+import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, fmtDateTime, empty, errorBox, ctx, isMuni, orgWord } from '../ui.js';
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Messages')),
@@ -37,8 +37,8 @@ function setupNote(status) {
   const missing = [!status.email_ready && 'email', !status.sms_ready && 'text messages'].filter(Boolean);
   const notes = [];
   if (missing.length) notes.push(h('p', { class: 'muted' }, `Not set up yet: ${missing.join(' and ')}. You can write drafts now. Sending starts once the account is connected (see Help, "Set up email and text messages").`));
-  if (!status.postal_address) notes.push(h('p', { class: 'muted' }, 'Email messages cannot go out until the mountain\u2019s postal address is in Settings, Mountain details. The law requires it at the foot of every marketing email.'));
-  notes.push(h('p', { class: 'muted' }, `Texts go out between ${(status.quiet_hours || {}).from || '8 AM'} and ${(status.quiet_hours || {}).until || '9 PM'} at the mountain. A text sent later waits until 8 AM.`));
+  if (!status.postal_address) notes.push(h('p', { class: 'muted' }, isMuni() ? 'Email messages cannot go out until the municipality\u2019s postal address is in Settings, Municipality details. The law requires it at the foot of every marketing email.' : 'Email messages cannot go out until the mountain\u2019s postal address is in Settings, Mountain details. The law requires it at the foot of every marketing email.'));
+  notes.push(h('p', { class: 'muted' }, `Texts go out between ${(status.quiet_hours || {}).from || '8 AM'} and ${(status.quiet_hours || {}).until || '9 PM'} at the ${orgWord()}. A text sent later waits until 8 AM.`));
   return h('div', null, ...notes);
 }
 
@@ -53,7 +53,7 @@ async function editor(id, status, done) {
   const reach = h('p', { class: 'muted', 'aria-live': 'polite' }, '');
   const subjectField = field('Subject', subject);
   const counter = h('small', { class: 'muted' });
-  const syncChannel = () => { subjectField.hidden = channel.value === 'sms'; counter.textContent = channel.value === 'sms' ? `${bodyBox.value.length} of 320 characters. We add the mountain name and how to stop.` : 'Use {first_name} and {mountain} to personalize. We add the unsubscribe link.'; };
+  const syncChannel = () => { subjectField.hidden = channel.value === 'sms'; counter.textContent = channel.value === 'sms' ? `${bodyBox.value.length} of 320 characters. We add the ${orgWord()} name and how to stop.` : 'Use {first_name} and {mountain} to personalize. We add the unsubscribe link.'; };
   async function count() {
     syncChannel();
     try {
@@ -112,5 +112,5 @@ async function auto(box) {
       h('li', null, h('strong', null, 'Rental overdue. '), 'An hour after gear was due back and has not been returned.'),
       h('li', null, h('strong', null, 'Season pass ending. '), 'Fourteen days before a pass ends, with how to renew.')),
     s.email_ready ? state('Email is connected', 'good') : state('Email is not connected yet', 'warn'),
-    h('p', { class: 'muted' }, ctx.me && ctx.me.sandbox ? 'Reminders use the same daily schedule as patrol follow-ups. Demo mountains never send.' : 'Reminders use the same daily schedule as patrol follow-ups.')));
+    h('p', { class: 'muted' }, isMuni() ? 'Reminders go out once a day.' : ctx.me && ctx.me.sandbox ? 'Reminders use the same daily schedule as patrol follow-ups. Demo mountains never send.' : 'Reminders use the same daily schedule as patrol follow-ups.')));
 }

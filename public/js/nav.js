@@ -4,7 +4,7 @@
 // bottom, pinned: Settings, Help and the person. On a phone a labeled bottom bar holds the first four items and Menu,
 // which opens a sheet: the short menu as tiles, then the same groups. Jump to (Ctrl+K, Cmd+K or "/") opens any page.
 // The side menu only picks the app: the parts of an app are tabs on its page (ui.js tabs()).
-import { h, clear, ctx, label, isManager } from './ui.js';
+import { h, clear, ctx, label, isManager, isMuni } from './ui.js';
 import { icon } from './icons.js';
 import { readTerminal } from './terminal.js';
 import { subPagesFor } from './jumpindex.js';
@@ -19,7 +19,15 @@ export const GROUPS = [
   ['Ski school', 'school', ['school', 'programs', 'availability']],
   ['Back office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
-export const GROUP_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
+// A municipality's All apps (muni release 1): residents, public works and the back office. The ski groups never show there.
+export const MUNI_GROUPS = [
+  ['Residents', 'residents', ['requests', 'notices', 'bulk']],
+  ['Public works', 'works', ['works', 'assets', 'assetprograms', 'buildings']],
+  ['Back office', 'office', ['workforce', 'messages', 'documents']],
+];
+/** The groups of All apps for this person's tenant. */
+export const groupsFor = () => (isMuni() ? MUNI_GROUPS : GROUPS);
+export const GROUP_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...MUNI_GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])), ...GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
 const BOTTOM = ['settings', 'help'];
 // The phone bar: the screen the person's menu opens on first, then their apps, then these (Inbox has its own button in
 // the phone's top bar).
@@ -30,9 +38,14 @@ export const ROLE_NAMES = {
   owner: 'Owner', manager: 'Manager', counter: 'Ticket window and rentals', instructor: 'Instructor', staff: 'Lift and mountain staff',
   patrol: 'Patroller', patrol_director: 'Patrol director', area: 'Ski area (read-only)',
 };
+// A municipality's roles have their own names (muni release 1): the crew and the front desk.
+export const MUNI_ROLE_NAMES = { owner: 'Owner', manager: 'Manager', staff: 'Crew', counter: 'Front desk' };
+/** The role names for this person's tenant. */
+export const roleNamesFor = (me = ctx.me) => (me && me.org_type === 'municipality' ? MUNI_ROLE_NAMES : ROLE_NAMES);
 /** The name of this person's role: a patroller whose roster access is Admin or Manager is the Patrol director. */
 export function roleName(me) {
   if (!me) return '';
+  if (me.org_type === 'municipality') return MUNI_ROLE_NAMES[me.role] || label(me.role);
   if (me.role === 'patrol' && me.patrol_lead) return ROLE_NAMES.patrol_director;
   return ROLE_NAMES[me.role] || label(me.role);
 }
@@ -68,6 +81,10 @@ const ALSO = {
   myshifts: 'my schedule clock in out', calendar: 'mountain calendar events meetings training closures holidays groups what is happening this week month ics phone',
   settings: 'account setup password security two-step passkey profile mountain team logins billing subscription plan invoice menus',
   help: 'how to guide instructions support questions articles',
+  // The municipal edition's apps (muni release 1).
+  requests: 'resident report pothole streetlight complaint service request 311 call', notices: 'street notice text alert water main break boil residents affected',
+  works: 'work orders jobs repairs crew service plans preventive maintenance recurring', assetprograms: 'programs hydrant flushing valve exercising inspections many assets',
+  bulk: 'bulk trash pickup furniture appliance large item booking', buildings: 'building inspections permits binder inspector calendar',
 };
 const RECENT_KEY = 'so.recent';
 
@@ -141,7 +158,7 @@ export function menuPlan(views, menu, links = {}) {
   const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => usable(k) && !HOME.includes(k) && !BOTTOM.includes(k)) : [];
   const listed = new Set([...home, ...apps, ...bottom]);
   const more = keys.filter((k) => !listed.has(k));
-  const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
+  const groups = groupsFor().map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
   const extra = more.filter((k) => !groups.some((g) => g.keys.includes(k))); // a new app shows somewhere rather than nowhere
   if (extra.length) groups.push({ name: 'More', id: 'more', keys: extra });
   // The phone bar always starts with the screen the menu opens on (Today, Patrol, Lessons, Sell, Summary).
@@ -310,7 +327,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
   // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
   const tabLinks = new Map();
   // The bottom bar has room for about ten letters a label: long names get a short one there (the full name is the link's title).
-  const SHORT = { conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', park: 'Park', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
+  const SHORT = { works: 'Work orders', notices: 'Notices', assetprograms: 'Programs', bulk: 'Bulk pickup', conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', park: 'Park', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
   const tab = (key) => { const a = keep(key, h('a', { href: hrefOf(key), dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(iconOf(key), 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
   const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);

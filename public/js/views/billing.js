@@ -5,7 +5,7 @@
 // readers at the counter. #/billing sends people to Settings.
 import { get, post, put, del } from '../api.js';
 import { leaveApp } from '../tablock.js';
-import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog } from '../ui.js';
+import { h, clear, ctx, money, state, button, table, toast, formDialog, field, input, errorBox, loading, label, fmtDate, fmtDateTime, confirmDialog, isMuni, orgWord } from '../ui.js';
 
 const STATUS_WORDS = {
   comped: ['Included at no charge', 'good'], subscribed: ['Paid and up to date', 'good'], cancelling: ['Canceling at the end of the period', 'warn'],
@@ -23,7 +23,7 @@ export async function render() {
 /** Settings, Billing and plan (the Verdynt/OS subscription), and Payments and card readers (guests' card payments). */
 export async function renderSettingsPage(root, key) {
   const query = new URLSearchParams(location.hash.split('?')[1] || '');
-  if (key === 'payments') { root.append(cardPaymentsPanel(query), readersPanel()); return; }
+  if (key === 'payments') { root.append(...[cardPaymentsPanel(query), isMuni() ? null : readersPanel()].filter(Boolean)); return; } // no counter card readers for a municipality
   await renderBilling(root, query);
 }
 
@@ -45,15 +45,17 @@ async function renderBilling(root, query) {
   function draw() {
     const s = d.standing; const b = d.billing || {};
     const [word, kind] = STATUS_WORDS[s.kind] || [label(s.kind), s.read_only ? 'bad' : 'neutral'];
-    const choice = { plan_id: b.plan_id || (d.plans[0] && d.plans[0].id) || null, addons: new Set(b.addons || []), interval: b.interval || 'month' };
+    // A municipality budgets by the year, so its prices show yearly first (muni release 1).
+    const choice = { plan_id: b.plan_id || (d.plans[0] && d.plans[0].id) || null, addons: new Set(b.addons || []), interval: b.interval || (isMuni() && !b.plan_id ? 'year' : 'month') };
     const owner = d.can_pay;
     const live = b.subscribed && ['active', 'trialing', 'past_due'].includes(b.sub_status);
 
     clear(box).append(...[
       standingPanel(s, b, word, kind),
-      b.comped && !live ? h('section', { class: 'panel' }, h('p', null, 'This mountain is on Verdynt/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
+      b.comped && !live ? h('section', { class: 'panel' }, h('p', null, isMuni() ? 'This municipality is on Verdynt/OS at no charge. There is nothing to pay.' : 'This mountain is on Verdynt/OS at no charge. There is nothing to pay.'), d.plans.length && owner ? h('p', { class: 'muted small' }, 'You can still choose a plan below if you would like to start paying.') : null) : null,
       d.plans.length ? planPanel(choice, { owner, live, b }) : h('section', { class: 'panel' }, h('p', { class: 'muted' }, 'Plans have not been set up yet. Contact Verdynt/OS.')),
-      h('p', { class: 'set-note' }, 'Guests\u2019 card payments go into your own Stripe account, set up under ', h('a', { href: '#/settings/payments' }, 'Payments and card readers'), '.'),
+      isMuni() ? h('p', { class: 'set-note' }, 'Residents\u2019 card payments go into your own Stripe account, set up under ', h('a', { href: '#/settings/payments' }, 'Payments'), '.')
+        : h('p', { class: 'set-note' }, 'Guests\u2019 card payments go into your own Stripe account, set up under ', h('a', { href: '#/settings/payments' }, 'Payments and card readers'), '.'),
       invoicesPanel(),
       historyPanel(),
     ].filter(Boolean));
@@ -88,7 +90,8 @@ async function renderBilling(root, query) {
       const intervalBtn = (v, text) => h('button', { type: 'button', 'data-tone': 'good', 'aria-pressed': String(choice.interval === v), disabled: !owner, onclick: () => { choice.interval = v; paint(); } }, text);
       clear(sec).append(...[
         h('div', { class: 'spread' }, h('h2', null, live ? 'Your plan' : 'Choose a plan'),
-          h('div', { class: 'seg', role: 'group', 'aria-label': 'Billing period' }, intervalBtn('month', 'Monthly'), intervalBtn('year', yearlySaves ? 'Yearly (save)' : 'Yearly'), intervalBtn('season', 'Over the season'))),
+          isMuni() ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Billing period' }, intervalBtn('year', 'Yearly'), intervalBtn('month', 'Monthly'))
+            : h('div', { class: 'seg', role: 'group', 'aria-label': 'Billing period' }, intervalBtn('month', 'Monthly'), intervalBtn('year', yearlySaves ? 'Yearly (save)' : 'Yearly'), intervalBtn('season', 'Over the season'))),
         choice.interval === 'season' ? h('p', { class: 'muted small' }, 'The yearly price in six monthly payments, November to April, with nothing to pay May to October. Everything keeps working all year. Starting between May and October, the first payment is on November 1.') : null,
         h('div', { class: 'plan-grid', role: 'radiogroup', 'aria-label': 'Plan' }, d.plans.map((p) => {
           const cents = priceOf(p); const on = p.id === choice.plan_id;
@@ -106,7 +109,7 @@ async function renderBilling(root, query) {
           return h('label', { class: 'addon' }, box2, h('span', null, h('b', null, a.name), a.blurb ? h('span', { class: 'muted small' }, ` ${a.blurb}`) : null), h('span', { class: 'addon-price' }, cents ? `${money(cents)} a ${per()}` : 'Included'));
         })) : null,
         h('p', { class: 'plan-total' }, 'Total ', h('b', null, `${money(total)} a ${per()}`), h('span', { class: 'muted small' }, ' plus any tax')),
-        owner ? actions(changed, live, b) : h('p', { class: 'muted small' }, 'Only the mountain\'s owner can change the plan or pay.'),
+        owner ? actions(changed, live, b) : h('p', { class: 'muted small' }, `Only the ${orgWord()}'s owner can change the plan or pay.`),
       ].filter(Boolean));
     }
     async function saveChoice() {
@@ -170,23 +173,25 @@ const CARD_STATE = {
   ready: ['Taking card payments', 'good'], unfinished: ['Stripe needs more details', 'warn'], not_connected: ['Not connected', 'neutral'], off: ['Not available yet', 'neutral'],
 };
 function cardPaymentsPanel(query) {
-  const sec = h('section', { class: 'panel stack' }, h('h2', null, 'Guest card payments'), loading('Checking Stripe'));
+  const sec = h('section', { class: 'panel stack' }, h('h2', null, isMuni() ? 'Resident card payments' : 'Guest card payments'), loading('Checking Stripe'));
   const back = query.get('stripe');
   (async () => {
     let s;
-    try { s = await get(`/payments/stripe${back ? '?refresh=1' : ''}`); } catch (err) { clear(sec).append(h('h2', null, 'Guest card payments'), errorBox(err)); return; }
+    try { s = await get(`/payments/stripe${back ? '?refresh=1' : ''}`); } catch (err) { clear(sec).append(h('h2', null, isMuni() ? 'Resident card payments' : 'Guest card payments'), errorBox(err)); return; }
     const draw = () => {
       const [word, kind] = CARD_STATE[s.status] || [s.status, 'neutral'];
       const fee = s.platform_fee_bps || s.platform_fee_cents ? `${(s.platform_fee_bps / 100).toFixed(2).replace(/\.?0+$/, '')}%${s.platform_fee_cents ? ` plus ${money(s.platform_fee_cents)}` : ''} of each guest card payment` : null;
       const go = async () => { const r = await post('/payments/stripe/link', {}); leaveApp(r.url); };
       const text = {
-        ready: `Online shop orders, lesson payments, date changes and gifts to the patrol are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`,
+        ready: isMuni() ? `Residents' card payments are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`
+          : `Online shop orders, lesson payments, date changes and gifts to the patrol are paid straight into your own Stripe account${s.business_name ? ` (${s.business_name})` : ''}, and Stripe pays them out to your bank. ${s.payouts_enabled ? '' : 'Payouts are not on yet: finish your bank details in Stripe. '}Refunds come back out of the same account.`,
         unfinished: 'Your Stripe account is connected, but Stripe still needs some details (the business, a person, a bank account) before it can take payments. Card payments open as soon as Stripe is happy.',
-        not_connected: 'Guests\' card payments go into your mountain\'s own Stripe account, never through Verdynt/OS. Connect one to open the online shop, lesson payments and patrol giving. Stripe asks for the business, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.',
+        not_connected: isMuni() ? 'Residents\' card payments (bulk pickup and other fees) go into your municipality\'s own Stripe account, never through Verdynt/OS. Stripe asks for the municipality, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.'
+          : 'Guests\' card payments go into your mountain\'s own Stripe account, never through Verdynt/OS. Connect one to open the online shop, lesson payments and patrol giving. Stripe asks for the business, a contact and the bank account payouts go to; if you already use Stripe, sign in with that login.',
         off: 'Card payments are not switched on for Verdynt/OS yet. Contact Verdynt/OS.',
       }[s.status];
       clear(sec).append(...[
-        h('div', { class: 'spread' }, h('h2', null, 'Guest card payments'), state(word, kind)),
+        h('div', { class: 'spread' }, h('h2', null, isMuni() ? 'Resident card payments' : 'Guest card payments'), state(word, kind)),
         h('p', null, text),
         h('p', { class: 'muted small' }, `Stripe's own card fees are charged by Stripe to your account. ${fee ? `Verdynt/OS's fee: ${fee}, kept by Stripe from the payment and returned in proportion on refunds. Gifts to the patrol carry no Verdynt/OS fee.` : 'Verdynt/OS adds no fee of its own.'}`),
         s.fallback ? h('p', { class: 'muted small' }, 'Until you connect, this test service takes card payments into the Verdynt/OS test account.') : null,
@@ -198,7 +203,7 @@ function cardPaymentsPanel(query) {
           s.status === 'ready' ? button('Update details in Stripe', go) : null,
           s.connected ? button('Check again', async () => { s = { ...s, ...(await get('/payments/stripe?refresh=1')) }; draw(); }) : null,
           s.connected ? button('Disconnect', () => confirmDialog('Stop taking card payments into this Stripe account?', 'The online shop, lesson payments and patrol giving stop taking cards until you connect an account again. Your Stripe account and the money in it are not touched, and refunds of earlier payments still work.', 'Disconnect', async () => { s = { ...s, ...(await post('/payments/stripe/disconnect', {})) }; toast('Disconnected'); draw(); }, { danger: true })) : null)
-          : !s.can_connect && s.status !== 'ready' ? h('p', { class: 'muted small' }, 'Only the mountain\'s owner can connect Stripe.') : null,
+          : !s.can_connect && s.status !== 'ready' ? h('p', { class: 'muted small' }, `Only the ${orgWord()}'s owner can connect Stripe.`) : null,
       ].filter(Boolean));
     };
     draw();

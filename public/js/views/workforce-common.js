@@ -1,6 +1,6 @@
 // Small helpers shared by the Staff and schedule screens. Shift times are the mountain's local wall-clock time as
 // stored ('YYYY-MM-DD HH:MM:SS'), so they are read as text, never through the browser's clock.
-import { addDays } from '../ui.js';
+import { addDays, isMuni } from '../ui.js';
 
 const asMs = (s) => Date.parse(`${String(s).replace(' ', 'T').slice(0, 19)}Z`);
 
@@ -24,6 +24,9 @@ export const dayLong = (d) => fmt(d, { weekday: 'long', month: 'long', day: 'num
 export const weekLabel = (start) => `${monthDay(start)} to ${monthDay(addDays(start, 6))}`;
 export const weekDays = (start) => Array.from({ length: 7 }, (_, i) => addDays(start, i));
 
+// A municipality's crews (muni release 1): public works and the office. Its positions are kept in these two.
+export const MUNI_DEPARTMENTS = ['maintenance', 'admin'];
+export const departmentsFor = () => (isMuni() ? MUNI_DEPARTMENTS : DEPARTMENTS);
 export const DEPARTMENTS = ['lifts', 'rentals', 'ski_school', 'patrol', 'food', 'guest_services', 'grooming', 'maintenance', 'admin', 'attractions'];
 export const STAFF_STATUS = ['active', 'onboarding', 'applicant', 'inactive'];
 export const STATUS_TONE = { active: 'good', onboarding: 'neutral', applicant: 'neutral', inactive: 'warn' };

@@ -1,23 +1,27 @@
 // Settings, Team and logins: three tabs. Logins (who can sign in, their role, staff record, password and PIN, season
 // end), Two-step sign-in (who must use it), and Menus for each role.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, ctx, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, tabs } from '../ui.js';
+import { h, clear, ctx, table, state, input, select, field, button, toast, formDialog, confirmDialog, val, num, label, empty, tabs, isMuni } from '../ui.js';
 import { card, row, toggle, formTracker } from './settings-kit.js';
 
 const ROLES = ['manager', 'staff', 'counter', 'instructor', 'patrol', 'area'];
+// A municipality has four roles, with its own names (muni release 1). The API refuses the ski roles there too.
+const MUNI_ROLES = ['manager', 'staff', 'counter'];
+const MUNI_NAMES = { owner: 'Owner', manager: 'Manager', staff: 'Crew', counter: 'Front desk' };
 // The ski area's free read-only login: the patrol summary and approved reports only.
-const roleName = (r) => (r === 'area' ? 'Ski area (read-only)' : label(r));
+const roleName = (r) => (isMuni() ? MUNI_NAMES[r] || label(r) : r === 'area' ? 'Ski area (read-only)' : label(r));
 
 const TABS = [['logins', 'Logins'], ['twostep', 'Two-step sign-in'], ['menus', 'Menus for each role']];
 
 export async function renderSettingsPage(root) {
   const wanted = new URLSearchParams(location.hash.split('?')[1] || '').get('tab');
   const initial = TABS.some((t) => t[0] === wanted) ? wanted : 'logins';
+  // A municipality's menus are fixed for each role (muni release 1): no Menus tab there.
   root.append(tabs([
     ['logins', 'Logins', (box) => drawLogins(box)],
     ['twostep', 'Two-step sign-in', (box) => drawTwoStep(box)],
-    ['menus', 'Menus for each role', async (box) => (await import('./settings-menus.js')).drawMenus(box)],
-  ], initial, { param: 'tab' }));
+    isMuni() ? null : ['menus', 'Menus for each role', async (box) => (await import('./settings-menus.js')).drawMenus(box)],
+  ].filter(Boolean), initial === 'menus' && isMuni() ? 'logins' : initial, { param: 'tab' }));
 }
 
 // ---------------------------------------------------------------- logins
@@ -31,8 +35,8 @@ async function drawLogins(box) {
   clear(box).append(
     h('section', { class: 'set-card', 'data-card': 'logins' },
       h('div', { class: 'set-card-head' }, h('h2', null, 'Logins'),
-        h('div', { class: 'row' }, button('Season end', () => seasonEnd(reload), { small: true }), button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true }))),
-      h('p', { class: 'set-card-intro' }, 'Who can sign in to this mountain. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.'),
+        h('div', { class: 'row' }, isMuni() ? null : button('Season end', () => seasonEnd(reload), { small: true }), button('Add login', () => addLogin(staff, isOwner, reload), { kind: 'primary', small: true }))),
+      h('p', { class: 'set-card-intro' }, isMuni() ? 'Who can sign in to this municipality. Managers run everything, the crew works the work orders and assets, and the front desk takes requests and bookings. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.' : 'Who can sign in to this mountain. Everyone signs in with their username, or their email if they have one; only managers must have an email. Link a login to a staff member so they can see their shifts and clock in.'),
       users.length ? table([
         { head: 'Username', cell: (u) => [h('strong', null, u.username || ''), u.must_change_password ? h('small', { class: 'muted' }, ' (temporary password)') : null] },
         { head: 'Email', cell: (u) => u.email || h('span', { class: 'muted' }, 'None') },
@@ -55,7 +59,7 @@ async function drawLogins(box) {
       ], users) : empty('No logins.')));
 }
 
-function roleOptions(isOwner) { return (isOwner ? ROLES : ROLES.filter((r) => r !== 'manager')); }
+function roleOptions(isOwner) { const all = isMuni() ? MUNI_ROLES : ROLES; return (isOwner ? all : all.filter((r) => r !== 'manager')); }
 
 const who = (u) => u.username || u.email;
 const needsEmail = (role) => ['owner', 'manager', 'area'].includes(role);
@@ -185,11 +189,12 @@ async function drawTwoStep(box) {
     card('Always required', [
       h('ul', { class: 'set-list' },
         h('li', null, h('strong', null, 'Owners and managers: '), 'always, with a passkey or an authenticator app.'),
-        h('li', null, h('strong', null, 'Patrol Admins and Managers: '), 'always.'),
-        h('li', null, h('strong', null, 'Counter, instructor and lift staff: '), 'not required. They use a password, or a PIN on a shared computer. A sign-in from a new device sends them a code by email when they have one.')),
+        isMuni() ? null : h('li', null, h('strong', null, 'Patrol Admins and Managers: '), 'always.'),
+        isMuni() ? h('li', null, h('strong', null, 'Crew and front desk: '), 'not required. They use a password, or a PIN on a shared computer. A sign-in from a new device sends them a code by email when they have one.')
+          : h('li', null, h('strong', null, 'Counter, instructor and lift staff: '), 'not required. They use a password, or a PIN on a shared computer. A sign-in from a new device sends them a code by email when they have one.')),
     ]),
     card('Your rules', [
-      row('Patrollers must use two-step sign-in', patrol, `Recommended, because Patrol holds patient details${soon}.`),
+      isMuni() ? null : row('Patrollers must use two-step sign-in', patrol, `Recommended, because Patrol holds patient details${soon}.`),
       row('Everyone must use two-step sign-in', everyone, 'Each person, including you, is asked to set it up on their next screen.'),
       owner ? null : h('p', { class: 'set-card-intro' }, 'Only the owner can change these.'),
       r.season_ends_on ? h('p', { class: 'set-card-intro' }, `Seasonal logins end after ${r.season_ends_on}. Change it under Logins, Season end.`) : null,

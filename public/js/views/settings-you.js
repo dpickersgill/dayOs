@@ -1,7 +1,7 @@
 // Settings, You: your username and password, passkeys, the authenticator app, your PIN for shared computers, where
 // you are signed in and the devices you have used, and light or dark on this device.
 import { get, post, session } from '../api.js';
-import { h, clear, ctx, input, field, button, toast, formDialog, errorBox, select } from '../ui.js';
+import { h, clear, ctx, input, field, button, toast, formDialog, errorBox, select, orgWord } from '../ui.js';
 import { mfaPanel } from './mfa.js';
 import { passkeysPanel, pinPanel, sessionsPanel } from './security.js';
 import { card, row } from './settings-kit.js';
@@ -51,7 +51,7 @@ function passwordCard() {
   const slot = h('div');
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Change password');
   const form = h('form', { class: 'stack set-form', novalidate: true },
-    h('div', { class: 'form' }, field('Current password', cur), field('New password', next, 'At least 12 characters. A short phrase of a few words is easiest to remember. Not your name or the mountain\'s.'), field('Repeat new password', again)),
+    h('div', { class: 'form' }, field('Current password', cur), field('New password', next, `At least 12 characters. A short phrase of a few words is easiest to remember. Not your name or the ${orgWord()}'s.`), field('Repeat new password', again)),
     slot, h('div', { class: 'row' }, go));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

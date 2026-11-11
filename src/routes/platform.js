@@ -247,7 +247,19 @@ async function usage(ids) {
   return out;
 }
 
-router.get('/modules', (_req, res) => res.json({ data: M.MODULES.map(({ key, label, blurb, needs, addon }) => ({ key, label, blurb, needs: needs || [], addon: Boolean(addon) })) }));
+/** Refuses turning on an app that is not offered to this kind of tenant (a ski app for a municipality, or the reverse). */
+function notOffered(modules, org) {
+  const wrong = Object.keys(modules || {}).filter((k) => modules[k] && !M.offered(k, org));
+  if (wrong.length) throw bad(`${wrong.map((k) => M.MODULES.find((m) => m.key === k).label).join(', ')} ${wrong.length === 1 ? 'is' : 'are'} not offered to a ${org === 'municipality' ? 'municipality' : 'ski area'}`);
+}
+
+// ?org_type=municipality (or mountain): only the apps offered to that kind of tenant, with add-on as it is for that kind.
+router.get('/modules', (req, res) => {
+  const org = M.ORG_TYPES.includes(req.query.org_type) ? req.query.org_type : null;
+  const list = org ? M.modulesFor(org) : M.MODULES;
+  res.json({ data: list.map((m) => ({ key: m.key, label: m.label, blurb: m.blurb, needs: m.needs || [], addon: M.isAddon(m, org || 'mountain'), orgs: m.orgs,
+    addon_by_org: Object.fromEntries(m.orgs.map((o) => [o, M.isAddon(m, o)])) })) });
+});
 
 /**
  * A mountain whose time zone does not fit its map position (a mountain left on Eastern in Colorado): the zone's winter
@@ -266,7 +278,7 @@ function zoneWarning(x) {
 }
 
 router.get('/tenants', async (_req, res) => {
-  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.timezone, t.map_lat, t.map_lng, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after, t.delete_due_at, t.data_deleted_at,
+  const t = await rows(pool, `SELECT t.id, t.slug, t.name, t.status, t.org_type, t.timezone, t.map_lat, t.map_lng, t.created_at, t.storage_cap_mb, t.platform_notes, t.delete_after, t.delete_due_at, t.data_deleted_at,
       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.active = 1) AS users FROM tenants t WHERE t.sandbox_expires_at IS NULL ORDER BY t.name`);
   for (const x of t) { x.zone_warning = zoneWarning(x); delete x.map_lat; delete x.map_lng; }
   const used = await usage(t.map((x) => x.id));
@@ -408,7 +420,7 @@ async function twoStepUnlessFirstOperator(req, res, next) {
 
 router.get('/tenants/:id', twoStepRead, async (req, res) => {
   const id = paramId(req);
-  const t = await one(pool, 'SELECT id, slug, name, status, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after, delete_due_at, data_deleted_at FROM tenants WHERE id = ?', [id]);
+  const t = await one(pool, 'SELECT id, slug, name, status, org_type, timezone, created_at, storage_cap_mb, platform_notes, closed_at, delete_after, delete_due_at, data_deleted_at FROM tenants WHERE id = ?', [id]);
   if (!t) throw notFound('Mountain');
   t.legal_holds = Number((await one(pool, 'SELECT COUNT(*) AS n FROM incidents WHERE tenant_id = ? AND legal_hold = 1', [id])).n);
   M.invalidate(id);
@@ -437,10 +449,19 @@ const planFields = {
   kind: z.enum(['plan', 'addon']).default('plan'), modules: z.array(z.string()).max(40).default([]),
   monthly_cents: z.number().int().min(0).max(100000000).default(0), yearly_cents: z.number().int().min(0).max(1000000000).default(0),
   active: z.boolean().optional(), sort: z.number().int().min(0).max(999).optional(),
+  // Who the plan is sold to: ski areas (the website's Pricing page) or municipalities. Set when the plan is made.
+  org_type: z.enum(['mountain', 'municipality']).default('mountain'),
 };
+/** Every app in a plan must be offered to the kind of tenant the plan is for. */
+function plansApps(modules, org) {
+  for (const k of modules) {
+    if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+    if (!M.offered(k, org)) throw bad(`${(M.MODULES.find((m) => m.key === k) || { label: k }).label} is not offered to a ${org === 'municipality' ? 'municipality' : 'ski area'}`);
+  }
+}
 const planCols = (b) => Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === 'modules' ? v.join(',') : typeof v === 'boolean' ? Number(v) : v]));
 router.post('/billing/plans', validate(z.object(planFields)), async (req, res) => {
-  for (const k of req.body.modules) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+  plansApps(req.body.modules, req.body.org_type);
   const c = planCols(req.body);
   try {
     const [r] = await pool.query(`INSERT INTO billing_plans (${Object.keys(c).join(', ')}) VALUES (${Object.keys(c).map(() => '?').join(', ')})`, Object.values(c));
@@ -452,8 +473,11 @@ router.post('/billing/plans', validate(z.object(planFields)), async (req, res) =
 // Editing: only the fields sent change (no defaults, so changing the description never resets a price).
 const planEdit = z.object({ ...planFields, kind: z.enum(['plan', 'addon']), modules: z.array(z.string()).max(40), monthly_cents: z.number().int().min(0).max(100000000), yearly_cents: z.number().int().min(0).max(1000000000) }).partial();
 router.patch('/billing/plans/:id', validate(planEdit), async (req, res) => {
-  for (const k of req.body.modules || []) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
-  const c = planCols(req.body); delete c.kind;
+  const was = await one(pool, 'SELECT org_type FROM billing_plans WHERE id = ?', [paramId(req)]);
+  if (!was) throw notFound('Plan');
+  if (req.body.org_type !== undefined && req.body.org_type !== was.org_type) throw bad('Who a plan is sold to cannot change. Make a new plan instead.');
+  plansApps(req.body.modules || [], was.org_type);
+  const c = planCols(req.body); delete c.kind; delete c.org_type;
   if (!Object.keys(c).length) throw bad('Nothing to change');
   const [r] = await pool.query(`UPDATE billing_plans SET ${Object.keys(c).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...Object.values(c), paramId(req)]);
   if (!r.affectedRows) throw notFound('Plan');
@@ -503,8 +527,9 @@ router.put('/tenants/:id/billing', needsAccess, validate(z.object({
   billing_email: z.string().trim().email().max(255).nullable().optional(), notes: z.string().max(500).nullable().optional(), apply_apps: z.boolean().default(false),
 })), async (req, res) => {
   const id = paramId(req); const b = req.body;
-  if (!(await one(pool, 'SELECT id FROM tenants WHERE id = ?', [id]))) throw notFound('Mountain');
-  const all = await BL.plans();
+  const tenant = await one(pool, 'SELECT id, org_type FROM tenants WHERE id = ?', [id]);
+  if (!tenant) throw notFound('Mountain');
+  const all = await BL.plans(pool, tenant.org_type || 'mountain'); // a ski area's plans, or a municipality's
   if (b.plan_id && !all.some((p) => p.id === b.plan_id && p.kind === 'plan')) throw bad('Unknown plan');
   for (const a of b.addons || []) if (!all.some((p) => p.id === a && p.kind === 'addon')) throw bad('Unknown add-on');
   await tx(async (conn) => {
@@ -523,6 +548,8 @@ router.put('/tenants/:id/billing', needsAccess, validate(z.object({
 
 router.post('/tenants', validate(z.object({
   slug, name: z.string().min(2).max(255), timezone: z.string().default('America/New_York'),
+  // A ski area or a municipality (muni release 1). Chosen here and never changed afterwards.
+  org_type: z.enum(['mountain', 'municipality']).default('mountain'),
   storage_cap_mb: z.number().int().min(10).max(100000).optional(),
   modules: z.record(z.string(), z.boolean()).optional(),
   owner: z.object({ email: z.string().email().max(255), password, first_name: z.string().trim().min(1).max(100), last_name: z.string().trim().min(1).max(100) }),
@@ -531,18 +558,20 @@ router.post('/tenants', validate(z.object({
   const b = req.body;
   try { new Intl.DateTimeFormat('en-US', { timeZone: b.timezone }); } catch (_) { throw new AppError(400, 'Unknown time zone'); }
   for (const k of Object.keys(b.modules || {})) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
+  notOffered(b.modules, b.org_type);
+  if (b.plan_id && !(await one(pool, 'SELECT id FROM billing_plans WHERE id = ? AND org_type = ?', [b.plan_id, b.org_type]))) throw bad(`That plan is not sold to a ${b.org_type === 'municipality' ? 'municipality' : 'ski area'}`);
   await PWR.refuseWeak(b.owner.password, { email: b.owner.email, tenantSlug: b.slug, tenantName: b.name });
   const hash = await bcrypt.hash(b.owner.password, 12);
   const created = await tx(async (conn) => {
-    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb) VALUES (?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500]);
+    const [t] = await conn.query('INSERT INTO tenants (slug, name, timezone, storage_cap_mb, org_type) VALUES (?, ?, ?, ?, ?)', [b.slug, b.name, b.timezone, b.storage_cap_mb ?? 500, b.org_type]);
     const [p] = await conn.query('INSERT INTO people (tenant_id, first_name, last_name, email) VALUES (?, ?, ?, ?)', [t.insertId, b.owner.first_name, b.owner.last_name, b.owner.email]);
     await conn.query('INSERT INTO users (tenant_id, person_id, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)', [t.insertId, p.insertId, b.owner.email, require('../lib/usernames').suggestUsername(b.owner), hash, 'owner']);
-    const on = M.apply({}, b.modules || {});
+    const on = M.apply({}, b.modules || {}, b.org_type);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
     if (b.billing === 'trial') await BL.startTrial(conn, t.insertId, { planId: b.plan_id || null, email: b.owner.email });
     else await conn.query('INSERT INTO tenant_billing (tenant_id, comped, plan_id) VALUES (?, 1, ?)', [t.insertId, b.plan_id || null]);
-    await log(conn, req, t.insertId, 'create', { slug: b.slug, apps: on, billing: b.billing });
-    return { id: t.insertId, slug: b.slug };
+    await log(conn, req, t.insertId, 'create', { slug: b.slug, org_type: b.org_type, apps: on, billing: b.billing });
+    return { id: t.insertId, slug: b.slug, org_type: b.org_type };
   });
   res.status(201).json(created);
 });
@@ -573,8 +602,11 @@ router.patch('/tenants/:id', needsAccess, validate(partialOf({
   // Verdynt/OS's fee on this mountain's guest card payments (not gifts): a share in basis points (100 = 1%, at most 10%) and
   // a fixed amount in cents per payment (at most $5). Both 0 unless set here; Stripe keeps it from each payment.
   platform_fee_bps: z.number().int().min(0).max(1000), platform_fee_cents: z.number().int().min(0).max(500),
+  org_type: z.string().max(40),
 })), async (req, res) => {
   const id = paramId(req);
+  // A ski area stays a ski area and a municipality a municipality: their apps, plans and records differ.
+  if (req.body.org_type !== undefined) throw bad('The organization type is set when the tenant is created and cannot be changed. To move to the other kind, create a new tenant.');
   const keys = Object.keys(req.body);
   if (!keys.length) throw bad('Nothing to change');
   // Resuming cancels a pending deletion. A mountain whose data was deleted cannot be resumed: only its kept records are left.
@@ -645,12 +677,15 @@ router.put('/tenants/:id/modules', needsAccess, validate(z.object({ modules: z.r
   const id = paramId(req);
   for (const k of Object.keys(req.body.modules)) if (!M.KEYS.includes(k)) throw bad(`Unknown app: ${k}`);
   const result = await tx(async (conn) => {
-    if (!(await one(conn, 'SELECT id FROM tenants WHERE id = ? FOR UPDATE', [id]))) throw notFound('Mountain');
+    const t = await one(conn, 'SELECT id, org_type FROM tenants WHERE id = ? FOR UPDATE', [id]);
+    if (!t) throw notFound('Mountain');
+    const org = t.org_type || 'mountain';
+    notOffered(req.body.modules, org);
     const [cur] = await conn.query('SELECT module, enabled FROM tenant_modules WHERE tenant_id = ?', [id]);
     const want = Object.fromEntries(M.KEYS.map((k) => [k, true]));
     for (const r of cur) want[r.module] = Boolean(r.enabled);
-    const before = M.settle(want);
-    const on = M.apply(want, req.body.modules);
+    const before = M.settle(want, org);
+    const on = M.apply(want, req.body.modules, org);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [id, k, on.includes(k) ? 1 : 0]);
     const asked = Object.keys(req.body.modules).filter((k) => on.includes(k) !== req.body.modules[k]);
     await log(conn, req, id, 'apps', { turned_on: on.filter((k) => !before.includes(k)), turned_off: before.filter((k) => !on.includes(k)) });

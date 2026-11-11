@@ -1,9 +1,9 @@
 // Staff and schedule > Setup: positions (with what each requires and how many people work it), certification types,
 // saved week templates and the time clock kiosk. Set up once, then left alone.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, table, label, empty } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, table, label, empty, isMuni } from '../ui.js';
 import { drawKiosk } from './kiosk-admin.js';
-import { DEPARTMENTS } from './workforce-common.js';
+import { departmentsFor } from './workforce-common.js';
 
 export async function drawSetup(box) {
   const positions = h('section', { class: 'section' });
@@ -20,9 +20,9 @@ export async function drawSetup(box) {
         { head: 'Department', cell: (p) => label(p.department) },
         { head: 'Requires', cell: (p) => (p.requires.length ? p.requires.map((c) => c.name).join(', ') : h('span', { class: 'muted' }, 'Nothing')) },
         { head: 'People trained', num: true, cell: (p) => String(p.trained) },
-        { head: 'Guests per staff member', num: true, cell: (p) => (p.visits_per_staff ? String(p.visits_per_staff) : '') },
+        isMuni() ? null : { head: 'Guests per staff member', num: true, cell: (p) => (p.visits_per_staff ? String(p.visits_per_staff) : '') },
         { head: '', actions: true, cell: (p) => [button('Edit', () => editPosition(p, drawPositions), { small: true, label: `Edit ${p.name}` }), button('Required certifications', () => requirements(p, certTypes, drawPositions), { small: true, label: `Required certifications for ${p.name}` })] },
-      ], data) : empty('No positions yet, such as Lift operator or Rental tech.'));
+      ].filter(Boolean), data) : empty(isMuni() ? 'No positions yet, such as Equipment operator or Laborer.' : 'No positions yet, such as Lift operator or Rental tech.'));
   }
   async function drawCerts() {
     const { data } = await get('/workforce/certifications?limit=500');
@@ -44,8 +44,8 @@ export async function drawSetup(box) {
 function editPosition(p, done) {
   formDialog(p ? `Edit ${p.name}` : 'Add a position', h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, value: p ? p.name : '' })),
-    field('Department', select(DEPARTMENTS, p ? p.department : 'lifts', { name: 'department' })),
-    field('Guests per staff member', input({ name: 'visits', type: 'number', min: 1, value: p && p.visits_per_staff ? p.visits_per_staff : '' }), 'Used by Staffing needs: one person for every this many expected guests')), async (fd) => {
+    field('Department', select(departmentsFor(), p ? p.department : departmentsFor()[0], { name: 'department' })),
+    isMuni() ? null : field('Guests per staff member', input({ name: 'visits', type: 'number', min: 1, value: p && p.visits_per_staff ? p.visits_per_staff : '' }), 'Used by Staffing needs: one person for every this many expected guests')), async (fd) => {
     const visits = String(fd.get('visits') || '');
     const body = { name: String(fd.get('name') || '').trim(), department: String(fd.get('department')), visits_per_staff: visits ? Number(visits) : null };
     if (p) await patch(`/workforce/positions/${p.id}`, body); else await post('/workforce/positions', body);

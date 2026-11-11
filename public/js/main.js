@@ -14,7 +14,7 @@ import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, restoreDeviceKey, dropDeviceKey } from './outbox.js';
 import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection, AREA_MENU } from './nav.js';
 import { icon } from './icons.js';
-import { h, svg, clear, ctx, can, isManager, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr, noteBack } from './ui.js';
+import { h, svg, clear, ctx, can, isManager, isMuni, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr, noteBack } from './ui.js';
 
 const VIEWS = [
   // [hash, label, who may open it, loader]
@@ -45,7 +45,19 @@ const VIEWS = [
   ['settings', 'Settings', () => true, () => import('./views/settings.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
   ['area', 'Summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
+  // The municipal edition (muni release 1). Each opens with its app (VIEW_MODULE) on; Crew is the staff role, Front desk
+  // the counter role. The owning workstreams replace the stub files.
+  ['requests', 'Requests', () => can('counter', 'staff'), () => import('./views/requests.js')],
+  ['notices', 'Street notices', () => can('counter'), () => import('./views/street-notices.js')],
+  ['works', 'Work orders', () => can('staff'), () => import('./views/works.js')],
+  ['assetprograms', 'Programs', () => can('staff'), () => import('./views/asset-programs.js')],
+  ['bulk', 'Bulk pickup', () => can('counter', 'staff'), () => import('./views/bulk-pickup.js')],
+  ['buildings', 'Buildings', () => can('counter', 'staff'), () => import('./views/buildings.js')],
 ];
+// A view whose app (lib/modules.js) has another name. Every other view's key is its app's key.
+const VIEW_MODULE = { requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings' };
+// The views a municipality may have at all (with their apps on, for the roles that may open them). Ski views never show there.
+const MUNI_VIEWS = ['dashboard', 'inbox', 'myshifts', 'requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'workforce', 'messages', 'documents', 'settings', 'help'];
 
 // Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings. Instructor
 // availability is Lessons, Instructors, Availability for everyone but an instructor, whose own menu keeps the page.
@@ -62,12 +74,13 @@ const app = document.getElementById('app');
 const SLUG_KEY = 'so.mountain';
 
 // Verdynt/OS Patrol: a mountain with Patrol and none of the front-desk or mountain apps is a patrol on its own.
-const patrolOnly = () => Boolean(ctx.me.modules) && ctx.me.modules.includes('patrol') && !['sell', 'conditions', 'rentals', 'school'].some((k) => ctx.me.modules.includes(k));
+const patrolOnly = () => !isMuni() && Boolean(ctx.me.modules) && ctx.me.modules.includes('patrol') && !['sell', 'conditions', 'rentals', 'school'].some((k) => ctx.me.modules.includes(k));
 
 function defaultView() {
   const role = ctx.me.role;
   const open = (k) => visibleViews().some((v) => v[0] === k);
   if (role === 'area') return 'area';
+  if (isMuni()) return open('dashboard') ? 'dashboard' : (visibleViews()[0] || ['settings'])[0];
   if (patrolOnly()) return open('patrol') ? 'patrol' : 'settings';
   // A menu (owners and managers have one too) starts on its start screen, or on the first app in it this person can open.
   const menu = ctx.me.menu;
@@ -552,13 +565,18 @@ const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 
 // An app the platform has turned off for this mountain is hidden for everyone, including the owner.
 const ALWAYS = ['dashboard', 'brief', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
-const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
+const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(VIEW_MODULE[key] || key);
 function visibleViews() {
+  // A municipality: Today and Inbox, My shifts when Staff and schedule is on, and its own apps (muni release 1).
+  if (isMuni()) {
+    const shifts = Boolean(ctx.me.modules) && ctx.me.modules.includes('workforce');
+    return VIEWS.filter((v) => MUNI_VIEWS.includes(v[0]) && (v[0] !== 'myshifts' || shifts) && (VIEW_MODULE[v[0]] ? !ctx.me.modules || ctx.me.modules.includes(VIEW_MODULE[v[0]]) : appOn(v[0])) && v[2]());
+  }
   // The ski area's read-only login sees the summary (patrol, ski school, or both) and its own account, nothing else.
   if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));
   // A patrol on its own has no customers, waivers or day board to keep.
   const hide = patrolOnly() ? ['dashboard', 'people', 'waivers', 'lostfound', 'myshifts'] : [];
-  return VIEWS.filter((v) => !hide.includes(v[0]) && appOn(v[0]) && v[2]());
+  return VIEWS.filter((v) => !hide.includes(v[0]) && !VIEW_MODULE[v[0]] && appOn(v[0]) && v[2]()); // the municipal views never show for a mountain
 }
 
 let frame = null;

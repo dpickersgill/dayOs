@@ -522,10 +522,10 @@ const api = express.Router();
 const M = require('../lib/modules');
 let planCache = { at: 0, body: null };
 
-/** The plans and add-ons mountains can buy, for the Pricing page. Only what the console marks active. */
+/** The plans and add-ons mountains can buy, for the Pricing page. Only what the console marks active, and only ski area plans (never a municipality's). */
 async function loadPlans() {
   if (!planCache.body || Date.now() - planCache.at > 60_000) {
-    const all = (await rows(pool, 'SELECT id, code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort FROM billing_plans WHERE active = 1 ORDER BY kind, sort, monthly_cents, id'));
+    const all = (await rows(pool, "SELECT id, code, name, blurb, kind, modules, monthly_cents, yearly_cents, sort FROM billing_plans WHERE active = 1 AND org_type = 'mountain' ORDER BY kind, sort, monthly_cents, id"));
     const label = (k) => (M.MODULES.find((m) => m.key === k) || { label: k }).label.replace(/\s*\(add-on\)/i, '');
     const shape = (p) => ({ code: p.code, name: p.name, blurb: p.blurb, monthly_cents: Number(p.monthly_cents), yearly_cents: Number(p.yearly_cents), apps: String(p.modules || '').split(',').filter(Boolean).map((k) => ({ key: k, label: label(k) })) });
     planCache = { at: Date.now(), body: { plans: all.filter((p) => p.kind === 'plan').map(shape), addons: all.filter((p) => p.kind === 'addon').map(shape), trial_days: require('../lib/billing').TRIAL_DAYS } };
