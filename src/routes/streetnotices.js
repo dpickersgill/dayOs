@@ -513,7 +513,7 @@ async function publicNotice(t, n) {
   const areas = await SN.areasOf(pool, t.id, n.id);
   const updates = await rows(pool, "SELECT kind, sms_text, body, COALESCE(queued_at, created_at) AS at FROM street_notice_updates WHERE tenant_id = ? AND notice_id = ? AND kind <> 'first' AND status IN ('queued','done') ORDER BY id", [t.id, n.id]);
   return {
-    municipality: t.name, code: n.code, type: n.type, type_label: SN.TYPE[n.type].label, title: n.title, summary: n.sms_text, body: n.body || null,
+    municipality: t.name, timezone: t.timezone, code: n.code, type: n.type, type_label: SN.TYPE[n.type].label, title: n.title, summary: n.sms_text, body: n.body || null,
     status: n.status === 'ended' ? 'ended' : 'active', starts_at: n.starts_at, ends_expected_at: n.ends_expected_at, sent_at: n.sent_at, ended_at: n.ended_at,
     streets: areas.map((a) => SN.areaWords(a)), operator_note: SN.TYPE[n.type].operator ? 'Issued by our certified water operator.' : null,
     updates: updates.map((u) => ({ kind: u.kind, at: u.at, text: u.body || u.sms_text })),

@@ -24,7 +24,19 @@ const mailer = require('../src/lib/mailer');
 const quiet = require('../src/lib/quiet');
 const SN = require('../src/lib/streetnotices');
 const { signature } = require('../src/routes/twilioinbound');
-const { createMuniTenant } = require('./helpers/muni');
+const helper = require('./helpers/muni');
+
+// Signing in on a new device asks for an emailed code while email is set up, so logins are made with email off for a moment.
+async function withoutMail(fn) {
+  const was = process.env.POSTMARK_SERVER_TOKEN; delete process.env.POSTMARK_SERVER_TOKEN;
+  try { return await fn(); } finally { process.env.POSTMARK_SERVER_TOKEN = was; }
+}
+async function createMuniTenant(b, opts) {
+  const M = await withoutMail(() => helper.createMuniTenant(b, opts));
+  const add = M.addLogin;
+  M.addLogin = (role, extra) => withoutMail(() => add(role, extra));
+  return M;
+}
 
 let server; let base; let tw; let pm;
 const texts = []; const mails = [];
@@ -375,7 +387,7 @@ test('import: residents who agreed elsewhere, the agreement confirmed and audite
   await signUp(M, { street: st['Hill Road'], house: '1', phone: stopped });
   await textBack(stopped, 'STOP');
   const a = newPhone(); const b = newPhone();
-  const csv = `name,phone,email,street,house_number,unit,topics\nAnn Imported,${a},,Hill Rd,20,,leaves\nBo Imported,${b},bo.${suffix}@example.com,Hill Road,21,,\nCy Stopped,${stopped},,Hill Road,1,,\nDee Nowhere,${newPhone()},,Lost Street,3,,\nEd NoContact,,,Hill Road,4,,`;
+  const csv = `name,phone,email,street,house_number,unit,topics\nAnn Imported,${a},,Hill Rd,20,,leaves\nBo Imported,${b},bo.${suffix}@example.com,Hill Road,21,,\nCy Stopped,${stopped},,Hill Road,1A,,\nDee Nowhere,${newPhone()},,Lost Street,3,,\nEd NoContact,,,Hill Road,4,,`;
   assert.equal((await api('POST', '/street-notices/residents/import', { token: M.token, body: { csv, consent_note: 'Paper forms' } })).status, 400, 'the agreement must be confirmed');
   const crew = await M.addLogin('staff');
   assert.equal((await api('POST', '/street-notices/residents/import', { token: crew.token, body: { csv, consent: true, consent_note: 'Paper forms at the open house' } })).status, 403);
@@ -388,8 +400,9 @@ test('import: residents who agreed elsewhere, the agreement confirmed and audite
   assert.equal(leaves.texts, 1, 'Ann picked leaf collection');
   const audit = await q("SELECT detail FROM audit_log WHERE tenant_id = ? AND entity = 'alert_signups' AND action = 'import'", [M.id]);
   assert.equal(audit.length, 1);
-  assert.equal(JSON.parse(audit[0].detail).consent_confirmed, true);
-  assert.ok(!/Imported|example\.com/.test(audit[0].detail), 'no names or contacts in the audit trail');
+  const detail = typeof audit[0].detail === 'string' ? JSON.parse(audit[0].detail) : audit[0].detail;
+  assert.equal(detail.consent_confirmed, true);
+  assert.ok(!/Imported|example\.com/.test(JSON.stringify(detail)), 'no names or contacts in the audit trail');
   // Imported once: importing again adds nobody twice.
   assert.equal(ok(await api('POST', '/street-notices/residents/import', { token: M.token, body: { csv, consent: true, consent_note: 'Paper forms at the open house' } })).already, 3);
 });
@@ -429,7 +442,7 @@ test('gating and isolation: off for a ski area and with Resident requests off; o
   assert.equal((await api('GET', `/public/${off.slug}/alerts`)).status, 404);
   const ski = await api('POST', '/platform/tenants', { headers: { 'x-platform-key': process.env.BOOTSTRAP_KEY }, body: { slug: `sn-ski-${suffix}`, name: 'Ski Test', billing: 'comped', owner: { email: `gm@sn-ski-${suffix}.test`, password: 'correct-horse-battery', first_name: 'G', last_name: 'M' } } });
   assert.equal(ski.status, 201, ski.text);
-  const skiToken = (await api('POST', '/auth/login', { body: { tenant: `sn-ski-${suffix}`, login: `gm@sn-ski-${suffix}.test`, password: 'correct-horse-battery' } })).body.token;
+  const skiToken = (await withoutMail(() => api('POST', '/auth/login', { body: { tenant: `sn-ski-${suffix}`, login: `gm@sn-ski-${suffix}.test`, password: 'correct-horse-battery' } }))).body.token;
   assert.equal((await api('GET', '/street-notices', { token: skiToken })).status, 403);
   assert.equal((await api('GET', `/public/sn-ski-${suffix}/alerts`)).status, 404);
   // B cannot read, change or send A's notice, nor preview A's streets.

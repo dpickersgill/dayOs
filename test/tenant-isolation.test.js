@@ -92,6 +92,8 @@ const SIGNED = {
   'helpsms.js': { router: '/patrol' },
   // Municipal edition (muni release 1): a municipality's street list.
   'streets.js': { router: '/requests/streets' },
+  // Municipal edition: street notices and the resident alert list.
+  'streetnotices.js': { router: '/street-notices' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -106,6 +108,7 @@ const PUBLIC = {
   // help/sms: Twilio's inbound text webhook for every mountain's help number (refused without Twilio's signature).
   'helpsms.js': { publicRouter: '/public' },
   'streets.js': { publicRouter: '/public' }, // muni release 1: a municipality's street names, keyed by its web address
+  'streetnotices.js': { publicRouter: '/public' }, // muni release 1: alert sign-ups, a notice's page and the manage link, keyed by the municipality's web address and a signed link
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.
 const EXEMPT = {
