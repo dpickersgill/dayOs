@@ -197,9 +197,9 @@ function createApp() {
   app.get('/rental-form/:slug', page('rental-form.html'));
   app.get('/waiver/:slug', page('waiver.html'));
   app.get('/availability/:slug', page('availability.html'));
-  // A municipality's bulk trash pickup page (muni release 1, Trash and recycling): /public/<municipality>/bulk-pickup, and
-  // a resident's own booking at ?booking=<token>.
-  app.get('/public/:slug/bulk-pickup', page('bulk-pickup.html'));
+  // A municipality's bulk trash pickup page (muni release 1, Trash and recycling): /bulk-pickup/<municipality>, and a
+  // resident's own booking at ?booking=<token>. Every municipal public page is /<page>/<municipality> (RUNBOOK.md).
+  app.get('/bulk-pickup/:slug', page('bulk-pickup.html'));
   // Street alerts (muni release 1): sign up, a notice's page, the email link and the manage link in every alert.
   app.get(['/alerts/:slug', '/alerts/:slug/:code', '/alerts/:slug/:kind/:token'], page('resident-alerts.html'));
 

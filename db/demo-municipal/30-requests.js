@@ -44,9 +44,12 @@ function picture(color, stage, seed) {
 
 // ---------------------------------------------------------------- the borough's choices
 // [category, make safe hours, fix hours, how often it is reported (weight)]
+// The borough's sample response targets, so the repair record shows which requests met them and which did not: a pothole
+// made safe in 24 hours and fixed in 5 days, a sign down made safe in 4 hours and fixed in 3 days, a street light fixed
+// in 10 days, a water leak or a sewer backup made safe in 2 hours.
 const STANDARDS = [
-  ['Pothole', 24, 72, 30], ['Street light out', null, 240, 18], ['Sign down or damaged', 4, 72, 8], ['Sidewalk or curb', 48, 720, 7],
-  ['Storm drain or flooding', 8, 72, 8], ['Water leak or low pressure', 4, 24, 6], ['Sewer backup', 2, 24, 4], ['Missed trash or recycling', null, 48, 10],
+  ['Pothole', 24, 120, 30], ['Street light out', null, 240, 18], ['Sign down or damaged', 4, 72, 8], ['Sidewalk or curb', 48, 720, 7],
+  ['Storm drain or flooding', 8, 72, 8], ['Water leak or low pressure', 2, 24, 6], ['Sewer backup', 2, 24, 4], ['Missed trash or recycling', null, 48, 10],
   ['Tree or branch down', 4, 72, 7], ['Other', null, null, 2],
 ];
 const ARTERIAL = ['Main Street', 'Bridge Street', 'Nutt Road', 'Ridge Avenue'];

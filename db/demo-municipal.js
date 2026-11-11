@@ -6,7 +6,8 @@
 // then runs every file in db/demo-municipal/ in name order. Each file exports
 //   async function (conn, tenantId, helpers)
 // and adds its own app's sample data: 00-base.js (the foundation) adds the logins and staff, the street list, the fleet
-// with meters and service plans, and work orders. A feature adds its own file (10-requests.js, 20-bulk-pickup.js...).
+// with meters and service plans, and work orders; then 20-assets.js, 30-requests.js, 40-trash.js, 50-notices.js and
+// 60-buildings.js each add their app's.
 // Safe to run again: every file finds what is there already (by name, title or username) and adds only what is missing.
 // Prints the owner's login at the end, like db/seed.js. Every login uses SEED_PASSWORD.
 const fs = require('fs');
@@ -24,19 +25,23 @@ if (!password || password.length < 12) { console.error('Set SEED_PASSWORD to at 
 const NAME = 'Riverbend Borough';
 const TZ = 'America/New_York';
 const DIR = path.join(__dirname, 'demo-municipal');
+/** The municipal add-ons, all on for a demo: Water, Sewer, Stormwater, Trash and recycling, Buildings. */
+const ADD_ONS = ['water', 'sewer', 'stormwater', 'solidwaste', 'buildings'];
 
 /** The tenant, made when it is not there. A ski area with this address is left alone. */
 async function tenantFor(conn) {
   const [[t]] = await conn.query('SELECT id, org_type FROM tenants WHERE slug = ?', [slug]);
   if (t) {
     if (t.org_type !== 'municipality') throw new Error(`${slug} is a ski area, not a municipality. Pick another address.`);
+    // A demo borough made before an add-on existed, or with one turned off since, gets every municipal add-on on again.
+    for (const k of ADD_ONS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE enabled = 1', [t.id, k]);
     return { id: Number(t.id), made: false };
   }
   const [r] = await conn.query("INSERT INTO tenants (slug, name, timezone, org_type, address, phone, weekly_report) VALUES (?, ?, ?, 'municipality', ?, ?, 0)",
     [slug, NAME, TZ, '100 Main Street, Riverbend, PA 19000', '(555) 010-2400']);
   const id = Number(r.insertId);
   // A demo shows every municipal app: the core and every add-on.
-  const on = M.apply({}, { water: true, sewer: true, stormwater: true, solidwaste: true, buildings: true }, 'municipality');
+  const on = M.apply({}, Object.fromEntries(ADD_ONS.map((k) => [k, true])), 'municipality');
   for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [id, k, on.includes(k) ? 1 : 0]);
   await conn.query('INSERT IGNORE INTO tenant_billing (tenant_id, comped) VALUES (?, 1)', [id]);
   return { id, made: true };

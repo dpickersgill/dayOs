@@ -134,7 +134,7 @@ test('a municipality starts with the usual settings: Monday, noon Thursday, 40 s
   assert.deepEqual(s.sizes.map((x) => [x.name, x.price_cents]), [['Small', 1500], ['Medium', 2500], ['Large', 3500], ['Metal', 0]]);
   assert.equal(s.pay_card, true); assert.equal(s.pay_stickers, true); assert.equal(s.not_out_policy, 'no_refund');
   assert.equal(s.card_ready, false, 'no Stripe account yet');
-  assert.match(s.page, new RegExp(`/public/${A.slug}/bulk-pickup$`));
+  assert.match(s.page, new RegExp(`/bulk-pickup/${A.slug}$`));
   is(await api('GET', '/solid-waste/settings', { token: deskA.token }), 403, 'the front desk does not change settings');
   is(await api('PUT', '/solid-waste/settings', { token: crewA.token, body: {} }), 403, 'nor does the crew');
 });
@@ -540,7 +540,7 @@ test('the app is gated: off for a municipality without it and for a ski area', a
   is(await pub('GET', C.slug, ''), 404, 'no public page either');
   is(await api('GET', '/solid-waste/today', { token: skiToken }), 403);
   is(await pub('GET', `tr-ski-${suffix}`, ''), 404);
-  const page = await call('GET', `/public/${A.slug}/bulk-pickup`);
+  const page = await call('GET', `/bulk-pickup/${A.slug}`);
   is(page, 200); assert.match(page.text, /bulkpage\.js/);
 });
 

@@ -1,4 +1,4 @@
-// Bulk pickup (muni release 1, the Trash and recycling app). Residents book and pay online at /public/<slug>/bulk-pickup;
+// Bulk pickup (muni release 1, the Trash and recycling app). Residents book and pay online at /bulk-pickup/<slug>;
 // here staff work with those bookings.
 //   Collection day   the stop list for a day, by street then house number, with counts by size. On a phone the crew taps
 //                    Picked up, Not out or Not accepted (a photo is required for the last two). Print view for the office.

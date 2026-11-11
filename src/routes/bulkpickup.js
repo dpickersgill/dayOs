@@ -11,7 +11,7 @@
 //   POST /bookings/:id/cancel | paid | refund-given | send-link | photos | outcome | decision
 //   GET  /bookings/:id/photos/:photoId   the photo as taken, with its SHA-256
 //   GET  /report, GET /export        numbers by month; the bookings as a spreadsheet (no contact details unless a manager asks)
-// Public side, /public/<slug>/bulk-pickup (no sign-in; the page and its booking link):
+// Public side: the page is /bulk-pickup/<slug>; its API is /public/<slug>/bulk-pickup (no sign-in; the page and its booking link):
 //   GET  /:slug/bulk-pickup          the page: sizes, streets, collection days, how to pay, the rules
 //   POST /:slug/bulk-pickup/bookings
 //   GET  /:slug/bulk-pickup/bookings/:token, POST .../cancel, POST .../pay

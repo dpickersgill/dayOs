@@ -348,9 +348,11 @@ export const MUNI_TODAY = [
   ['requests', '/requests/today', () => true],
   ['requests', '/street-notices/today', () => true],
   ['solidwaste', '/solid-waste/today', () => true],
-  ['water', '/water/today', () => true],
-  ['sewer', '/sewer/today', () => true],
-  ['stormwater', '/stormwater/today', () => true],
+  // Water, Sewer and Stormwater cards are for the crew and managers, as their routes are (routes/utilities.js), so the
+  // front desk's Today does not ask for cards it may not read.
+  ['water', '/water/today', () => can('staff')],
+  ['sewer', '/sewer/today', () => can('staff')],
+  ['stormwater', '/stormwater/today', () => can('staff')],
   ['buildings', '/buildings/today', () => true],
 ];
 

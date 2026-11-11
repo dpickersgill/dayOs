@@ -162,7 +162,7 @@ async function insertBooking(conn, tenantId, b, lines) {
 const itemsOf = (db, tenantId, bookingIds) => (bookingIds.length ? rows(db, 'SELECT booking_id, size_id, name, unit_cents, quantity FROM bulk_booking_items WHERE tenant_id = ? AND booking_id IN (?) ORDER BY id', [tenantId, bookingIds]) : Promise.resolve([]));
 const itemsText = (items) => items.map((i) => `${i.quantity} ${i.name}`).join(', ');
 const addressOf = (b) => `${b.house_number} ${b.street}${b.unit ? `, ${b.unit}` : ''}`;
-const pageLink = (base, slug) => `${base}/public/${encodeURIComponent(slug)}/bulk-pickup`;
+const pageLink = (base, slug) => `${base}/bulk-pickup/${encodeURIComponent(slug)}`;
 const viewLink = (base, slug, tok) => `${pageLink(base, slug)}?booking=${tok}`;
 
 /** Can this municipality take a card payment now? Its own connected Stripe account, ready, and not a demo. */

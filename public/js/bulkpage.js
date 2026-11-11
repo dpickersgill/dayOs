@@ -1,4 +1,4 @@
-// A municipality's bulk trash pickup page (/public/<municipality>/bulk-pickup), linked from its website. Phone first:
+// A municipality's bulk trash pickup page (/bulk-pickup/<municipality>), linked from its website. Phone first:
 // one step at a time (address, day, items, contact, pay), a running total, then a reference and a link to view or cancel.
 // With ?booking=<token> it shows that one booking. It never shows anyone else's booking or address.
 import { h, clear } from './ui.js';
