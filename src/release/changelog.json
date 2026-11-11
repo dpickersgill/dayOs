@@ -1,6 +1,33 @@
 {
   "releases": [
     {
+      "version": "2026.11.18",
+      "date": "2026-11-09",
+      "title": "A School only plan for a ski school on its own",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": "platform",
+          "text": "A School only plan, for a ski school that signs up on its own: Ski school, Documents and Instructor availability, $249 a month or $2,540 a year. It is on the website's Pricing page, and the Ski school page and Contact form take school sign-ups."
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "The ski area's free read-only login (Account, Logins, role Ski area) now also shows the ski school's day in numbers when a mountain has Ski school on: lessons and students booked by time, level and discipline, instructors rostered by name, and how many students have a waiver on file. Never a dollar figure or a family's name. It shows alongside the patrol summary when a mountain has both on.",
+          "help": "area-summary"
+        },
+        {
+          "kind": "improved",
+          "app": "school",
+          "who": [],
+          "text": "Texts to families and AI lesson recaps stay separate paid add-ons on the School only plan, the same as on every other plan.",
+          "help": "school-only"
+        }
+      ]
+    },
+    {
       "version": "2026.11.16",
       "date": "2026-11-09",
       "title": "Guest help: one tap or a text to reach patrol, mapped places and help signs",

@@ -16,6 +16,8 @@
   const SVGNS = 'http://www.w3.org/2000/svg';
   // kept the same as PATROL_ONLY in src/routes/site.js
   const PATROL_ONLY = ['Patient care reports and the report check', 'Requirements your patrol director sets', 'Dispatch and phone alerts', 'Duty, the patrol schedule and shift cover', 'Opening checks and the closing sweep', 'Medications, oxygen and AEDs', 'Records requests and legal hold', 'Documents', 'A free read-only login for the ski area'];
+  // kept the same as SCHOOL_ONLY in src/routes/site.js
+  const SCHOOL_ONLY = ['Lesson sessions with rosters and capacity', 'Packages that count down as they are used', 'Online lesson booking and requests', 'Instructor availability, posted by each instructor', 'Waivers signed at home or at the counter', 'Documents', 'A free read-only login for the ski area'];
   function sym(i, code) {
     const s = document.createElementNS(SVGNS, 'svg');
     s.setAttribute('width', '34'); s.setAttribute('height', '34'); s.setAttribute('viewBox', '0 0 34 34'); s.setAttribute('aria-hidden', 'true');
@@ -154,8 +156,8 @@
           el('div', { class: 'price' }, el('b', null, offered ? dollars(perMonth(p, interval)) : 'Ask us'), el('span', null, offered ? 'per month' : '')),
           el('p', { class: 'setup' }, interval === 'year' ? (p.yearly_cents ? `${dollars(p.yearly_cents)} billed once a year` : 'Not offered yearly')
             : interval === 'season' ? (p.yearly_cents ? `November to April only: ${dollars(p.yearly_cents)} a year` : 'Not offered over the season') : 'Billed monthly'),
-          // Patrol only is one app, so its card says what that app holds for a patrol (as the page's own HTML does)
-          el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...(p.code === 'patrol-only' ? PATROL_ONLY : added.map((a) => a.label)).map((t) => el('li', null, t))),
+          // Patrol only and School only are a few apps each, so their cards say what those apps hold (as the page's own HTML does)
+          el('ul', null, prev ? el('li', { class: 'plus' }, `Everything in ${prev.name}, plus:`) : null, ...(p.code === 'patrol-only' ? PATROL_ONLY : p.code === 'school-only' ? SCHOOL_ONLY : added.map((a) => a.label)).map((t) => el('li', null, t))),
           el('a', { class: `btn go${i === 1 ? '' : ' ghost'}`, href: `${base}/contact?kind=trial&plan=${encodeURIComponent(p.name)}` }, 'Request a trial mountain'));
       }));
       $('#planfine').textContent = `Prices are in US dollars, before any sales tax. ${interval === 'year' ? 'Yearly prices are shown per month and charged once a year.'
@@ -194,6 +196,7 @@
     walkthrough: 'Which part of the day is hardest right now?', trial: 'Anything we should set up for your trial? (lifts, apps you want first)',
     founding: 'Tell us about your mountain and what you would want from Verdynt/OS', question: 'Your question',
     patrol: 'About your patrol: how many patrollers, volunteer or paid, and who at the ski area should get the read-only login',
+    school: 'About your ski school: how many instructors and lessons a season, and who at the ski area should get the read-only login',
     review: 'About your reports: how many incidents a season, paper or software, and who reviews them today. Please don\'t paste patient details here',
     setup: 'What you run today (ticketing, rentals, school, patrol), roughly how many customers and staff, and when you would like to go live',
   };
@@ -220,7 +223,7 @@
   function contact() {
     const form = $('#leadform'); if (!form) return;
     const q = new URLSearchParams(location.search);
-    // three choices show; the others (founding, patrol, review, setup) appear only when a page links here for one
+    // three choices show; the others (founding, patrol, school, review, setup) appear only when a page links here for one
     const kind = q.get('kind'); if (kind && LABELS[kind]) { const r = form.querySelector(`input[name=kind][value="${kind}"]`); if (r) { r.closest('label').hidden = false; r.checked = true; } }
     const plan = q.get('plan'); if (plan) { const s = $('#f-plan'); if ([...s.options].some((o) => o.value === plan)) s.value = plan; }
     const msgLabel = $('#l-msg');
@@ -229,7 +232,7 @@
       msgLabel.firstChild.textContent = `${LABELS[k]} `;
       msgLabel.querySelector('.opt').hidden = k === 'question';
       if (k === 'founding') $('#f-found').checked = true;
-      $('#f-send').textContent = { walkthrough: 'Book my walkthrough', trial: 'Ask for a trial mountain', founding: 'Book my walkthrough', question: 'Send my question', patrol: 'Set up our patrol', review: 'Ask for a report review', setup: 'Ask for guided setup' }[k];
+      $('#f-send').textContent = { walkthrough: 'Book my walkthrough', trial: 'Ask for a trial mountain', founding: 'Book my walkthrough', question: 'Send my question', patrol: 'Set up our patrol', school: 'Set up our ski school', review: 'Ask for a report review', setup: 'Ask for guided setup' }[k];
     };
     form.addEventListener('change', (e) => { if (e.target.name === 'kind') syncKind(); });
     syncKind();

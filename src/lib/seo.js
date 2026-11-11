@@ -239,8 +239,9 @@ const FEATURES = ['Lift and trail status and inspections', 'Grooming and snowmak
 function head({ slug, origin, html, plans, verify = {}, sameAs = [], noindex = false, modified = null, asset = '' }) {
   const key = slug in META ? slug : 'notfound';
   const m = META[key];
-  // The lowest ski area plan: Patrol only is left out, as lib/demomail.js does, so "from" never quotes the patrol's own price.
-  const areaPlans = plans ? plans.plans.filter((p) => p.code !== 'patrol-only' && p.monthly_cents) : [];
+  // The lowest ski area plan: Patrol only and School only are left out, as lib/demomail.js does, so "from" never quotes
+  // one of those standalone plans' own price.
+  const areaPlans = plans ? plans.plans.filter((p) => p.code !== 'patrol-only' && p.code !== 'school-only' && p.monthly_cents) : [];
   const from = areaPlans.length ? dollars(Math.min(...areaPlans.map((p) => p.monthly_cents))) : '$199';
   const fill = (s) => String(s || '').replaceAll('{{FROM}}', from);
   const url = `${origin}/${key === 'notfound' ? '' : slug}`;

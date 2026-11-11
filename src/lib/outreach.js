@@ -107,7 +107,7 @@ async function contextFor(db, seq, s) {
   const c = await one(db, 'SELECT * FROM prospect_contacts WHERE id = ?', [seq.contact_id]);
   const plans = await rows(db, "SELECT code, kind, monthly_cents FROM billing_plans WHERE kind = 'plan' AND monthly_cents > 0 ORDER BY monthly_cents").catch(() => []);
   const patrol = plans.find((x) => x.code === 'patrol-only');
-  const full = plans.filter((x) => x.code !== 'patrol-only');
+  const full = plans.filter((x) => x.code !== 'patrol-only' && x.code !== 'school-only');
   const senderName = s.sender_name || 'The Verdynt/OS team';
   return {
     prospect: p, contact: c,

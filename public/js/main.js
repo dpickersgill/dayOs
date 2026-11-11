@@ -44,7 +44,7 @@ const VIEWS = [
   ['calendar', 'Calendar', () => ctx.me.role !== 'area', () => import('./views/calendar.js')],
   ['settings', 'Settings', () => true, () => import('./views/settings.js')],
   ['help', 'Help', () => true, () => import('./views/help.js')],
-  ['area', 'Patrol summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
+  ['area', 'Summary', () => ctx.me.role === 'area', () => import('./views/area.js')],
 ];
 
 // Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings. Instructor
@@ -554,7 +554,7 @@ const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
 const ALWAYS = ['dashboard', 'brief', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
 const appOn = (key) => ALWAYS.includes(key) || !ctx.me.modules || ctx.me.modules.includes(key);
 function visibleViews() {
-  // The ski area's read-only login sees the patrol summary and its own account, nothing else.
+  // The ski area's read-only login sees the summary (patrol, ski school, or both) and its own account, nothing else.
   if (ctx.me.role === 'area') return VIEWS.filter((v) => ['area', 'settings', 'help'].includes(v[0]));
   // A patrol on its own has no customers, waivers or day board to keep.
   const hide = patrolOnly() ? ['dashboard', 'people', 'waivers', 'lostfound', 'myshifts'] : [];
@@ -567,7 +567,7 @@ function buildShell() {
   // Instructor availability is a tab of Lessons for everyone but an instructor, so it is not a menu item for them.
   // The Morning brief is opened from Today, its email and its phone alert, so it is not a menu item.
   const inMenu = visibleViews().filter(([key]) => key !== 'brief' && (key !== 'availability' || ownAvailability()));
-  // The ski area's read-only login has a menu of its own: the patrol summary (and Help), no All apps.
+  // The ski area's read-only login has a menu of its own: the summary (and Help), no All apps.
   const menu = ctx.me.role === 'area' ? AREA_MENU : ctx.me.menu || null;
   frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu, links: ctx.me.menu_links || {} });
   app.append(frame.shell);

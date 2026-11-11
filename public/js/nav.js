@@ -36,7 +36,7 @@ export function roleName(me) {
   if (me.role === 'patrol' && me.patrol_lead) return ROLE_NAMES.patrol_director;
   return ROLE_NAMES[me.role] || label(me.role);
 }
-// The ski area's read-only login: its menu is the patrol summary (and Help), never All apps.
+// The ski area's read-only login: its menu is the summary (and Help), never All apps.
 export const AREA_MENU = { apps: ['area'], start: 'area' };
 const OPEN_KEY = 'so.nav.open'; // which groups this device keeps open
 
@@ -144,7 +144,7 @@ export function menuPlan(views, menu, links = {}) {
   const groups = GROUPS.map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
   const extra = more.filter((k) => !groups.some((g) => g.keys.includes(k))); // a new app shows somewhere rather than nowhere
   if (extra.length) groups.push({ name: 'More', id: 'more', keys: extra });
-  // The phone bar always starts with the screen the menu opens on (Today, Patrol, Lessons, Sell, Patrol summary).
+  // The phone bar always starts with the screen the menu opens on (Today, Patrol, Lessons, Sell, Summary).
   const start = menu && menu.start && has(menu.start) && menu.start !== 'inbox' ? [menu.start] : [];
   const first = [...new Set([...start, ...apps, ...PHONE_HOME.filter(has)])].slice(0, 4);
   return { home, apps, groups, bottom, more, first };

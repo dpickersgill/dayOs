@@ -176,7 +176,7 @@ async function openProspect(id) {
   const priority = select(PRIORITY.map(([n, t]) => [String(n), t]), String(p.priority), { 'aria-label': 'Priority' });
   const next = input({ maxlength: 300, value: p.next_step || '', placeholder: 'For example: call the GM about a demo', 'aria-label': 'Next step' });
   const nextOn = input({ type: 'date', value: p.next_on ? String(p.next_on).slice(0, 10) : '', 'aria-label': 'Next step date' });
-  const plan = select([['', 'Not known yet'], ['Lodge', 'Lodge'], ['Mountain', 'Mountain'], ['Resort', 'Resort'], ['Patrol only', 'Patrol only']], p.plan_interest || '', { 'aria-label': 'Plan they would fit' });
+  const plan = select([['', 'Not known yet'], ['Lodge', 'Lodge'], ['Mountain', 'Mountain'], ['Resort', 'Resort'], ['Patrol only', 'Patrol only'], ['School only', 'School only']], p.plan_interest || '', { 'aria-label': 'Plan they would fit' });
   const savePipe = button('Save', async () => {
     try {
       await call('PATCH', `/prospects/${p.id}`, { stage: stage.value, priority: Number(priority.value), next_step: next.value, next_on: nextOn.value || null, plan_interest: plan.value || null });

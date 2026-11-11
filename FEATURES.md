@@ -695,6 +695,12 @@ Platform console, **Demos**: everyone who started a demo, newest first. Tiles sh
 - **Patrol-only menu**: signing in opens Patrol; Today, Customers, Waivers and My shifts are hidden.
 - **Website**: Contact takes a "Patrol only" sign-up (lead kind `patrol`); the Ski patrol page explains patrol-only and the free ski area login.
 
+### Ski school on its own (2026.11.9)
+
+- **School only plan** (`school-only`: Ski school, Documents and Instructor availability, $249 a month, $2,540 a year), seeded once on existing installs; on the website's Pricing page. Priced above Patrol only because a ski school handles money (lesson sales, credits) and is more software than Patrol, which handles none. Texts to families and AI lesson recaps stay paid add-ons, the same as for any other plan: they are never bundled into School only's modules.
+- **Ski area read-only login, generalized** (`src/routes/areaview.js`, role `area`): `GET /area/summary` now shows Patrol's fields at the top level exactly as before when Patrol is on, and a `school` object (lessons and students booked by time slot, level and discipline; instructors rostered that day, by name; how many of today's students have a waiver on file) when Ski school is on; both appear together if a mountain somehow has both. `/area/reports` and `/area/reports/:id` stay Patrol's own, unaffected. The school summary never includes a dollar figure, a lesson price, or a family's name or contact details.
+- **Website**: Contact takes a "School only" sign-up (lead kind `school`); the Ski school page explains school-only and the free ski area login; Pricing lists the School only plan and its Guided setup price.
+
 ### Security
 
 - **Tiered sign-in (2026.10.17):** passkeys (WebAuthn, `@simplewebauthn/server`) for sign-in, as the second step and for the second check; owners, managers, patrol leads and (after two weeks, owner can turn off) patrollers must have a passkey or an app; crew use a password or a PIN on an enrolled terminal; a new device gets an email alert and, without two-step, an emailed code; Account lists sessions and devices; season end stops seasonal logins; the console's operators sign in with a passkey only once they have one and open a mountain with a reason for up to 8 hours (`src/lib/passkeys.js`, `src/lib/stepup.js`, `src/routes/security.js`, `db/zerotrust.sql`).

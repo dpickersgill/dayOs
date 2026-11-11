@@ -1,5 +1,6 @@
-// The ski area's view of its patrol (free, read only): one day's patrol in numbers, and the approved reports. Opening a
-// report shows the copy frozen when it was approved, and is recorded in the audit log.
+// The ski area's view (free, read only): one day's patrol in numbers and its approved reports, one day's ski school in
+// numbers, or both when a mountain somehow has both on. Opening a patrol report shows the copy frozen when it was
+// approved, and is recorded in the audit log. Ski school shows counts only, never a family's name.
 
 import { get } from '../api.js';
 import { h, clear, ctx, input, field, button, table, dialog, errorBox, empty, label, state, fmtDate, fmtDateTime, todayStr } from '../ui.js';
@@ -7,24 +8,33 @@ import { h, clear, ctx, input, field, button, table, dialog, errorBox, empty, la
 const CAT = { injury: 'Injury', collision: 'Collision', lost_person: 'Lost person', equipment: 'Equipment', medical: 'Medical', conduct: 'Conduct', other: 'Other' };
 const SEV = { minor: 'Minor', moderate: 'Moderate', serious: 'Serious', critical: 'Critical' };
 const tally = (obj, names) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${names[k] || label(k)} ${n}`).join(', ') || 'None';
+const clock = (t) => { const [hh, mm] = t.split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
 
 export async function render(root) {
   const today = todayStr(ctx.tz);
   const date = input({ type: 'date', name: 'date', value: today, max: today, 'aria-label': 'Day' });
   const summary = h('div', { class: 'stack', 'data-area': 'summary' });
+  const schoolBox = h('div', { class: 'stack', 'data-area': 'school' });
   const reports = h('div', { class: 'stack', 'data-area': 'reports' });
-  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Patrol summary'),
-    h('p', { class: 'muted' }, 'Your patrol\'s day in numbers, and every approved report. Read only: reports in progress stay with patrol until they are approved.'))),
-  h('div', { class: 'row' }, field('Day', date)), summary, reports);
-  date.addEventListener('change', () => drawSummary());
+  root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Summary'),
+    h('p', { class: 'muted' }, 'Your mountain\'s day in numbers, read only.'))),
+  h('div', { class: 'row' }, field('Day', date)), summary, schoolBox, reports);
+  let patrolOn = false;
+  date.addEventListener('change', async () => { await drawSummary(); await drawReports(); });
 
   async function drawSummary() {
-    clear(summary);
+    clear(summary); clear(schoolBox);
     let s;
     try { s = await get(`/area/summary?date=${date.value || today}`); } catch (err) { summary.append(errorBox(err)); return; }
+    patrolOn = Boolean(s.calls);
+    if (patrolOn) drawPatrol(s);
+    if (s.school) drawSchool(s);
+  }
+
+  function drawPatrol(s) {
     const tile = (n, what) => h('div', { class: 'stat' }, h('strong', null, String(n)), h('span', null, what));
     summary.append(h('section', { class: 'panel stack' },
-      h('h2', null, s.today ? 'Today' : fmtDate(s.date)),
+      h('h2', null, 'Patrol: ', s.today ? 'Today' : fmtDate(s.date)),
       h('div', { class: 'stats' },
         tile(s.on_duty, 'patrollers on duty'), tile(s.runs_checked, 'runs checked'), tile(s.calls.total, s.calls.total === 1 ? 'call' : 'calls'),
         tile(s.calls.transported, 'transported'), tile(s.reports.approved, 'reports approved'), tile(s.reports.waiting, 'reports in progress')),
@@ -34,8 +44,23 @@ export async function render(root) {
       h('p', { class: 'muted small' }, `Season ${s.season} so far: ${s.season_calls.length ? s.season_calls.map((x) => `${CAT[x.category] || label(x.category)} ${x.n}`).join(', ') : 'no calls yet'}.`)));
   }
 
+  function drawSchool(s) {
+    const sc = s.school;
+    const tile = (n, what) => h('div', { class: 'stat' }, h('strong', null, String(n)), h('span', null, what));
+    schoolBox.append(h('section', { class: 'panel stack' },
+      h('h2', null, 'Ski school: ', s.today ? 'Today' : fmtDate(s.date)),
+      h('div', { class: 'stats' },
+        tile(sc.lessons, sc.lessons === 1 ? 'lesson' : 'lessons'), tile(sc.students, sc.students === 1 ? 'student booked' : 'students booked'),
+        tile(sc.waivers.on_file, `of ${sc.waivers.of} with a waiver on file`)),
+      sc.slots.length ? h('div', null, h('b', null, 'Lessons by time and level: '),
+        sc.slots.map((g) => `${clock(g.time)} ${label(g.level)} (${g.discipline === 'ski' ? 'ski' : label(g.discipline)}): ${g.students} of ${g.sessions === 1 ? '1 lesson' : `${g.sessions} lessons`}`).join(', ')) : h('p', { class: 'muted' }, 'No lessons scheduled.'),
+      h('p', null, h('b', null, 'Instructors rostered today: '), sc.instructors.length ? sc.instructors.join(', ') : 'None listed'),
+      h('p', { class: 'muted small' }, 'Counts only. No family names, contact details or lesson prices.')));
+  }
+
   async function drawReports() {
     clear(reports);
+    if (!patrolOn) return; // Patrol's own reports; nothing to show when this mountain has no Patrol
     let data;
     try { ({ data } = await get('/area/reports')); } catch (err) { reports.append(errorBox(err)); return; }
     reports.append(h('section', { class: 'panel stack' }, h('h2', null, 'Approved reports'),
@@ -49,7 +74,8 @@ export async function render(root) {
       ], data) : empty('No approved reports yet.')));
   }
 
-  await Promise.all([drawSummary(), drawReports()]);
+  await drawSummary();
+  await drawReports();
 }
 
 const live = (x) => !x.voided_at;
