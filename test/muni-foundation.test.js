@@ -315,3 +315,104 @@ test('the SPA knows the kind: isMuni and orgWord, municipal views with stubs, gr
   assert.deepEqual(nav.menuPlan([['conditions', 'Mountain status'], ['patrol', 'Patrol']], { apps: [], start: 'dashboard' }).groups.map((g) => g.name), ['On the hill']);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------- 6. streets
+test('streets: everyone signed in reads, managers add, rename, import and mark not in use; the public list is active names only', async () => {
+  const crew = await muni.addLogin('staff');
+  is(await api('POST', '/requests/streets', { token: crew.token, body: { name: 'Main Street' } }), 403, 'the crew reads, never edits');
+  const main = await api('POST', '/requests/streets', { token: muni.token, body: { name: '  Main   Street ', aliases: 'Main St, main street, Main' } });
+  is(main, 201);
+  is(await api('POST', '/requests/streets', { token: muni.token, body: { name: 'main street' } }), 409, 'one row per street, any case');
+  is(await api('POST', '/requests/streets', { token: muni.token, body: { name: 'x' } }), 400);
+
+  const imp = await api('POST', '/requests/streets/import', { token: muni.token, body: { text: 'Bridge Street\nChurch Street\n\nMain Street\nChurch Street\n', format: 'lines' } });
+  is(imp, 200);
+  assert.deepEqual([imp.body.added, imp.body.updated, imp.body.unchanged], [2, 0, 2]);
+  const csv = await api('POST', '/requests/streets/import', { token: muni.token, body: { text: 'name,aliases\nBridge Street,"Bridge St, Bridge"\nHigh Street,High St\n', format: 'csv' } });
+  is(csv, 200);
+  assert.deepEqual([csv.body.added, csv.body.updated], [1, 1]);
+
+  let list = (await api('GET', '/requests/streets', { token: crew.token })).body.data;
+  assert.deepEqual(list.map((s) => s.name), ['Bridge Street', 'Church Street', 'High Street', 'Main Street']);
+  assert.equal(list.find((s) => s.name === 'Main Street').aliases, 'Main St, Main', 'tidied: the name itself is not an alias');
+  assert.equal(list.find((s) => s.name === 'Bridge Street').aliases, 'Bridge St, Bridge');
+
+  const church = list.find((s) => s.name === 'Church Street');
+  is(await api('PATCH', `/requests/streets/${church.id}`, { token: muni.token, body: { name: 'Church Road' } }), 200);
+  is(await api('PATCH', `/requests/streets/${church.id}`, { token: muni.token, body: { name: 'Main Street' } }), 409);
+  const high = list.find((s) => s.name === 'High Street');
+  is(await api('PATCH', `/requests/streets/${high.id}`, { token: muni.token, body: { active: false } }), 200);
+  list = (await api('GET', '/requests/streets', { token: muni.token })).body.data;
+  assert.ok(!list.some((s) => s.name === 'High Street'), 'not in use: left off the list');
+  assert.ok((await api('GET', '/requests/streets?all=1', { token: muni.token })).body.data.some((s) => s.name === 'High Street' && !s.active));
+
+  const pub = await api('GET', `/public/${muni.slug}/streets`);
+  is(pub, 200);
+  assert.deepEqual(pub.body, { streets: ['Bridge Street', 'Church Road', 'Main Street'] }, 'names only, in use only');
+
+  // Another municipality never sees (or changes) these.
+  const other = await createMuniTenant(base);
+  assert.deepEqual((await api('GET', '/requests/streets?all=1', { token: other.token })).body.data, []);
+  is(await api('PATCH', `/requests/streets/${church.id}`, { token: other.token, body: { name: 'Taken Over' } }), 404);
+  assert.deepEqual((await api('GET', `/public/${other.slug}/streets`)).body, { streets: [] });
+  // A paused municipality, or one without Resident requests, has no public street list.
+  is(await platform('PUT', `/tenants/${other.id}/modules`, { modules: { requests: false } }), 200);
+  M.invalidate(other.id);
+  is(await api('GET', `/public/${other.slug}/streets`), 404);
+  is(await api('GET', '/requests/streets', { token: other.token }), 403);
+  const [[audited]] = await pool.query("SELECT COUNT(*) AS n FROM audit_log WHERE tenant_id = ? AND entity = 'streets'", [muni.id]);
+  assert.ok(Number(audited.n) >= 5, 'every change is in the audit log');
+});
+
+// ---------------------------------------------------------------- 5. the Work orders screen's filters
+test('work orders filter by priority, who they are assigned to, where they came from and overdue', async () => {
+  const t = await createMuniTenant(base);
+  const a = await api('POST', '/ops/work-orders', { token: t.token, body: { title: 'Urgent and late', priority: 'urgent', due_date: '2020-05-01' } });
+  const b = await api('POST', '/ops/work-orders', { token: t.token, body: { title: 'Normal, later', priority: 'normal', due_date: '2099-05-01' } });
+  const pm = await api('POST', '/ops/pm', { token: t.token, body: { name: 'Generator test run', interval_days: 30 } });
+  const c = await api('POST', `/ops/pm/${pm.body.id}/work-order`, { token: t.token });
+  const titles = async (q) => (await api('GET', `/ops/work-orders?${q}`, { token: t.token })).body.data.map((w) => w.id).sort();
+  assert.deepEqual(await titles('priority=urgent'), [a.body.id]);
+  assert.deepEqual(await titles('overdue=1'), [a.body.id]);
+  assert.deepEqual(await titles('source=preventive'), [c.body.id]);
+  assert.deepEqual(await titles('source=manual'), [a.body.id, b.body.id].sort());
+  assert.deepEqual(await titles('assigned_staff_id=none'), [a.body.id, b.body.id, c.body.id].sort());
+  assert.deepEqual(await titles('priority=bogus'), [a.body.id, b.body.id, c.body.id].sort(), 'an unknown priority is no filter');
+});
+
+// ---------------------------------------------------------------- 7. the demo borough
+test('db/demo-municipal.js builds Riverbend Borough, and running it again adds nothing', async () => {
+  const path = require('path'); const { execFileSync } = require('child_process');
+  const demo = `demo-boro-${suffix}`.slice(0, 40);
+  const run = () => execFileSync(process.execPath, [path.join(__dirname, '..', 'db', 'demo-municipal.js'), demo], { cwd: path.join(__dirname, '..'), env: { ...process.env, SEED_PASSWORD: 'a-demo-password-1' }, timeout: 120000 }).toString();
+  const out = run();
+  assert.match(out, new RegExp(`Login: tenant=${demo}`));
+  const [[t]] = await pool.query('SELECT id, name, org_type, timezone FROM tenants WHERE slug = ?', [demo]);
+  assert.deepEqual([t.name, t.org_type, t.timezone], ['Riverbend Borough', 'municipality', 'America/New_York']);
+  const counts = async () => {
+    const one = async (sql) => Number((await pool.query(sql, [t.id]))[0][0].n);
+    return {
+      users: await one('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?'),
+      crew: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'staff'"),
+      desk: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'counter'"),
+      streets: await one('SELECT COUNT(*) AS n FROM streets WHERE tenant_id = ?'),
+      assets: await one('SELECT COUNT(*) AS n FROM ops_assets WHERE tenant_id = ?'),
+      plans: await one('SELECT COUNT(*) AS n FROM pm_tasks WHERE tenant_id = ?'),
+      open: await one("SELECT COUNT(*) AS n FROM work_orders WHERE tenant_id = ? AND status NOT IN ('done','cancelled')"),
+      done: await one("SELECT COUNT(*) AS n FROM work_orders WHERE tenant_id = ? AND status = 'done'"),
+    };
+  };
+  const first = await counts();
+  assert.deepEqual(first, { users: 7, crew: 4, desk: 1, streets: 40, assets: 8, plans: 12, open: 6, done: 10 });
+  run();
+  assert.deepEqual(await counts(), first, 'the second run adds nothing');
+  // Its owner signs in, has every municipal app, and sees the Today cards for work orders.
+  const login = await api('POST', '/auth/login', { body: { tenant: demo, login: 'owner', password: 'a-demo-password-1' } });
+  is(login, 200);
+  M.invalidate(t.id);
+  const me = (await api('GET', '/auth/me', { token: login.body.token })).body;
+  for (const k of ['requests', 'water', 'sewer', 'stormwater', 'solidwaste', 'buildings', 'assets']) assert.ok(me.modules.includes(k), k);
+  const today = await api('GET', '/ops/work-orders/today', { token: login.body.token });
+  assert.equal(today.body.cards.find((c) => c.title === 'Open work orders').count, 6);
+  assert.equal((await api('GET', `/public/${demo}/streets`)).body.streets.length, 40);
+});
