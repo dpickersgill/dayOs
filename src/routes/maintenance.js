@@ -10,6 +10,7 @@ const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const O = require('../lib/ops');
 const { card, todayRoute } = require('../lib/today');
+const W = require('../lib/workcosts');
 
 const router = express.Router();
 const crew = requireRole('staff', 'manager', 'patrol');
@@ -31,6 +32,13 @@ async function whoIs(conn, req) {
 }
 async function mustExist(conn, table, tenantId, id, what) {
   if (id && !(await one(conn, `SELECT id FROM \`${table}\` WHERE tenant_id = ? AND id = ?`, [tenantId, id]))) throw notFound(what);
+}
+/** The department, fund and street on a work order exist; only a manager moves a cost to another department or fund. */
+async function booksExist(conn, req, b) {
+  await mustExist(conn, 'departments', req.auth.tenantId, b.department_id, 'Department');
+  await mustExist(conn, 'funds', req.auth.tenantId, b.fund_id, 'Fund');
+  await mustExist(conn, 'streets', req.auth.tenantId, b.street_id, 'Street');
+  if ((b.department_id !== undefined || b.fund_id !== undefined) && !['owner', 'manager'].includes(req.auth.role)) throw require('../lib/errors').forbidden('Only a manager chooses the department and fund');
 }
 
 // ---------------------------------------------------------------- fleet
@@ -124,13 +132,18 @@ const orderFields = {
   due_date: nullable(dateStr),
   // A valve, hydrant, manhole or pipe on the asset map (muni release 1).
   map_feature_id: nullable(z.number().int().positive()),
+  // A municipality's department and fund it is charged to, and the street (2026.11.20, lib/workcosts.js).
+  department_id: nullable(z.number().int().positive()), fund_id: nullable(z.number().int().positive()), street_id: nullable(z.number().int().positive()),
 };
 // The map feature a work order is on: its name or tag, kind and where it is (for the work order's mini map).
 const ORDER_SQL = `SELECT w.id, w.tenant_id, w.title, w.description, w.priority, w.status, w.asset_id, w.lift_id, w.location, w.source, w.assigned_staff_id,
     w.due_date, w.opened_at, w.opened_by, w.completed_at, w.labor_hours, w.parts_note, w.resolution, w.pm_task_id, a.name AS asset, l.name AS lift, CONCAT(p.first_name, ' ', p.last_name) AS assignee,
     w.map_feature_id, w.program_id, w.request_id, mf.name AS feature_name, mf.tag AS feature_tag, mf.kind AS feature_kind, mf.geometry AS feature_geometry, mf.lat AS feature_lat, mf.lng AS feature_lng,
-    ap.name AS program
+    ap.name AS program, w.department_id, w.fund_id, w.street_id, dp.name AS department, fu.name AS fund, wst.name AS street
   FROM work_orders w
+  LEFT JOIN departments dp ON dp.tenant_id = w.tenant_id AND dp.id = w.department_id
+  LEFT JOIN funds fu ON fu.tenant_id = w.tenant_id AND fu.id = w.fund_id
+  LEFT JOIN streets wst ON wst.tenant_id = w.tenant_id AND wst.id = w.street_id
   LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
   LEFT JOIN map_features mf ON mf.tenant_id = w.tenant_id AND mf.id = w.map_feature_id
   LEFT JOIN asset_programs ap ON ap.tenant_id = w.tenant_id AND ap.id = w.program_id
@@ -144,10 +157,13 @@ async function createOrder(conn, req, b, source = 'manual') {
   await mustExist(conn, 'staff', req.auth.tenantId, b.assigned_staff_id, 'Staff member');
   await mustExist(conn, 'map_features', req.auth.tenantId, b.map_feature_id, 'Map item');
   await mustExist(conn, 'asset_programs', req.auth.tenantId, b.program_id, 'Program');
-  const [r] = await conn.query('INSERT INTO work_orders (tenant_id, title, description, priority, asset_id, lift_id, location, source, assigned_staff_id, due_date, opened_by, map_feature_id, program_id, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  await booksExist(conn, req, b);
+  const [r] = await conn.query('INSERT INTO work_orders (tenant_id, title, description, priority, asset_id, lift_id, location, source, assigned_staff_id, due_date, opened_by, map_feature_id, program_id, request_id, department_id, fund_id, street_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [req.auth.tenantId, b.title, b.description ?? null, b.priority || 'normal', b.asset_id ?? null, b.lift_id ?? null, b.location ?? null, source, b.assigned_staff_id ?? null, b.due_date ?? null, req.auth.userId,
-      b.map_feature_id ?? null, b.program_id ?? null, b.request_id ?? null]);
+      b.map_feature_id ?? null, b.program_id ?? null, b.request_id ?? null, b.department_id ?? null, b.fund_id ?? null, b.street_id ?? null]);
   await audit(conn, req, 'create', 'work_orders', r.insertId, { source, ...(b.map_feature_id ? { map_feature_id: b.map_feature_id } : {}), ...(b.program_id ? { program_id: b.program_id } : {}) });
+  // A municipality's department, fund and street: what was chosen, else from its asset, map item or place (lib/workcosts.js).
+  await W.fillBooks(conn, req.auth.tenantId, { ids: [r.insertId] });
   return r.insertId;
 }
 
@@ -158,6 +174,15 @@ async function orderFilters(req) {
   if (status === 'open') where.push("w.status NOT IN ('done','cancelled')");
   else if (status === 'closed') where.push("w.status IN ('done','cancelled')");
   else if (status !== 'all') { where.push('w.status = ?'); params.push(status); }
+  // A date range (2026.11.20): closed work orders by the day they were completed, open ones by the day they were opened.
+  // Department and fund (a municipality's, lib/workcosts.js).
+  for (const [k, op] of [['from', '>='], ['to', '<=']]) {
+    const d = req.query[k] ? first(req.query[k]) : '';
+    if (!d) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw bad(`${k === 'from' ? 'From' : 'To'} must be a date (YYYY-MM-DD)`);
+    if (status === 'open') { where.push(`w.opened_at ${op} ?`); params.push(require('../lib/util').dayRange(await tenantTz(req.auth.tenantId), d)[k === 'from' ? 0 : 1]); } else { where.push(`w.completed_at ${op} ?`); params.push(k === 'from' ? `${d} 00:00:00` : `${d} 23:59:59`); }
+  }
+  for (const k of ['department_id', 'fund_id', 'street_id']) if (req.query[k]) { if (first(req.query[k]) === 'none') where.push(`w.${k} IS NULL`); else { where.push(`w.${k} = ?`); params.push(Number(first(req.query[k]))); } }
   if (req.query.asset_id) { where.push('w.asset_id = ?'); params.push(Number(first(req.query.asset_id))); }
   if (req.query.lift_id) { where.push('w.lift_id = ?'); params.push(Number(first(req.query.lift_id))); }
   if (req.query.map_feature_id) { where.push('w.map_feature_id = ?'); params.push(Number(first(req.query.map_feature_id))); }
@@ -172,9 +197,18 @@ async function orderFilters(req) {
 }
 
 router.get('/work-orders', async (req, res) => {
+  await W.fillBooks(pool, req.auth.tenantId);
   const [where, params] = await orderFilters(req);
   const limit = Math.min(Number(req.query.limit) || 200, 500);
-  res.json({ data: await rows(pool, `${ORDER_SQL} WHERE ${where.join(' AND ')} ORDER BY FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.opened_at DESC LIMIT ?`, [...params, limit]) });
+  const data = await rows(pool, `${ORDER_SQL} WHERE ${where.join(' AND ')} ORDER BY FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.opened_at DESC LIMIT ?`, [...params, limit]);
+  // totals=1 (2026.11.20): how many match, their hours and, for a manager, their cost (every match, not only this page).
+  if (first(req.query.totals || '') !== '1') { res.json({ data }); return; }
+  const all = (await rows(pool, `SELECT w.id FROM work_orders w WHERE ${where.join(' AND ')} LIMIT 20000`, params)).map((r) => Number(r.id));
+  const costs = await W.orderCosts(pool, req.auth.tenantId, all);
+  const sum = (k) => [...costs.values()].reduce((s, c) => s + c[k], 0);
+  const see = ['owner', 'manager'].includes(req.auth.role);
+  for (const w of data) { const c = costs.get(Number(w.id)); w.hours = c ? c.labor_hours : 0; if (see) w.cost_cents = c ? c.total_cents : 0; }
+  res.json({ data, totals: { count: all.length, labor_hours: Math.round(sum('labor_hours') * 100) / 100, equipment_hours: Math.round(sum('equipment_hours') * 100) / 100, cost_cents: see ? sum('total_cents') : null } });
 });
 
 /**
@@ -246,6 +280,7 @@ router.get('/work-orders/today', todayRoute(async (req) => {
 
 router.get('/work-orders/:id', async (req, res) => {
   const id = paramId(req);
+  await W.fillBooks(pool, req.auth.tenantId, { ids: [id] });
   const w = await one(pool, `${ORDER_SQL} WHERE w.tenant_id = ? AND w.id = ?`, [req.auth.tenantId, id]);
   if (!w) throw notFound('Work order');
   // The map feature it is on, with its shape, for the mini map.
@@ -270,10 +305,14 @@ router.patch('/work-orders/:id', validate(partialOf(orderFields)), async (req, r
     await mustExist(conn, 'lifts', req.auth.tenantId, req.body.lift_id, 'Lift');
     await mustExist(conn, 'staff', req.auth.tenantId, req.body.assigned_staff_id, 'Staff member');
     await mustExist(conn, 'map_features', req.auth.tenantId, req.body.map_feature_id, 'Map item');
+    await booksExist(conn, req, req.body);
     const set = setClause(req.body, Object.keys(orderFields));
     if (!set) throw bad('No updatable fields supplied');
+    await W.fillBooks(conn, req.auth.tenantId, { ids: [id] });
     const [r] = await conn.query(`UPDATE work_orders SET ${set.sql} WHERE tenant_id = ? AND id = ?`, [...set.values, req.auth.tenantId, id]);
     if (!r.affectedRows) throw notFound('Work order');
+    // A department, fund or street someone chose is never filled in again from the asset or place.
+    if (['department_id', 'fund_id', 'street_id'].some((k) => req.body[k] !== undefined)) await conn.query('UPDATE work_orders SET books_checked = 1 WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, id]);
     await audit(conn, req, 'update', 'work_orders', id, Object.keys(req.body));
   });
   res.json({ ok: true });
@@ -285,30 +324,37 @@ router.post('/work-orders/:id/status', validate(z.object({
   labor_hours: nullable(z.number().min(0).max(999)), parts_note: nullable(z.string().max(255)), resolution: nullable(z.string().max(500)),
 })), async (req, res) => {
   const id = paramId(req);
-  let fixed = [];
-  await tx(async (conn) => {
-    const w = await one(conn, 'SELECT status, pm_task_id, meter_hours, meter_miles FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
-    if (!w) throw notFound('Work order');
-    const b = req.body;
-    if (b.status === 'done' && !b.resolution && !(await one(conn, 'SELECT 1 AS x FROM work_orders WHERE tenant_id = ? AND id = ? AND resolution IS NOT NULL', [req.auth.tenantId, id]))) throw bad('Say what was done before completing the work order');
-    const done = b.status === 'done' || b.status === 'cancelled';
-    await conn.query('UPDATE work_orders SET status = ?, completed_at = ?, labor_hours = COALESCE(?, labor_hours), parts_note = COALESCE(?, parts_note), resolution = COALESCE(?, resolution) WHERE tenant_id = ? AND id = ?',
-      [b.status, done ? nowIn(await tenantTz(req.auth.tenantId)) : null, b.labor_hours ?? null, b.parts_note ?? null, b.resolution ?? null, req.auth.tenantId, id]);
-    await conn.query('INSERT INTO work_order_notes (tenant_id, work_order_id, user_id, body) VALUES (?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, `${STATUS_TEXT[b.status]}${b.resolution ? `: ${b.resolution}` : ''}`]);
-    // A preventive work order that is completed marks its service plan done, at the meters recorded on the order.
-    // Only once per order: an order reopened and completed again does not count as a second service.
-    if (b.status === 'done' && w.pm_task_id && w.status !== 'done') {
-      const t = await one(conn, 'SELECT * FROM pm_tasks WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, w.pm_task_id]);
-      const already = await one(conn, 'SELECT id FROM pm_log WHERE tenant_id = ? AND work_order_id = ?', [req.auth.tenantId, id]);
-      if (t && !already) await markPmDone(conn, req, t, { on: todayIn(await tenantTz(req.auth.tenantId)), hours: w.meter_hours === null ? undefined : Number(w.meter_hours), miles: w.meter_miles === null ? undefined : Number(w.meter_miles), note: `Work order ${id}`, workOrderId: id });
-    }
-    // A work order made from a resident's request (muni release 1): completing it marks the request fixed.
-    if (b.status === 'done' && w.status !== 'done') fixed = await require('../lib/requests').workOrderDone(conn, req, id);
-    await audit(conn, req, 'status', 'work_orders', id, { from: w.status, to: b.status });
-  });
+  const fixed = await tx((conn) => changeStatus(conn, req, id, req.body));
   if (fixed.length) await require('../lib/requests').tellFixed(req.auth.tenantId, fixed, require('../lib/baseurl').baseUrl(req));
   res.json({ ok: true });
 });
+
+/**
+ * A work order's new status, inside the caller's transaction (the status route, and Mark done with its costs in
+ * routes/workmoney.js). Returns the resident requests to tell they are fixed, after the transaction.
+ */
+async function changeStatus(conn, req, id, body) {
+  let fixed = [];
+  const w = await one(conn, 'SELECT status, pm_task_id, meter_hours, meter_miles FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, id]);
+  if (!w) throw notFound('Work order');
+  const b = body;
+  if (b.status === 'done' && !b.resolution && !(await one(conn, 'SELECT 1 AS x FROM work_orders WHERE tenant_id = ? AND id = ? AND resolution IS NOT NULL', [req.auth.tenantId, id]))) throw bad('Say what was done before completing the work order');
+  const done = b.status === 'done' || b.status === 'cancelled';
+  await conn.query('UPDATE work_orders SET status = ?, completed_at = ?, labor_hours = COALESCE(?, labor_hours), parts_note = COALESCE(?, parts_note), resolution = COALESCE(?, resolution) WHERE tenant_id = ? AND id = ?',
+    [b.status, done ? nowIn(await tenantTz(req.auth.tenantId)) : null, b.labor_hours ?? null, b.parts_note ?? null, b.resolution ?? null, req.auth.tenantId, id]);
+  await conn.query('INSERT INTO work_order_notes (tenant_id, work_order_id, user_id, body) VALUES (?, ?, ?, ?)', [req.auth.tenantId, id, req.auth.userId, `${STATUS_TEXT[b.status]}${b.resolution ? `: ${b.resolution}` : ''}`]);
+  // A preventive work order that is completed marks its service plan done, at the meters recorded on the order.
+  // Only once per order: an order reopened and completed again does not count as a second service.
+  if (b.status === 'done' && w.pm_task_id && w.status !== 'done') {
+    const t = await one(conn, 'SELECT * FROM pm_tasks WHERE tenant_id = ? AND id = ? FOR UPDATE', [req.auth.tenantId, w.pm_task_id]);
+    const already = await one(conn, 'SELECT id FROM pm_log WHERE tenant_id = ? AND work_order_id = ?', [req.auth.tenantId, id]);
+    if (t && !already) await markPmDone(conn, req, t, { on: todayIn(await tenantTz(req.auth.tenantId)), hours: w.meter_hours === null ? undefined : Number(w.meter_hours), miles: w.meter_miles === null ? undefined : Number(w.meter_miles), note: `Work order ${id}`, workOrderId: id });
+  }
+  // A work order made from a resident's request (muni release 1): completing it marks the request fixed.
+  if (b.status === 'done' && w.status !== 'done') fixed = await require('../lib/requests').workOrderDone(conn, req, id);
+  await audit(conn, req, 'status', 'work_orders', id, { from: w.status, to: b.status });
+  return fixed;
+}
 
 router.post('/work-orders/:id/notes', validate(z.object({ body: z.string().min(1).max(1000) })), async (req, res) => {
   const id = paramId(req);
@@ -665,4 +711,5 @@ function reportText(r) {
 
 router.createOrder = createOrder;
 router.markPmDone = markPmDone;
+router.changeStatus = changeStatus;
 module.exports = router;

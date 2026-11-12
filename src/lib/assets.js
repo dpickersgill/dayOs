@@ -53,7 +53,7 @@ async function costs(conn, tenantId, assetIds, since) {
   const ids = [assetIds];
   // completed_at is a mountain-clock time; opened_at is a UTC timestamp, so it is compared with the same moment in UTC.
   const sinceUtc = dayRange((await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone, since)[0];
-  const [labor, parts, vendor, fuel] = await Promise.all([
+  const [labor, parts, vendor, fuel, materials] = await Promise.all([
     rows(conn, `SELECT w.asset_id, SUM(l.hours * l.rate_cents) AS all_c, SUM(IF(l.worked_on >= ?, l.hours * l.rate_cents, 0)) AS yr_c, SUM(l.hours) AS hours
       FROM work_order_labor l JOIN work_orders w ON w.tenant_id = l.tenant_id AND w.id = l.work_order_id WHERE l.tenant_id = ? AND w.asset_id IN (?) GROUP BY w.asset_id`, [since, tenantId, ...ids]),
     rows(conn, `SELECT m.asset_id, SUM(-m.qty * m.unit_cost_cents) AS all_c, SUM(IF(m.at >= ?, -m.qty * m.unit_cost_cents, 0)) AS yr_c
@@ -62,11 +62,15 @@ async function costs(conn, tenantId, assetIds, since) {
       FROM work_orders WHERE tenant_id = ? AND asset_id IN (?) AND vendor_cost_cents IS NOT NULL AND status <> 'cancelled' GROUP BY asset_id`, [sinceUtc, since, tenantId, ...ids]),
     rows(conn, `SELECT asset_id, SUM(cost_cents) AS all_c, SUM(IF(filled_at >= ?, cost_cents, 0)) AS yr_c, SUM(gallons) AS gallons
       FROM asset_fuel WHERE tenant_id = ? AND asset_id IN (?) GROUP BY asset_id`, [since, tenantId, ...ids]),
+    // One-off materials on its work orders (2026.11.20, lib/workcosts.js) count with its parts.
+    rows(conn, `SELECT w.asset_id, SUM(m.qty * m.unit_cost_cents) AS all_c, SUM(IF(m.used_on >= ?, m.qty * m.unit_cost_cents, 0)) AS yr_c
+      FROM work_order_materials m JOIN work_orders w ON w.tenant_id = m.tenant_id AND w.id = m.work_order_id WHERE m.tenant_id = ? AND w.asset_id IN (?) GROUP BY w.asset_id`, [since, tenantId, ...ids]),
   ]);
   const out = new Map(assetIds.map((id) => [id, { labor: 0, parts: 0, vendor: 0, fuel: 0, labor_12: 0, parts_12: 0, vendor_12: 0, fuel_12: 0, labor_hours: 0, gallons: 0 }]));
   const put = (list, key, extra) => { for (const r of list) { const o = out.get(Number(r.asset_id)); if (!o) continue; o[key] = Math.round(Number(r.all_c || 0)); o[`${key}_12`] = Math.round(Number(r.yr_c || 0)); if (extra) extra(o, r); } };
   put(labor, 'labor', (o, r) => { o.labor_hours = Number(r.hours || 0); });
   put(parts, 'parts');
+  for (const r of materials) { const o = out.get(Number(r.asset_id)); if (o) { o.parts += Math.round(Number(r.all_c || 0)); o.parts_12 += Math.round(Number(r.yr_c || 0)); } }
   put(vendor, 'vendor');
   put(fuel, 'fuel', (o, r) => { o.gallons = Number(r.gallons || 0); });
   for (const o of out.values()) {
