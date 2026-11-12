@@ -444,6 +444,15 @@ Day to day: directors open Patrol, Follow-up to approve or skip held cases. Emai
 
 `node db/reset.js <slug>` shows what would be deleted. `node db/reset.js <slug> --yes` deletes it. It keeps the mountain and its owner login(s) and removes everything else for that mountain only. There is no undo, so take a database backup first if the data matters.
 
+## The menu (2026.11.21)
+
+The side menu, top bar and phone bar are all in the browser (`public/js/nav.js`); this part of the release needs no migration and no setting. Three things are kept on each device, in the browser's own storage, and are safe to clear: `so.nav.collapsed` (`1` or `0`: the person collapsed or opened the menu; without it the menu is a strip of icons under 1280 px), `so.nav.folded` (the sections they folded) and `so.nav.moved` (when the device first saw this menu, and whether "Settings, Help and Sign out moved here." was dismissed; the note ends by itself after 14 days).
+
+- Someone cannot find Settings, Help or Sign out: they are under their name at the bottom of the menu (on a phone: Menu, then their name). Ctrl+K, then "settings" or "sign out", works too.
+- The menu is only icons: they collapsed it, or the window is under 1280 px. The arrow at the top of the strip, or Ctrl+\ (Cmd+\ on a Mac), opens it and the device remembers.
+- A count beside an app looks wrong: counts come from `/nav/counts` and use the same rules as Today's cards; Inbox's comes from `/inbox/unread`. Both are asked again within a minute.
+- A person's pins are kept on the server (`user_nav`); the role's menu under Settings, Team and logins, Menus for each role is what people start from and go back to.
+
 ## Demo data
 
 `node db/demo.js <slug>` fills a mountain with made-up staff, customers, products, rentals, lessons, sales, patrol cases and punches by using the app's own API. It runs after `node db/seed.js` (it uses the seed's lifts, runs, products, certifications and positions) and is safe to run again: anything already there is kept and not added a second time. The ski school gets four instructors with certifications, teaching profiles and pay rates, lessons for kids and adults on each of the next 7 days, and a six-week Saturday program. Staff get 6-digit kiosk PINs, and patrollers get a published patrol schedule for the week. Run `node db/reset.js <slug> --yes` first for a clean start. It signs in with a temporary owner login that it deletes at the end, and it stops with a message if the mountain requires two-step sign-in.

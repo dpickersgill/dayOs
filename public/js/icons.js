@@ -59,6 +59,13 @@ const PATHS = {
   water: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z',
   sewer: 'M3 8h18v8H3zM7 8V5M17 8V5M7 16v3M17 16v3M10 12h4',
   stormwater: 'M7 14a4 4 0 0 1 .5-8 5 5 0 0 1 9.5 1.5A3.5 3.5 0 0 1 17 14zM8 17l-1 3M12 17l-1 3M16 17l-1 3',
+  // 2026.11.21: the monthly report (a page with bars), and the pin star for the top bar and the menu.
+  monthreport: 'M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM14 3v4h4M9 17v-3M12 17v-6M15 17v-4',
+  star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z',
+  pin: 'M9 4h6l-1 6 3 3v2H7v-2l3-3zM12 15v6',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  up: 'M6 15l6-6 6 6',
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
 };
 
 export function icon(name, size = 20) {

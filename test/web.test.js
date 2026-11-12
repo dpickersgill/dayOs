@@ -97,6 +97,12 @@ async function renderView(name, role, token, extra, params) {
   return root;
 }
 
+/** Sign out is in the account menu (2026.11.21): open it from the account row and press Sign out. */
+function signOutFromMenu() {
+  if (!document.querySelector('.acct-menu')) document.querySelector('.rail .acct').click();
+  [...document.querySelectorAll('.acct-menu .menu-row')].find((b) => b.textContent === 'Sign out').click();
+}
+
 const clean = (root, what) => {
   assert.equal(root.querySelector('.error-box'), null, `${what}: error box shown: ${root.querySelector('.error-box') && root.querySelector('.error-box').textContent}`);
   const text = root.textContent;
@@ -445,21 +451,31 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   assert.ok(document.querySelector('.nav'), 'signed in');
   assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, 'Today');
 
+  // The side menu (2026.11.21): one list. Home, then Pinned (the owner's menu, to start with), then every app in its
+  // section, all open. Settings and Help are in the account menu.
   const links = [...document.querySelectorAll('.rail .nav a.nav-row')];
-  assert.equal(links.length, 23, 'owner reaches every app (Calendar, Inbox, Waivers, Lost and found, Settings and Help included; Partner passes is a Sell tab, Billing a Settings page and Instructor availability a Lessons tab now)');
-  assert.deepEqual([...document.querySelectorAll('.rail .nav-home a')].map((a) => a.textContent), ['Today', 'Inbox', 'Calendar', 'My shifts'], 'Home, pinned at the top');
-  assert.deepEqual([...document.querySelectorAll('.rail .nav-mine a')].map((a) => a.textContent), ['Money', 'Mountain status', 'Patrol', 'Lessons', 'Customers', 'Staff and schedule'], 'the owner\'s short menu');
-  assert.deepEqual([...document.querySelectorAll('.rail .nav-fold')].map((b) => b.textContent), ['Guests and sales', 'On the hill', 'Ski school', 'Back office'], 'All apps: four folding groups, no counts');
-  assert.equal(document.querySelector('.rail .nav-all-head').textContent, 'All apps');
-  assert.equal(document.querySelector('.rail-toggle'), null, 'no collapsing rail');
-  for (const a of links) {
+  assert.deepEqual([...document.querySelectorAll('.rail .nav-home a')].map((a) => a.textContent), ['Today', 'Inbox', 'Calendar', 'My shifts'], 'Home, the first rows');
+  assert.deepEqual([...document.querySelectorAll('.rail .nav-pins a')].map((a) => a.textContent), ['Money', 'Mountain status', 'Patrol', 'Lessons', 'Customers', 'Staff and schedule'], 'Pinned starts as the owner\'s menu');
+  assert.deepEqual([...document.querySelectorAll('.rail .nav-fold')].map((b) => b.textContent), ['Guests and sales', 'Mountain', 'Ski school', 'Back office'], 'four sections');
+  assert.ok([...document.querySelectorAll('.rail .nav-fold')].every((b) => b.getAttribute('aria-expanded') === 'true'), 'all open');
+  const inSections = [...document.querySelectorAll('.rail .nav-sec:not(.nav-pins) a.nav-row')];
+  assert.equal(inSections.length, 17, 'owner reaches every app (Waivers and Lost and found included; Partner passes is a Sell tab, Billing a Settings page and Instructor availability a Lessons tab)');
+  assert.equal(links.length, 4 + 6 + 17);
+  assert.equal(document.querySelector('.rail .nav-all-head, .rail .nav-row[data-key=settings], .rail .nav-row[data-key=help]'), null, 'no All apps, and Settings and Help are not rows');
+  assert.ok(document.querySelector('.rail-toggle'), 'the menu collapses');
+  document.querySelector('.rail .acct').click();
+  const account = [...document.querySelectorAll('.acct-menu a.menu-row')];
+  assert.deepEqual(account.map((a) => [a.textContent, a.getAttribute('href')]), [['Your profile and sign-in', '#/settings/profile'], ['Settings', '#/settings/organization'], ["Help and What's new", '#/help']]);
+  document.querySelector('.acct-menu').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  for (const a of [...document.querySelectorAll('.rail .nav-home a'), ...inSections, ...account]) {
     window.location.hash = a.getAttribute('href').slice(1);
     await settle();
     await sleep(60);
     await settle();
-    // #/billing now opens Settings, Billing and plan
-    const settingsLink = document.querySelector('.nav a[href="#/settings"]');
-    assert.equal(document.querySelector('.nav a[aria-current=page]').textContent, a.getAttribute('href') === '#/billing' ? settingsLink.textContent : a.textContent);
+    const inMenu = a.classList.contains('nav-row');
+    if (inMenu) assert.equal(document.querySelector('.rail .nav a[aria-current=page]').textContent, a.textContent);
+    else assert.equal(document.querySelector('.rail .nav a[aria-current=page]'), null, 'Settings and Help light no row');
+    assert.equal(document.querySelector('.top-where .where-app').textContent, inMenu ? a.textContent : a.getAttribute('href').startsWith('#/settings') ? 'Settings' : 'Help', 'the top bar names the app');
     clean(document.querySelector('main'), `nav ${a.textContent}`);
   }
 
@@ -471,7 +487,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
   const realFetch = globalThis.fetch;
   globalThis.fetch = (u, ...rest) => { asked.push(String(u)); return realFetch(u, ...rest); };
   try {
-    [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sign out').click();
+    signOutFromMenu();
     await settle();
     await sleep(100);
   } finally { globalThis.fetch = realFetch; }
@@ -486,7 +502,7 @@ test('sign in through the real form, move around, and sign out', skip(), async (
 // ---------------------------------------------------------------- the menus, tabs in the address, redirects
 /** Signs in through the real form (main.js is already loaded by the test above). */
 async function signInAs(email) {
-  if (mods.api.session.token) { [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sign out').click(); await settle(); await sleep(50); }
+  if (mods.api.session.token) { signOutFromMenu(); await settle(); await sleep(50); }
   const form = document.querySelector('.signin form');
   assert.ok(form, 'sign-in form shown');
   for (const [name, v] of [['tenant', slug], ['login', email], ['password', PW]]) form.querySelector(`input[name=${name}]`).value = v;
@@ -519,7 +535,8 @@ test('tabs live in the address: open by address, a click changes only the query,
   assert.equal(selectedTab().textContent, 'Service', 'the tab named in the address opens');
   const page = document.querySelector('main').firstElementChild;
   assert.equal(document.querySelector('main .tabs[data-address=tab]') !== null, true);
-  assert.equal(document.querySelector('.page-head .crumbs').textContent, 'Rentals/Service', 'breadcrumb: app, then tab');
+  assert.equal(document.querySelector('.page-head .crumbs').textContent, 'Rentals/Service', 'breadcrumb (a phone): app, then tab');
+  assert.equal(document.querySelector('.top-where').textContent, 'Rentals›Service', 'the top bar: app, then tab');
 
   [...document.querySelectorAll('main [role=tab]')].find((b) => b.textContent === 'Inventory').click();
   await settle();
@@ -527,6 +544,7 @@ test('tabs live in the address: open by address, a click changes only the query,
   assert.equal(document.querySelector('main').firstElementChild, page, 'the page is not drawn again');
   assert.equal(selectedTab().textContent, 'Inventory');
   assert.equal(document.querySelector('.page-head .crumbs [aria-current]').textContent, 'Inventory', 'the breadcrumb follows the tab');
+  assert.equal(document.querySelector('.top-where .where-part').textContent, 'Inventory', 'and so does the top bar');
 
   window.history.back();
   await sleep(60); await settle();
@@ -545,12 +563,17 @@ test('tabs live in the address: open by address, a click changes only the query,
   await go('#/rentals?tab=reports');
   assert.equal(selectedTab().textContent, 'Reports');
 
-  // The page header: breadcrumb, Help with words, and "<App> settings" for managers.
+  // The page header: breadcrumb, Help with words, and "<App> settings" for managers. The title repeats the app's name, so
+  // on a computer it is kept for screen readers and not drawn (the top bar says it), and Help is in the top bar.
   const head = document.querySelector('main .page-head');
   assert.equal(head.querySelector('h1').textContent, 'Rentals');
+  assert.ok(head.querySelector('h1').classList.contains('h1-same'));
   const help = head.querySelector('a.help-btn');
   assert.equal(help.textContent, 'Help');
   assert.equal(help.getAttribute('href'), '#/help/for-rentals');
+  const topHelp = document.querySelector('.topbar .top-help');
+  assert.equal(topHelp.getAttribute('href'), '#/help/for-rentals');
+  assert.equal(topHelp.getAttribute('aria-label'), 'Help with Rentals');
   const settingsBtn = head.querySelector('a.head-settings');
   assert.equal(settingsBtn.textContent, 'Rentals settings');
   assert.equal(settingsBtn.getAttribute('href'), '#/settings/rentals');
@@ -564,18 +587,20 @@ test('old addresses redirect: Partner passes to its Sell tab, Billing to Setting
   await go('#/partners');
   assert.equal(window.location.hash, '#/sell?tab=partners');
   assert.ok(document.querySelector('.nav a[aria-current=page][data-key=sell]'), 'Sell is the current app');
+  assert.equal(document.querySelector('.top-where').textContent, 'Sell›Partner passes');
   await go('#/billing?paid=1');
   assert.equal(window.location.hash, '#/settings/billing?paid=1', 'the query (a payment coming back) is kept');
   assert.equal(document.querySelector('.nav a[data-key=partners]'), null, 'Partner passes is not in the menu');
   assert.equal(document.querySelector('.nav a[data-key=billing]'), null, 'Billing is not in the menu');
-  assert.equal(document.querySelector('.nav a[data-key=settings]').textContent, 'Settings', 'Account is now Settings');
+  assert.equal(document.querySelector('.nav a[data-key=settings]'), null, 'Settings is in the account menu, not a row');
+  assert.equal(document.querySelector('.top-where').textContent, 'Settings›Billing and plan', 'the top bar names the Settings page');
 });
 
 test('Patrol: no sections in the side menu; Now, Cases, People and Gear are its page tabs (row 1), and old addresses land on the right one', skip(), async () => {
   const row1 = () => document.querySelector('main .tabs.row1.link-tabs');
   const on = () => row1().querySelector('a[aria-current=page]');
   await go('#/patrol');
-  assert.equal(document.querySelector('.rail .nav-sections, .rail .nav-sec'), null, 'nothing under Patrol in the side menu');
+  assert.equal(document.querySelector('.rail .nav-sections, .rail .nav-row[data-key=patrol] + *'), null, 'nothing under Patrol in the side menu');
   assert.deepEqual([...row1().querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]), [['Now', '#/patrol/now'], ['Cases', '#/patrol/cases'], ['People', '#/patrol/people'], ['Gear', '#/patrol/gear']]);
   assert.equal(on().textContent, 'Now', 'Now by default');
   assert.equal(document.querySelector('main .page-head h1').textContent, 'Patrol', 'the page title is the app');
@@ -585,6 +610,7 @@ test('Patrol: no sections in the side menu; Now, Cases, People and Gear are its 
     assert.equal(on().textContent, want, `${hash} opens ${want}`);
     assert.equal(document.querySelector('.page-head .crumbs [aria-current]').textContent, want, `${hash}: the breadcrumb says Patrol / ${want}`);
     assert.ok(document.querySelector('.rail .nav-row[data-key=patrol][aria-current=page]'), `${hash}: Patrol is the current app`);
+    assert.equal(document.querySelector('.top-where').textContent, `Patrol›${want}`, `${hash}: the top bar says Patrol, then ${want}`);
   }
   const { patrolSection } = await mods.imp('nav.js');
   assert.equal(patrolSection(['kit-labels']), 'gear');
@@ -592,18 +618,22 @@ test('Patrol: no sections in the side menu; Now, Cases, People and Gear are its 
   assert.equal(patrolSection([]), 'now');
 });
 
-test('theme: follows the device until the person picks Light or Dark beside their name', skip(), async () => {
+test('theme: follows the device until the person picks Light or Dark in the account menu', skip(), async () => {
   const nav = await mods.imp('nav.js');
-  const btn = document.querySelector('.rail .theme-btn');
-  assert.ok(btn, 'the switch is beside the name');
-  assert.equal(btn.closest('.who').querySelector('.who-text b').textContent, `owner@${slug}.test`);
-  btn.click();
-  const choices = [...document.querySelectorAll('.theme-pop [role=menuitemradio]')];
-  assert.deepEqual(choices.map((c) => c.textContent), ['Light', 'Dark', 'Same as this device']);
+  const acct = document.querySelector('.rail .acct');
+  assert.equal(acct.querySelector('.who-text b').textContent, 'owner', 'the account row: the login\'s short name');
+  assert.equal(acct.getAttribute('aria-label'), `Account: owner@${slug}.test, Owner`);
+  acct.click();
+  assert.equal(document.querySelector('.acct-menu .menu-who b').textContent, `owner@${slug}.test`);
+  const choices = [...document.querySelectorAll('.acct-menu [role=menuitemradio]')];
+  assert.deepEqual(choices.map((c) => c.textContent), ['Light', 'Dark', 'Device'], 'the three choices in a row');
+  assert.deepEqual(choices.map((c) => c.getAttribute('aria-label')), ['Light', 'Dark', 'Same as this device']);
   choices[1].click();
   assert.equal(document.documentElement.getAttribute('data-theme'), 'dark');
   assert.equal(localStorage.getItem('verdynt.theme'), 'dark');
-  assert.equal(btn.getAttribute('aria-label'), 'Theme: Dark');
+  assert.equal(choices[1].getAttribute('aria-checked'), 'true');
+  document.querySelector('.acct-menu').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(document.querySelector('.acct-menu'), null);
   nav.setTheme('device');
   assert.equal(localStorage.getItem('verdynt.theme'), null, 'same as this device: nothing kept');
   assert.equal(nav.themePick(), 'device');
@@ -625,86 +655,97 @@ test('What moved: managers see the note for 30 days from the November 8 release,
   assert.equal(main.settingsPageFor('patrol'), null, 'Patrol has its own button');
 });
 
-test('role menus: a counter has Home pinned, then their apps, and the rest in the folding groups of All apps', skip(), async () => {
+test('role menus: a counter has Home, their role\'s menu as Pinned, and every app they may open in its section', skip(), async () => {
   const restore = withMenu(STANDARD_MENUS.counter);
   try {
     await signInAs(`counter@${slug}.test`);
     assert.equal(window.location.hash, '#/sell', 'the first screen is the menu start');
     assert.deepEqual([...document.querySelectorAll('.rail .nav-home .nav-row')].map((a) => a.dataset.key), ['dashboard', 'inbox', 'calendar', 'myshifts'], 'Home is the same for everyone');
-    assert.deepEqual([...document.querySelectorAll('.rail .nav-mine .nav-row')].map((a) => a.dataset.key), ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop'], 'the menu order');
-    assert.deepEqual([...document.querySelectorAll('.rail .nav-bottom a')].map((a) => a.textContent), ['Settings', 'Help']);
-    const groups = [...document.querySelectorAll('.rail .nav-all-groups .nav-group')];
-    const inGroups = groups.flatMap((g) => [...g.querySelectorAll('.nav-row')].map((a) => a.dataset.key));
-    assert.ok(inGroups.includes('lostfound') && inGroups.includes('conditions') && inGroups.includes('school'), 'Lost and found, Mountain status and Lessons are one click away');
-    assert.ok(!inGroups.some((k) => ['sell', 'settings', 'dashboard', 'inbox', 'calendar', 'myshifts'].includes(k)), 'nothing already in Home or the menu');
-    assert.ok(!inGroups.includes('money') && !inGroups.includes('workforce') && !inGroups.includes('availability'), 'nothing the counter may not open, and availability is inside Lessons');
-    // Folding: closed until opened, remembered on this device.
-    const hill = document.querySelector('.rail .nav-fold[data-group=hill]');
-    assert.equal(hill.getAttribute('aria-expanded'), 'false');
-    hill.click();
+    assert.deepEqual([...document.querySelectorAll('.rail .nav-pins .nav-row')].map((a) => a.dataset.key), ['sell', 'gate', 'rentals', 'people', 'waivers', 'shop'], 'Pinned: the role\'s menu, in its order');
+    const sections = [...document.querySelectorAll('.rail .nav-sec:not(.nav-pins)')];
+    assert.deepEqual(sections.map((el) => el.querySelector('.nav-fold').textContent), ['Guests and sales', 'Mountain', 'Ski school', 'Back office']);
+    const inSections = sections.flatMap((g) => [...g.querySelectorAll('.nav-row')].map((a) => a.dataset.key));
+    assert.deepEqual(inSections, ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound', 'conditions', 'park', 'school', 'programs', 'documents'], 'every app the counter may open, pinned or not, each in its section');
+    assert.ok(!inSections.includes('money') && !inSections.includes('workforce') && !inSections.includes('availability'), 'nothing the counter may not open, and availability is inside Lessons');
+    document.querySelector('.rail .acct').click();
+    assert.deepEqual([...document.querySelectorAll('.acct-menu .menu-row')].map((a) => a.textContent), ['Your profile and sign-in', "Help and What's new", 'Sign out'], 'no Settings row for someone with only their own profile there');
+    document.querySelector('.acct-menu').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    // Folding: open until folded, remembered on this device; the section holding the open page stays open.
+    const hill = document.querySelector('.rail .nav-fold[data-section=hill]');
     assert.equal(hill.getAttribute('aria-expanded'), 'true');
-    assert.ok(JSON.parse(localStorage.getItem('so.nav.open')).includes('hill'), 'kept on this device');
-    document.querySelector('.rail .nav-row[data-key=conditions]').click();
+    hill.click();
+    assert.equal(hill.getAttribute('aria-expanded'), 'false');
+    assert.ok(JSON.parse(localStorage.getItem('so.nav.folded')).includes('hill'), 'kept on this device');
     await go('#/conditions');
-    assert.equal(window.location.hash, '#/conditions', 'an app outside the menu still opens');
-    assert.equal(hill.getAttribute('aria-disabled'), 'true', 'the group holding this page is locked open');
+    assert.equal(window.location.hash, '#/conditions', 'an app outside the pins still opens');
+    assert.equal(hill.getAttribute('aria-expanded'), 'true', 'landing in a folded section opens it');
+    assert.equal(hill.getAttribute('aria-disabled'), 'true', 'and it cannot be folded away from the open page');
     hill.click();
     assert.equal(hill.getAttribute('aria-expanded'), 'true', 'a press does not fold it');
     await go('#/sell');
     assert.equal(hill.getAttribute('aria-disabled'), null);
+    assert.equal(hill.getAttribute('aria-expanded'), 'false', 'folded again, as this device kept it, once the page is elsewhere');
     hill.click();
-    assert.equal(hill.getAttribute('aria-expanded'), 'false', 'folds again once the page is elsewhere');
-    // The phone bar: the first four menu items and Menu.
+    assert.equal(hill.getAttribute('aria-expanded'), 'true');
+    // The phone bar: the screen the menu opens on, then the pins, to make four, and Menu.
     assert.deepEqual([...document.querySelectorAll('.tabbar .tab')].map((t) => t.textContent), ['Sell', 'Gate', 'Rentals', 'Customers', 'Menu']);
-    // Jump to still finds every app the counter may open.
+    // Jump to still finds every app the counter may open (All apps is gone: everything is in the menu).
     document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
     const titles = [...document.querySelectorAll('.palette-item .p-title')].map((x) => x.textContent);
-    assert.ok(titles.includes('Today') && titles.includes('Sell') && titles.includes('Mountain status') && titles.includes('All apps'));
+    assert.ok(titles.includes('Today') && titles.includes('Sell') && titles.includes('Mountain status') && titles.includes('Settings') && titles.includes('Help'));
+    assert.ok(!titles.includes('All apps'));
     document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     assert.equal(document.querySelector('.palette-overlay'), null);
-    // No help button or settings button for Settings itself; the counter gets no "<App> settings" button.
+    // The counter gets no "<App> settings" button; Help is there for the phone, and in the top bar.
     await go('#/rentals');
     assert.equal(document.querySelector('main .head-settings'), null, 'app settings are for managers');
     assert.ok(document.querySelector('main .help-btn'));
+    assert.equal(document.querySelector('.topbar .top-help').getAttribute('href'), '#/help/for-rentals');
   } finally { restore(); }
 });
 
-test('role menus: a patroller starts on Patrol; the phone Menu sheet shows their tiles, then the groups', skip(), async () => {
+test('role menus: a patroller starts on Patrol; the phone Menu sheet shows Home, Pinned and the sections as grids, and one account row', skip(), async () => {
   const restore = withMenu(STANDARD_MENUS.patrol);
   try {
     await signInAs(`patrol@${slug}.test`);
     assert.equal(window.location.hash, '#/patrol');
-    assert.deepEqual([...document.querySelectorAll('.rail .nav-mine .nav-row')].map((a) => a.dataset.key), ['patrol', 'conditions']);
+    assert.deepEqual([...document.querySelectorAll('.rail .nav-pins .nav-row')].map((a) => a.dataset.key), ['patrol', 'conditions']);
     assert.equal(document.querySelector('.rail .nav-sections'), null, 'no Patrol sections in the side menu');
     assert.deepEqual([...document.querySelectorAll('.tabbar .tab')].map((t) => t.textContent), ['Patrol', 'Mountain', 'My shifts', 'Today', 'Menu'], 'Inbox has its own button in the phone top bar');
+    assert.ok(document.querySelector('.topbar .top-inbox'));
     await go('#/patrol/cases');
     document.querySelector('.tabbar .tab-menu').click();
     const sheet = document.querySelector('.menu-sheet.phone-menu');
     assert.ok(sheet, 'Menu opens the sheet');
-    assert.deepEqual([...sheet.querySelectorAll('.sheet-mine .sheet-item')].map((a) => a.dataset.key), ['dashboard', 'calendar', 'myshifts', 'patrol', 'conditions'], 'Home (Inbox is in the top bar), then their apps');
-    assert.equal(sheet.querySelector('.sheet-item[aria-current=page]').dataset.key, 'patrol');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-home .sheet-item')].map((a) => a.dataset.key), ['dashboard', 'inbox', 'calendar', 'myshifts'], 'Home');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-pins .sheet-item')].map((a) => a.dataset.key), ['patrol', 'conditions'], 'Pinned');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-label h3')].map((x) => x.textContent), ['Pinned', 'Mountain', 'Back office'], 'then each section, labeled');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-item[aria-current=page]')].map((a) => a.dataset.key), ['patrol', 'patrol'], 'the open app: its pin and its tile in its section');
     assert.equal(sheet.querySelector('.sheet-chip'), null, 'no Patrol section chips: they are tabs on the page');
-    assert.equal(sheet.querySelector('.nav-all-head').textContent, 'All apps');
-    assert.ok(sheet.querySelectorAll('.nav-fold').length >= 1, 'the folding groups');
-    assert.deepEqual([...sheet.querySelectorAll('.sheet-foot > a')].map((a) => a.textContent.trim()), ['Settings', 'Help']);
-    assert.ok([...sheet.querySelectorAll('button')].some((b) => b.textContent === 'Sign out'));
-    assert.deepEqual([...sheet.querySelectorAll('.theme-seg [role=radio]')].map((b) => b.textContent), ['Light', 'Dark', 'Same as this device']);
+    assert.equal(sheet.querySelector('.nav-all-head, .nav-fold'), null, 'no All apps and no folding on a phone: every section is open');
+    assert.ok(sheet.querySelector('.sheet-help-here'), 'Guest needs help, for those who have it');
+    sheet.querySelector('.sheet-acct').click();
+    const acct = document.querySelector('.menu-sheet.acct-sheet');
+    assert.deepEqual([...acct.querySelectorAll('.menu-row')].map((a) => a.textContent.trim()), ['Your profile and sign-in', "Help and What's new", 'Sign out']);
+    assert.deepEqual([...acct.querySelectorAll('.theme-seg [role=radio]')].map((b) => b.getAttribute('aria-label')), ['Light', 'Dark', 'Same as this device']);
+    acct.querySelector('.sheet-close').click();
     sheet.querySelector('.sheet-close').click();
     assert.equal(document.querySelector('.menu-sheet'), null);
   } finally { restore(); }
 });
 
-test('menu plan: Home first, then the person\'s apps in order, then everything else in the four groups', skip(), async () => {
+test('menu plan: Home first, the role\'s menu as starting pins, and every app in its section', skip(), async () => {
   const { menuPlan } = await mods.imp('nav.js');
   const views = [['dashboard', 'Today'], ['inbox', 'Inbox'], ['gate', 'Gate'], ['conditions', 'Mountain status'], ['lostfound', 'Lost and found'], ['myshifts', 'My shifts'], ['documents', 'Documents'], ['settings', 'Settings'], ['help', 'Help']];
   const plan = menuPlan(views, { apps: ['dashboard', 'conditions', 'sell', 'gate', 'lostfound', 'inbox', 'myshifts'], start: 'dashboard' });
   assert.deepEqual(plan.home, ['dashboard', 'inbox', 'myshifts']);
-  assert.deepEqual(plan.apps, ['conditions', 'gate', 'lostfound'], 'Sell is left out (this person cannot open it), and Home apps are never in the menu');
-  assert.deepEqual(plan.groups.map((g) => [g.name, g.keys]), [['Back office', ['documents']]]);
-  assert.deepEqual(plan.first, ['dashboard', 'conditions', 'gate', 'lostfound'], 'the phone bar starts with the screen the menu opens on');
+  assert.deepEqual(plan.apps, ['conditions', 'gate', 'lostfound'], 'Sell is left out (this person cannot open it), and Home apps are never pins');
+  assert.deepEqual(plan.pins.map((p) => p.href), ['conditions', 'gate', 'lostfound']);
+  assert.deepEqual(plan.sections.map((g) => [g.name, g.keys]), [['Guests and sales', ['gate', 'lostfound']], ['Mountain', ['conditions']], ['Back office', ['documents']]], 'pinned or not, each app is in its section');
+  assert.deepEqual(plan.bar.map((p) => p.href), ['dashboard', 'conditions', 'gate', 'lostfound'], 'the phone bar starts with the screen the menu opens on');
   const none = menuPlan(views, null);
   assert.deepEqual(none.apps, []);
-  assert.deepEqual(none.groups.map((g) => g.name), ['Guests and sales', 'On the hill', 'Back office']);
+  assert.deepEqual(none.sections.map((g) => g.name), ['Guests and sales', 'Mountain', 'Back office']);
 });
 
 // ---------------------------------------------------------------- patrol cases and team
@@ -2114,7 +2155,7 @@ test('two-step sign-in: set up from Account, then the sign-in form asks for the 
   step.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
   assert.ok(document.querySelector('.nav'), 'signed in after the code');
-  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sign out').click();
+  signOutFromMenu();
   await settle();
 });
 

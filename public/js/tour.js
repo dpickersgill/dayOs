@@ -117,7 +117,10 @@ function find(step) {
   if (!step.at) return null;
   const visible = (e) => e.getClientRects().length > 0 && !e.closest('.tour-card');
   const words = (e) => (e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ');
-  return [...document.querySelectorAll(step.at)].find((e) => visible(e) && (!step.text || words(e).startsWith(step.text))) || null;
+  const el = [...document.querySelectorAll(step.at)].find((e) => visible(e) && (!step.text || words(e).startsWith(step.text))) || null;
+  // A page title that repeats the app's name is not drawn on a computer (the top bar says it, 2026.11.21): point there.
+  if (el && el.classList.contains('h1-same') && el.getBoundingClientRect().width <= 1) return document.querySelector('.topbar .top-where') || el;
+  return el;
 }
 
 function unring() { if (ring) ring.classList.remove('tour-ring'); ring = null; }

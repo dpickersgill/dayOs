@@ -1,39 +1,79 @@
-// The menu. On a computer the side menu is always in view. At the top, pinned: the brand, Jump to and Home (Today, Inbox,
-// Calendar, My shifts, whichever the person may open), the same for everyone. In the middle, the only part that scrolls:
-// the person's short menu (ctx.me.menu, owners and managers included), then All apps in four groups that fold. At the
-// bottom, pinned: Settings, Help and the person. On a phone a labeled bottom bar holds the first four items and Menu,
-// which opens a sheet: the short menu as tiles, then the same groups. Jump to (Ctrl+K, Cmd+K or "/") opens any page.
-// The side menu only picks the app: the parts of an app are tabs on its page (ui.js tabs()).
-import { h, clear, ctx, label, isManager, isMuni } from './ui.js';
+// The menu and the page frame (2026.11.21). The menu is for places and the top bar is for actions.
+//
+// On a computer the side menu has three parts. A 56 px row at the top: the organization and a button that collapses the
+// menu. One list that scrolls as a whole: Home (Today, Inbox, Calendar, My shifts, whichever the person may open), then
+// Pinned (the person's own short list, starting from their role's menu), then every app they may open, each in its one
+// section, all open. A 56 px row at the bottom: the person, which opens the account menu (profile, Settings, Help and
+// What's new, the theme, Switch person, Sign out, the version). Collapsed, the menu is a 64 px strip of icons that shows
+// the whole menu over the page while the pointer or the keyboard is in it.
+//
+// The top bar is on every page: where you are (the app, then its part), a place for the pin star, Jump to, + New, Guest
+// needs help (ski areas), Ask, Inbox and the page's Help. On a phone the top bar holds the organization's name and three
+// icon buttons, a bottom bar holds the person's four places and Menu, and Menu opens a sheet with everything in grids.
+//
+// Two other modules plug in through what buildFrame returns: pins.js (setPins, slots.star, the nav:edit-pins and
+// nav:row-menu events) and navcounts.js / newmenu.js (setBadge, setNew, addCommands). The frame works without them: it
+// starts from the role's menu, and shows no Edit link until someone has called setPins.
+import { h, clear, ctx, label, isManager, isMuni, schoolCan } from './ui.js';
 import { icon } from './icons.js';
 import { readTerminal } from './terminal.js';
 import { subPagesFor } from './jumpindex.js';
-import { staffHelpButton } from './staffhelp.js';
+import { mayAskForHelp, openStaffHelp } from './staffhelp.js';
 
-// Home: pinned at the top for everyone, never inside All apps or a menu.
+// Home: the first rows of the menu for everyone, never inside a section and never a pin.
 export const HOME = ['dashboard', 'inbox', 'calendar', 'myshifts'];
-// All apps: four groups that fold. [heading, id, apps]. An app shows only for people who may open it.
-export const GROUPS = [
+// The sections of a ski area's menu: [label, id, apps]. Every app has one home, the same for every role; a role only
+// changes which apps show. An app shows only for people who may open it, and a section with none of them does not show.
+export const SECTIONS = [
   ['Guests and sales', 'sales', ['sell', 'gate', 'shop', 'rentals', 'people', 'waivers', 'lostfound']],
-  ['On the hill', 'hill', ['conditions', 'park', 'patrol', 'area', 'assets']],
+  ['Mountain', 'hill', ['conditions', 'park', 'patrol', 'area', 'assets']],
   ['Ski school', 'school', ['school', 'programs', 'availability']],
   ['Back office', 'office', ['catalog', 'money', 'workforce', 'messages', 'documents']],
 ];
-// A municipality's All apps (muni release 1): residents, public works and the back office. The ski groups never show there.
-export const MUNI_GROUPS = [
+// A municipality's sections. The ski sections never show there.
+export const MUNI_SECTIONS = [
   ['Residents', 'residents', ['requests', 'notices', 'bulk']],
-  ['Public works', 'works', ['works', 'assets', 'assetprograms', 'buildings', 'monthreport', 'water', 'sewer', 'stormwater']],
+  ['Public works', 'works', ['works', 'assets', 'assetprograms', 'buildings', 'monthreport']],
+  ['Utilities', 'utilities', ['water', 'sewer', 'stormwater']],
   ['Back office', 'office', ['workforce', 'messages', 'documents']],
 ];
-/** The groups of All apps for this person's tenant. */
-export const groupsFor = () => (isMuni() ? MUNI_GROUPS : GROUPS);
-export const GROUP_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...MUNI_GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])), ...GROUPS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
-const BOTTOM = ['settings', 'help'];
-// The phone bar: the screen the person's menu opens on first, then their apps, then these (Inbox has its own button in
-// the phone's top bar).
+/** The sections of the menu for this person's organization. */
+export const sectionsFor = () => (isMuni() ? MUNI_SECTIONS : SECTIONS);
+/** The section each app lives in ({ id, name }); Home's apps say 'home'. main.js puts the id on the page (data-group). */
+export const SECTION_OF = Object.fromEntries([...HOME.map((k) => [k, { id: 'home', name: 'Home' }]), ...MUNI_SECTIONS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }])), ...SECTIONS.flatMap(([name, id, keys]) => keys.map((k) => [k, { id, name }]))]);
+// Settings and Help are not rows of the menu: they are in the account menu.
+const ACCOUNT = ['settings', 'help'];
+// The phone bar: the screen the person's menu opens on first, then their pins, then these, to make four (Inbox has its
+// own button in the phone's top bar).
 const PHONE_HOME = ['myshifts', 'dashboard', 'calendar'];
+// The phone bar has room for about twelve letters under an icon. Every app has a label that fits, so nothing is ever cut
+// in the middle of a word there (the full name is the link's accessible name).
+export const SHORT = {
+  dashboard: 'Today', inbox: 'Inbox', calendar: 'Calendar', myshifts: 'My shifts',
+  sell: 'Sell', gate: 'Gate', shop: 'Shop', rentals: 'Rentals', people: 'Customers', waivers: 'Waivers', lostfound: 'Lost items',
+  conditions: 'Mountain', park: 'Park', patrol: 'Patrol', area: 'Summary', assets: 'Assets',
+  school: 'Lessons', programs: 'Programs', availability: 'Availability',
+  catalog: 'Products', money: 'Money', workforce: 'Staff', messages: 'Messages', documents: 'Documents',
+  requests: 'Requests', notices: 'Notices', bulk: 'Bulk pickup', works: 'Work orders', assetprograms: 'Programs', buildings: 'Buildings',
+  monthreport: 'Report', water: 'Water', sewer: 'Sewer', stormwater: 'Stormwater', settings: 'Settings', help: 'Help',
+};
+export const BAR_LABEL_MAX = 12;
+/**
+ * The words under a phone bar icon, 12 letters at most and never cut inside a word. An app's own page uses its short
+ * name. A pin with its own name keeps it when it fits; a longer one keeps its first whole words ("Records requests"
+ * is "Records"), and when even the first word is too long, its app's short name.
+ */
+export function barLabel(item) {
+  const text = String((item && item.label) || '').trim();
+  const short = SHORT[item && item.app] || '';
+  if (item && item.href === item.app && short) return short;
+  if (text && text.length <= BAR_LABEL_MAX) return text;
+  let out = '';
+  for (const word of text.split(/\s+/)) { const next = out ? `${out} ${word}` : word; if (next.length > BAR_LABEL_MAX) break; out = next; }
+  return out || short || text.slice(0, BAR_LABEL_MAX);
+}
 
-// What each role is called, the same in the person's name card and in Settings, Team and logins, Menus for each role.
+// What each role is called, the same in the account row and in Settings, Team and logins, Menus for each role.
 export const ROLE_NAMES = {
   owner: 'Owner', manager: 'Manager', counter: 'Ticket window and rentals', instructor: 'Instructor', staff: 'Lift and mountain staff',
   patrol: 'Patroller', patrol_director: 'Patrol director', area: 'Ski area (read-only)',
@@ -49,20 +89,19 @@ export function roleName(me) {
   if (me.role === 'patrol' && me.patrol_lead) return ROLE_NAMES.patrol_director;
   return ROLE_NAMES[me.role] || label(me.role);
 }
-// The ski area's read-only login: its menu is the summary (and Help), never All apps.
+// The ski area's read-only login: its menu is the summary alone, and it has no pins.
 export const AREA_MENU = { apps: ['area'], start: 'area' };
-const OPEN_KEY = 'so.nav.open'; // which groups this device keeps open
 
 // Patrol's four parts are its page tabs (row 1 on the Patrol page). The side menu has none of them.
 export const PATROL_SECTIONS = [['now', 'Now'], ['cases', 'Cases'], ['people', 'People'], ['gear', 'Gear']];
-const SECTION_OF = {
+const PATROL_PART_OF = {
   now: 'now', home: 'now', board: 'now', duty: 'now', dispatch: 'now', map: 'now', opening: 'now', sweep: 'now', avalanche: 'now', log: 'now', room: 'now',
   cases: 'cases', case: 'cases', review: 'cases', followup: 'cases', records: 'cases', release: 'cases', stats: 'cases', network: 'cases', risk: 'cases', 'risk-report': 'cases', claim: 'cases', version: 'cases', collision: 'cases', access: 'cases', refusal: 'cases', handoff: 'cases',
   people: 'people', schedule: 'people', crews: 'people', cover: 'people', posts: 'people', team: 'people', training: 'people', passport: 'people',
   gear: 'gear', kit: 'gear', kits: 'gear', 'kit-labels': 'gear', equipment: 'gear', meds: 'gear', lifts: 'gear', places: 'gear', signs: 'gear', stencil: 'gear',
 };
 /** Which Patrol section a Patrol address belongs to: ['case', '12'] -> 'cases'. */
-export const patrolSection = (params = []) => SECTION_OF[params[0]] || 'now';
+export const patrolSection = (params = []) => PATROL_PART_OF[params[0]] || 'now';
 
 // Words people might type that are not in the page's name (old names included, so habits still work).
 const ALSO = {
@@ -90,18 +129,42 @@ const ALSO = {
   bulk: 'bulk trash pickup furniture appliance large item booking route order', buildings: 'building inspections life safety fire extinguisher sprinkler alarm elevator boiler backflow generator playground binder certificate vendor round calendar',
 };
 const RECENT_KEY = 'so.recent';
+const FOLDED_KEY = 'so.nav.folded'; // the sections this device keeps folded (ids)
+const COLLAPSED_KEY = 'so.nav.collapsed'; // '1' collapsed, '0' open; nothing kept: by the window's width
+const MOVED_KEY = 'so.nav.moved'; // the "moved here" note: when this device first saw this menu, and whether it was dismissed
+export const MOVED_NOTE_DAYS = 14;
+const COLLAPSE_UNDER = 1280; // with no choice kept on this device, the menu starts collapsed under this width
+const PEEK_MS = 150; // how long the pointer rests on the collapsed strip before the whole menu shows
 
 const read = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } };
 const initials = (name) => String(name || '?').split('@')[0].split(/[\s._-]+/).map((s) => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
 const isMac = () => /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
+const media = (q) => { try { return Boolean(window.matchMedia && window.matchMedia(q).matches); } catch (_) { return false; } };
+const onPhone = () => media('(max-width: 860px)');
+/** An address without its "#/": '#/patrol/cases?tab=records' -> 'patrol/cases?tab=records'. */
+const bare = (hash) => String(hash || '').replace(/^#\/?/, '');
+const hrefNow = () => bare(typeof location !== 'undefined' ? location.hash : '');
+/** Tells the other modules something happened in the frame (nav:page, nav:edit-pins, nav:row-menu), on window. */
+const tell = (name, detail) => window.dispatchEvent(new window.CustomEvent(name, { detail }));
+/** True when the address `at` is the page `href` names: the same path, and every ?name=value of href is in it. */
+export function samePage(href, at) {
+  const [path, query = ''] = String(href).split('?');
+  const [atPath, atQuery = ''] = String(at).split('?');
+  if (path.replace(/\/$/, '') !== atPath.replace(/\/$/, '')) return false;
+  let want; let have;
+  try { want = new URLSearchParams(query); have = new URLSearchParams(atQuery); } catch (_) { return false; }
+  for (const [k, v] of want) if (have.get(k) !== v) return false;
+  return true;
+}
 
 // ---------------------------------------------------------------- theme
 // Light, Dark, or the same as this device (the default). theme.js applies it before the page paints; this keeps it in step.
 export const THEME_KEY = 'verdynt.theme';
-const THEMES = [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['device', 'Same as this device', 'device']];
+const THEMES = [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['device', 'Device', 'device']];
+const THEME_SAYS = { light: 'Light', dark: 'Dark', device: 'Same as this device' };
 export function themePick() { const v = read(THEME_KEY, null); return v === 'light' || v === 'dark' ? v : 'device'; }
-const deviceDark = () => { try { return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (_) { return false; } };
+const deviceDark = () => media('(prefers-color-scheme: dark)');
 export function applyTheme(pick = themePick()) {
   const dark = pick === 'dark' || (pick === 'device' && deviceDark());
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -112,281 +175,515 @@ export function setTheme(pick) {
   window.dispatchEvent(new Event('theme:change'));
 }
 
-/** Three labeled choices. kind 'menu': a small button beside the person's name that opens them; 'seg': a row of three. */
-function themeControl(kind) {
-  const choices = THEMES.map(([id, text, ico]) => {
-    const b = h('button', { type: 'button', role: kind === 'menu' ? 'menuitemradio' : 'radio', dataset: { theme: id }, class: 'theme-choice' }, icon(ico, 16), h('span', null, text));
-    b.addEventListener('click', () => { setTheme(id); if (kind === 'menu') setOpen(false, true); });
+/**
+ * The three theme choices in one row. In the account menu (a role=menu) each is a menuitemradio; in the phone's account
+ * sheet they are radios in a radiogroup. Choosing one changes the theme at once and leaves the menu open, so the
+ * person sees it happen.
+ */
+function themeRow(inMenu) {
+  const choices = THEMES.map(([id, text]) => {
+    const b = h('button', { type: 'button', role: inMenu ? 'menuitemradio' : 'radio', dataset: { theme: id }, class: 'theme-choice', 'aria-label': THEME_SAYS[id] }, text);
+    b.addEventListener('click', () => setTheme(id));
     return b;
   });
-  const mark = () => { const now = themePick(); for (const b of choices) b.setAttribute('aria-checked', String(b.dataset.theme === now)); if (btn) { const t = THEMES.find((x) => x[0] === now); clear(btn).append(icon(t[2], 17)); btn.setAttribute('aria-label', `Theme: ${t[1]}`); btn.title = `Theme: ${t[1]}`; } };
-  let btn = null; let pop = null;
-  function setOpen(open, focusBack) { pop.hidden = !open; btn.setAttribute('aria-expanded', String(open)); if (open) (choices.find((b) => b.getAttribute('aria-checked') === 'true') || choices[0]).focus(); else if (focusBack) btn.focus(); }
-  let root = null;
-  const onChange = () => { if (root && !root.isConnected) { window.removeEventListener('theme:change', onChange); return; } mark(); };
+  const root = h('div', { class: 'theme-seg', role: inMenu ? 'group' : 'radiogroup', 'aria-label': 'Theme' }, choices);
+  const mark = () => { const now = themePick(); for (const b of choices) b.setAttribute('aria-checked', String(b.dataset.theme === now)); };
+  const onChange = () => { if (!root.isConnected) { window.removeEventListener('theme:change', onChange); return; } mark(); };
   window.addEventListener('theme:change', onChange);
-  if (kind !== 'menu') { root = h('div', { class: 'theme-seg', role: 'radiogroup', 'aria-label': 'Theme' }, choices); mark(); return root; }
-  btn = h('button', { type: 'button', class: 'theme-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
-  pop = h('div', { class: 'theme-pop', role: 'menu', 'aria-label': 'Theme', hidden: true }, choices);
-  btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(pop.hidden); });
-  pop.addEventListener('keydown', (e) => {
-    const at = choices.indexOf(document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); setOpen(false, true); } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); choices[(at + (e.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length].focus(); }
-  });
-  document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target)) setOpen(false); });
   mark();
-  root = h('div', { class: 'theme-wrap' }, btn, pop);
   return root;
 }
 
-/** The version under the person's name: "Verdynt/OS 2026.10.4", linking to What's new. */
-function whoVersion() {
-  const a = h('a', { class: 'who-version', href: '#/help/whats-new' });
+/** The version at the foot of the account menu: "Verdynt/OS 2026.11.21", linking to What's new. */
+function whoVersion(inMenu) {
+  const a = h('a', { class: 'who-version', href: '#/help/whats-new', role: inMenu ? 'menuitem' : null }, 'Verdynt/OS');
   fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `Verdynt/OS ${v.version}`; }).catch(() => {});
   return a;
 }
 
 /**
- * What the menu shows for this person. views: [[key, label]] already filtered for them; menu: ctx.me.menu.
- * home: Today, Inbox, Calendar, My shifts (pinned, the same for everyone). apps: their short menu, in its order, without
- * Home. groups: everything else they may open, in the four groups of All apps. first: the phone bar's four items.
+ * What the menu shows for this person. views: [[key, label]] already filtered for them; menu: ctx.me.menu (the role's
+ * menu, as managers set it); links: ctx.me.menu_links (its shortcuts to a page inside an app).
+ * home: Today, Inbox, Calendar, My shifts. sections: every other app they may open, each in its one section ("More"
+ * for an app that has none yet). apps: the role's menu, in its order, without Home. pins: that menu as starting pins
+ * ({ id, label, href, app, icon? }). bar: the phone bar's four places. account: Settings and Help, for the account menu.
  */
 export function menuPlan(views, menu, links = {}) {
   const keys = views.map(([k]) => k);
+  const names = new Map(views);
   const has = (k) => keys.includes(k);
   // A shortcut (a page inside an app, such as Patrol's Records requests) shows when the person may open its app.
-  const usable = (k) => has(k) || Boolean(links && links[k] && has(links[k].app));
+  const usable = (k) => (links && links[k] ? has(links[k].app) : has(k));
   const home = HOME.filter(has);
-  const bottom = BOTTOM.filter(has);
-  const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => usable(k) && !HOME.includes(k) && !BOTTOM.includes(k)) : [];
-  const listed = new Set([...home, ...apps, ...bottom]);
-  const more = keys.filter((k) => !listed.has(k));
-  const groups = groupsFor().map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => more.includes(k)) })).filter((g) => g.keys.length);
-  const extra = more.filter((k) => !groups.some((g) => g.keys.includes(k))); // a new app shows somewhere rather than nowhere
-  if (extra.length) groups.push({ name: 'More', id: 'more', keys: extra });
-  // The phone bar always starts with the screen the menu opens on (Today, Patrol, Lessons, Sell, Summary).
-  const start = menu && menu.start && has(menu.start) && menu.start !== 'inbox' ? [menu.start] : [];
-  const first = [...new Set([...start, ...apps, ...PHONE_HOME.filter(has)])].slice(0, 4);
-  return { home, apps, groups, bottom, more, first };
+  const account = ACCOUNT.filter(has);
+  const rest = keys.filter((k) => !HOME.includes(k) && !ACCOUNT.includes(k));
+  const sections = sectionsFor().map(([name, id, ks]) => ({ name, id, keys: ks.filter((k) => rest.includes(k)) })).filter((s) => s.keys.length);
+  const extra = rest.filter((k) => !sections.some((s) => s.keys.includes(k))); // a new app shows somewhere rather than nowhere
+  if (extra.length) sections.push({ name: 'More', id: 'more', keys: extra });
+  const apps = menu && Array.isArray(menu.apps) ? [...new Set(menu.apps)].filter((k) => usable(k) && !HOME.includes(k) && !ACCOUNT.includes(k)) : [];
+  const pinOf = (k) => (links && links[k]
+    ? { id: k, label: links[k].label, href: links[k].href, app: links[k].app, ...(links[k].icon ? { icon: links[k].icon } : {}) }
+    : { id: k, label: names.get(k), href: k, app: k });
+  const pins = apps.map(pinOf);
+  const start = menu && menu.start && has(menu.start) && menu.start !== 'inbox' ? menu.start : null;
+  const bar = defaultBar({ start, pins, home, names });
+  return { home, apps, pins, sections, account, bar, start };
 }
 
-/** The group of All apps that holds this app, for this plan (null when the app is in Home or the short menu). */
-const groupHolding = (plan, key) => (plan.groups.find((g) => g.keys.includes(key)) || null);
+/** The phone bar when the person has not chosen one: the screen their menu opens on, their pins, then Home, to make four. */
+function defaultBar({ start, pins, home, names }) {
+  const place = (k) => ({ label: names.get(k), href: k, app: k });
+  const all = [...(start ? [place(start)] : []), ...pins, ...PHONE_HOME.filter((k) => home.includes(k)).map(place)];
+  const seen = new Set();
+  return all.filter((p) => (seen.has(p.href) ? false : seen.add(p.href))).slice(0, 4).map(({ label: text, href, app, icon: ico }) => ({ label: text, href, app, ...(ico ? { icon: ico } : {}) }));
+}
 
-/** Which groups this device keeps open (ids). */
-function openGroups() { try { const v = JSON.parse(read(OPEN_KEY, '[]')); return Array.isArray(v) ? v : []; } catch (_) { return []; } }
-function keepOpen(id, open) { const now = new Set(openGroups()); if (open) now.add(id); else now.delete(id); write(OPEN_KEY, JSON.stringify([...now])); }
+/** Whether the "moved here" note is still due on this device: 14 days from the first time it loaded this menu. */
+export function movedHereDue(now = Date.now()) {
+  let kept = null;
+  try { kept = JSON.parse(read(MOVED_KEY, 'null')); } catch (_) { kept = null; }
+  if (!kept || !kept.first) { kept = { first: now, done: false }; write(MOVED_KEY, JSON.stringify(kept)); }
+  return !kept.done && now - kept.first < MOVED_NOTE_DAYS * 86400000;
+}
+const movedHereDone = () => { let first = Date.now(); try { first = JSON.parse(read(MOVED_KEY, 'null')).first || first; } catch (_) { /* a new record */ } write(MOVED_KEY, JSON.stringify({ first, done: true })); };
 
 /**
- * Builds the page frame. views: [[key, label]] already filtered for this person; menu: ctx.me.menu.
- * Returns { shell, setCurrent(key, params), openPalette(), openAllApps(), openSheet(), setBadge(), plan }.
+ * Builds the page frame. views: [[key, label]] already filtered for this person; menu: ctx.me.menu; links:
+ * ctx.me.menu_links; nav: ctx.me.nav when the server sent the person's own pins ({ pins, bar }), so the first paint
+ * already has them.
+ * Returns { shell, plan, canEdit, slots: { star }, setCurrent(key, params), setWhere({ part, help }), setPins(pins, bar),
+ * setBadge(key, n, { dot, says, alert }), setNew(items), addCommands(fn), openPalette(), openSheet() }.
  */
-export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
+export function buildFrame({ views, main, signOut, menu = null, links = {}, nav = null }) {
+  const me = ctx.me;
   const byKey = new Map(views);
-  for (const [k, l] of Object.entries(links || {})) if (!byKey.has(k) && byKey.has(l.app)) byKey.set(k, l.label);
-  const have = (k) => byKey.has(k) && !(links && links[k]);
+  const viewKeys = views.map(([k]) => k);
+  ctx.views = viewKeys;
   const plan = menuPlan(views, menu, links);
-  const hrefOf = (k) => (links && links[k] ? `#/${links[k].href}` : `#/${k}`);
-  const iconOf = (k) => (links && links[k] ? links[k].icon || links[k].app : k);
+  const terminal = Boolean(me.terminal) || Boolean(readTerminal());
+  // A session opened by PIN on a shared computer and the ski area's read-only login keep the role's menu as it is.
+  const canEdit = !me.terminal && me.role !== 'area';
+  const appItem = (k) => ({ label: byKey.get(k), href: k, app: k });
+  /** Only pins and bar places whose app this person may open, in the shape the frame draws. */
+  const usablePins = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.href && byKey.has(p.app) && !ACCOUNT.includes(p.app)).map((p) => ({ id: String(p.id || p.href), label: String(p.label || byKey.get(p.app)), href: bare(p.href), app: p.app, ...(p.icon ? { icon: p.icon } : {}) }));
+
+  let pins = me.role === 'area' ? [] : nav && Array.isArray(nav.pins) ? usablePins(nav.pins) : plan.pins;
+  let bar = nav && Array.isArray(nav.bar) && nav.bar.length ? usablePins(nav.bar).slice(0, 4) : null; // null: the default
+  let pinsLive = false; // true once pins.js has called setPins: only then is there someone to answer Edit
+  const barNow = () => bar || defaultBar({ start: plan.start, pins, home: plan.home, names: byKey });
+
   const shell = h('div', { class: 'shell' });
-  const links_ = new Map(); // key -> every <a> for that page (side menu, phone bar, sheet)
-  const dots = new Set();
   let currentKey = null;
   let currentSection = null;
-  const keep = (key, a) => { if (!links_.has(key)) links_.set(key, []); links_.get(key).push(a); return a; };
-  const link = (key, cls = 'nav-row') => keep(key, h('a', { href: hrefOf(key), class: cls, dataset: { key } }, icon(iconOf(key), 18), h('span', { class: 'nav-label' }, byKey.get(key))));
+  let where = { key: null, href: null, label: null };
+  const badges = new Map(); // app key -> { n, dot, says, alert }
+  const commandFns = []; // palette commands other modules add (addCommands)
+
+  // ---- every link the frame draws to a page, so the open page and the counts can be marked wherever it shows.
+  // zone: 'list' (Home and the sections), 'pins', 'bar', 'top', 'sheet'. kind: 'app' (the app's own row) or 'pin'.
+  let shown = [];
+  const track = (el, item, zone, kind) => { shown.push({ el, app: item.app, href: item.href, zone, kind }); return el; };
+  const forget = (zone) => { shown = shown.filter((s) => s.zone !== zone); };
+  /** The pin or bar place that names this exact page (the one with the most of the address in it), or null. */
+  function pinHere() {
+    const at = hrefNow();
+    const hits = [...pins, ...barNow()].filter((p) => p.app === currentKey && p.href !== p.app && samePage(p.href, at));
+    return hits.sort((a, b) => b.href.length - a.href.length)[0] || null;
+  }
+  /** Marks the open page: its app's row in its section, and among the pins the one that names the page most exactly. */
+  function mark() {
+    const exact = pinHere();
+    const on = (s) => (s.kind === 'app' ? s.app === currentKey : exact ? s.href === exact.href : s.href === currentKey);
+    for (const s of shown) { if (on(s)) s.el.setAttribute('aria-current', 'page'); else s.el.removeAttribute('aria-current'); }
+    more.classList.toggle('on', Boolean(currentKey) && !barNow().some((p) => (exact ? p.href === exact.href : p.href === currentKey)));
+  }
+
+  /** Draws (or removes) the count on one link. A count is said once: hidden from screen readers, and in the link's description. */
+  function paintBadge(el, st) {
+    let b = [...el.children].find((c) => c.classList && c.classList.contains('nav-badge'));
+    if (!st || !st.n) { if (b) b.remove(); el.removeAttribute('aria-description'); return; }
+    if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); el.append(b); }
+    b.classList.toggle('dot', Boolean(st.dot));
+    b.classList.toggle('alert', Boolean(st.alert));
+    b.textContent = st.dot ? '' : st.n > 99 ? '99+' : String(st.n);
+    el.setAttribute('aria-description', st.dot ? st.says : `${st.n} ${st.says}`);
+  }
+  /** Puts every count where its app shows at its own address. A pin to a page inside an app gets none. */
+  function paintBadges(zone) {
+    for (const s of shown) if ((!zone || s.zone === zone) && s.href === s.app) paintBadge(s.el, badges.get(s.app));
+  }
 
   /**
-   * A folding group: a heading button (aria-expanded) and its apps. The group holding the open page is locked open:
-   * its heading says so (aria-disabled) and a press does nothing. Open or closed is kept on this device.
+   * Right-click (or a long press on a phone) on a menu row or tile asks pins.js for the Pin / Unpin menu: the frame
+   * stops the browser's own menu and says which row, and shows nothing itself. Not offered where the menu cannot be changed.
    */
-  const folds = []; // every folding group drawn (side menu and phone sheet): { id, btn, body }
-  function foldGroup(g, { prefix, item }) {
-    const bodyId = `${prefix}-${g.id}`;
-    const btn = h('button', { type: 'button', class: 'nav-fold', 'aria-expanded': 'false', 'aria-controls': bodyId, dataset: { group: g.id } },
-      h('span', { class: 'nav-fold-text' }, g.name), h('span', { class: 'nav-chev', 'aria-hidden': 'true' }));
-    const body = h('div', { class: 'nav-items', id: bodyId, role: 'group', 'aria-label': g.name, hidden: true }, g.keys.map(item));
-    const f = { id: g.id, btn, body };
-    btn.addEventListener('click', () => {
-      if (btn.getAttribute('aria-disabled') === 'true') return; // the group holding this page stays open
-      const open = btn.getAttribute('aria-expanded') !== 'true';
-      keepOpen(g.id, open);
-      paintFolds();
-      if (open) afterFold();
-    });
-    folds.push(f);
-    return h('div', { class: 'nav-group', dataset: { group: g.id } }, btn, body);
+  let lastAsk = 0;
+  function askRowMenu(item, x, y) {
+    if (Date.now() - lastAsk < 400) return; // a long press also fires contextmenu on some phones: once is enough
+    lastAsk = Date.now();
+    tell('nav:row-menu', { key: item.app, href: item.href, label: item.label, x, y, pinned: pins.some((p) => p.href === item.href) });
   }
+  /** A long press on a touch screen: after half a second without moving, do(x, y); the tap that follows is swallowed. */
+  function longPress(el, act) {
+    let timer = null; let at = null; let fired = false;
+    const stop = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return;
+      fired = false; at = [e.clientX, e.clientY];
+      timer = setTimeout(() => { fired = true; act(at[0], at[1]); }, 500);
+    });
+    el.addEventListener('pointermove', (e) => { if (timer && at && Math.hypot(e.clientX - at[0], e.clientY - at[1]) > 10) stop(); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, stop);
+    el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  }
+  function rowMenu(el, item) {
+    if (!canEdit || ACCOUNT.includes(item.app)) return el;
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); askRowMenu(item, e.clientX, e.clientY); });
+    longPress(el, (x, y) => askRowMenu(item, x, y));
+    return el;
+  }
+  const askEdit = (forBar) => tell('nav:edit-pins', { bar: Boolean(forBar) });
+
+  /** One row of the side menu: the icon, the name, and room for a count. */
+  const row = (item, zone, kind) => h('li', null, rowMenu(track(
+    h('a', { href: `#/${item.href}`, class: 'nav-row', dataset: { key: item.app, ...(kind === 'pin' ? { pin: item.id } : {}) } }, icon(item.icon || item.app, 18), h('span', { class: 'nav-label' }, item.label)),
+    item, zone, kind), item));
+
+  // ---- sections: all open; a label folds its section, and this device remembers the ones it folded
+  const foldedNow = () => { try { const v = JSON.parse(read(FOLDED_KEY, '[]')); return Array.isArray(v) ? v : []; } catch (_) { return []; } };
+  const keepFolded = (id, folded) => { const now = new Set(foldedNow()); if (folded) now.add(id); else now.delete(id); write(FOLDED_KEY, JSON.stringify([...now])); };
+  const folds = []; // { id, btn, body, keys }
+  function section(s) {
+    const bodyId = `nav-s-${s.id}`;
+    const btn = h('button', { type: 'button', class: 'nav-fold', 'aria-expanded': 'true', 'aria-controls': bodyId, dataset: { section: s.id } },
+      h('span', { class: 'nav-fold-text' }, s.name), h('span', { class: 'nav-chev', 'aria-hidden': 'true' }));
+    const body = h('ul', { class: 'nav-items', id: bodyId }, s.keys.map((k) => row(appItem(k), 'list', 'app')));
+    btn.addEventListener('click', () => {
+      if (btn.getAttribute('aria-disabled') === 'true') return; // the section holding the open page stays open
+      keepFolded(s.id, btn.getAttribute('aria-expanded') === 'true');
+      paintFolds();
+    });
+    folds.push({ id: s.id, btn, body, keys: s.keys });
+    return h('div', { class: 'nav-sec', dataset: { section: s.id } }, h('h2', { class: 'nav-head' }, btn), body);
+  }
+  /** Open or folded, from what this device kept. The section holding the open page is always open and says why. */
   function paintFolds() {
-    const held = currentKey ? groupHolding(plan, currentKey) : null;
-    const kept = openGroups();
+    const kept = foldedNow();
     for (const f of folds) {
-      const locked = Boolean(held && held.id === f.id);
-      const open = locked || kept.includes(f.id);
+      const held = Boolean(currentKey) && f.keys.includes(currentKey);
+      const open = held || !kept.includes(f.id);
       f.btn.setAttribute('aria-expanded', String(open));
-      if (locked) { f.btn.setAttribute('aria-disabled', 'true'); f.btn.title = 'The page you are on is in this group, so it stays open'; } else { f.btn.removeAttribute('aria-disabled'); f.btn.removeAttribute('title'); }
+      if (held) { f.btn.setAttribute('aria-disabled', 'true'); f.btn.title = 'The page you are on is in this section, so it stays open'; } else { f.btn.removeAttribute('aria-disabled'); f.btn.removeAttribute('title'); }
       f.body.hidden = !open;
     }
   }
 
-  // ---- side menu: Home pinned at the top; the short menu and All apps scroll; Settings, Help and the person at the bottom
-  const homeNav = plan.home.length ? h('nav', { class: 'nav nav-home', 'aria-label': 'Home' }, plan.home.map((k) => link(k))) : null;
-  const allHead = plan.groups.length ? h('p', { class: 'nav-all-head', id: 'nav-all-head' }, 'All apps') : null;
-  const nav = h('nav', { class: 'nav nav-scroll', 'aria-label': 'Main' },
-    plan.apps.length ? h('div', { class: 'nav-group nav-mine' }, plan.apps.map((k) => link(k))) : null,
-    allHead,
-    plan.groups.length ? h('div', { class: 'nav-all-groups', role: 'group', 'aria-labelledby': 'nav-all-head' }, plan.groups.map((g) => foldGroup(g, { prefix: 'nav-g', item: (k) => link(k) }))) : null);
+  // ---- the side menu
+  const name = me.login_name || me.username || me.email || '';
+  const shortName = String(name).split('@')[0] || name;
+  const roleText = roleName(me);
+  const collapseKeys = isMac() ? '⌘\\' : 'Ctrl+\\';
+  const toggle = h('button', { type: 'button', class: 'rail-toggle', 'aria-controls': 'nav-list' }, icon('collapse', 16));
+  // A ski area keeps the mountain mark; a municipality has the wordmark only (2026.11.20), and its initials stand in
+  // for a mark where there is no room for words (the collapsed strip).
+  const org = h('div', { class: 'rail-org' },
+    isMuni() ? h('span', { class: 'org-mono', 'aria-hidden': 'true' }, initials(me.tenant_name)) : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '32', height: '18' }),
+    h('div', { class: 'org-text' }, h('strong', { title: me.tenant_name }, me.tenant_name), h('span', null, 'Verdynt/OS')),
+    toggle);
 
-  const search = h('button', { type: 'button', class: 'rail-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', { class: 'nav-label' }, 'Jump to'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
-  // Ask: the assistant's side panel, loaded the first time it is opened. Hidden until the server says it is on.
-  const viewKeys = views.map(([k]) => k);
-  ctx.views = viewKeys;
-  const openAsk = () => import('./assistant.js').then((m) => m.openAssistant({ page: currentKey, views: viewKeys }));
-  const ask = h('button', { type: 'button', class: 'rail-search rail-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 18), h('span', { class: 'nav-label' }, 'Ask'));
-  const topAsk = h('button', { type: 'button', class: 'top-inbox top-ask', 'aria-label': 'Ask the assistant', hidden: true }, icon('ask', 22));
-  ask.addEventListener('click', openAsk); topAsk.addEventListener('click', openAsk);
-  if (ctx.me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; topAsk.hidden = !yes; fit(); }).catch(() => {});
+  const editBtn = h('button', { type: 'button', class: 'nav-edit', hidden: true, 'aria-label': 'Edit your pinned pages' }, 'Edit');
+  editBtn.addEventListener('click', () => askEdit(false));
+  const pinList = h('ul', { class: 'nav-items' });
+  const pinBox = h('div', { class: 'nav-sec nav-pins', hidden: true }, h('div', { class: 'nav-head' }, h('h2', { class: 'nav-title' }, 'Pinned'), editBtn), pinList);
+  const list = h('nav', { class: 'nav', id: 'nav-list', 'aria-label': 'Main' },
+    plan.home.length ? h('ul', { class: 'nav-items nav-home' }, plan.home.map((k) => row(appItem(k), 'list', 'app'))) : null,
+    pinBox,
+    plan.sections.map(section));
 
-  const name = ctx.me.login_name || ctx.me.username || ctx.me.email;
-  const roleText = roleName(ctx.me);
-  const terminal = Boolean(ctx.me.terminal) || Boolean(readTerminal());
-  const outBtn = (cls) => { const b = h('button', { type: 'button', class: cls }, icon('signout', 17), h('span', null, 'Sign out')); b.addEventListener('click', () => signOut()); return b; };
-  // A shared counter computer: the next person switches in with their PIN (signing out shows the PIN screen there).
-  const switchBtn = (cls) => { if (!terminal) return null; const b = h('button', { type: 'button', class: cls }, icon('swap', 17), h('span', null, 'Switch person')); b.addEventListener('click', () => signOut()); return b; };
-  const who = h('div', { class: 'who' },
-    h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name)),
-    h('span', { class: 'who-text' }, h('b', { title: ctx.me.email || name }, name), h('span', null, roleText)),
-    themeControl('menu'));
-  const foot = h('div', { class: 'rail-foot' },
-    h('nav', { class: 'nav nav-bottom', 'aria-label': 'Settings and help' }, plan.bottom.map((k) => link(k))),
-    who,
-    h('div', { class: 'who-actions' }, switchBtn('btn small who-switch'), outBtn('rail-out'), whoVersion()));
-  const rail = h('aside', { class: 'rail' },
-    h('div', { class: 'rail-top' },
-      // A municipality sees the Verdynt/OS wordmark without the mountain peaks; a ski area keeps the mark (2026.11.20).
-      h('div', { class: 'brand' }, isMuni() ? null : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
-        h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
-      search, ask, homeNav, staffHelpButton('nav-help-here')),
-    nav, foot);
+  const avatar = () => h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name));
+  const acctBtn = h('button', { type: 'button', class: 'acct', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': `Account: ${name}, ${roleText}`, title: me.email || name },
+    avatar(), h('span', { class: 'who-text' }, h('b', null, shortName), h('span', null, roleText)), icon('chevron', 16));
+  const foot = h('div', { class: 'rail-foot' }, acctBtn);
+  const rail = h('aside', { class: 'rail', 'aria-label': 'Menu' }, org, list, foot);
 
+  /** Draws Pinned in the side menu and the phone bar from the pins and bar there are now. */
+  function drawPins() {
+    forget('pins');
+    clear(pinList).append(...pins.map((p) => row(p, 'pins', 'pin')));
+    pinBox.hidden = !pins.length;
+    editBtn.hidden = !(canEdit && pinsLive);
+    drawBar();
+    paintBadges('pins');
+    mark();
+  }
+
+  // ---- collapsed: a 64 px strip. With no choice kept on this device it starts collapsed under 1280 px.
+  const keptCollapsed = () => { const v = read(COLLAPSED_KEY, null); return v === '1' ? true : v === '0' ? false : null; };
+  const isCollapsed = () => shell.classList.contains('collapsed');
+  function paintCollapsed() {
+    const kept = keptCollapsed();
+    const c = kept === null ? (typeof window !== 'undefined' && window.innerWidth < COLLAPSE_UNDER) : kept;
+    shell.classList.toggle('collapsed', c);
+    if (!c) rail.classList.remove('peek');
+    toggle.setAttribute('aria-expanded', String(!c));
+    const says = c ? 'Keep the menu open' : 'Collapse the menu';
+    toggle.setAttribute('aria-label', says);
+    toggle.title = `${says} (${collapseKeys})`;
+    clear(toggle).append(icon(c ? 'expand' : 'collapse', 16));
+  }
+  function setCollapsed(c) { write(COLLAPSED_KEY, c ? '1' : '0'); paintCollapsed(); }
+  toggle.addEventListener('click', () => setCollapsed(!isCollapsed()));
+
+  // Pointing at the strip for a moment, or moving keyboard focus into it, shows the whole menu over the page (the page
+  // does not move). It goes back to a strip when the pointer and the focus have both left. A tap on a touch screen never
+  // opens it: the tap goes to the icon.
+  let peekTimer = null; let pointerIn = false;
+  const focusIn = () => {
+    const a = document.activeElement;
+    if (!a || !rail.contains(a)) return false;
+    try { return a.matches(':focus-visible'); } catch (_) { return true; } // a browser without :focus-visible: any focus counts
+  };
+  const peek = (on) => { clearTimeout(peekTimer); if (!on || (isCollapsed() && !menuOpen(acctBtn))) rail.classList.toggle('peek', on); };
+  const settlePeek = () => { clearTimeout(peekTimer); peekTimer = setTimeout(() => { if (!pointerIn && !focusIn()) peek(false); }, 180); };
+  rail.addEventListener('pointerenter', (e) => { if (e.pointerType === 'touch') return; pointerIn = true; clearTimeout(peekTimer); peekTimer = setTimeout(() => peek(true), PEEK_MS); });
+  rail.addEventListener('pointerleave', () => { pointerIn = false; settlePeek(); });
+  rail.addEventListener('focusin', () => { if (focusIn()) peek(true); });
+  rail.addEventListener('focusout', () => settlePeek());
+  rail.addEventListener('keydown', (e) => { if (e.key === 'Escape' && rail.classList.contains('peek') && !menuOpen(acctBtn)) { pointerIn = false; peek(false); main.focus({ preventScroll: true }); } });
+
+  // ---- small menus that open from a button (the account menu, + New): role=menu, arrow keys, Escape, focus returns
+  const openMenus = new Map(); // button -> close()
+  const menuOpen = (btn) => openMenus.has(btn);
   /**
-   * The scrolling middle rests between two rows, never through one: its height is cut to the last whole row that fits.
-   * A thin shadow at an edge says there is more past it (no fade: a fade dims the row under it).
+   * Opens `build(close)` as a menu beside `btn`. Up and Down move through its items (Home and End jump to the ends),
+   * Escape closes it and returns to the button, Tab or a press anywhere else closes it. A link in it closes it too.
    */
-  const rowsIn = () => [...nav.querySelectorAll('.nav-row, .nav-fold, .nav-all-head')].filter((el) => el.offsetParent !== null);
-  function fit(keepCurrent = true) {
-    if (!rail.isConnected || !nav.isConnected) return;
-    nav.style.flex = '';
-    nav.style.height = '';
-    const room = nav.clientHeight;
-    const rows = rowsIn();
-    if (!room || !rows.length) { edges(); return; }
-    const top = nav.getBoundingClientRect().top - nav.scrollTop;
-    const full = rows[rows.length - 1].getBoundingClientRect().bottom - top;
-    if (full <= room + 1) { edges(); return; } // everything fits
-    let last = -1;
-    rows.forEach((r, i) => { if (last === i - 1 && r.getBoundingClientRect().bottom - top <= room) last = i; });
-    // A heading is never the last row above the edge ("All apps" or an open group with none of its apps showing).
-    while (last > 0 && (rows[last].classList.contains('nav-all-head') || (rows[last].classList.contains('nav-fold') && rows[last].getAttribute('aria-expanded') === 'true'))) last -= 1;
-    if (last >= 0) {
-      const cut = Math.floor(rows[last].getBoundingClientRect().bottom - top + 1); // measured before the size changes, as scrolling may move the rows
-      nav.style.height = `${cut}px`;
-      nav.style.flex = '0 0 auto';
+  function popMenu(btn, { cls, says, build, host = btn.parentElement }) {
+    if (openMenus.has(btn)) { openMenus.get(btn)(true); return null; }
+    const pop = h('div', { class: `pop-menu ${cls}`, role: 'menu', 'aria-label': says });
+    const items = () => [...pop.querySelectorAll('[role=menuitem], [role=menuitemradio]')].filter((el) => !el.hidden && !el.closest('[hidden]'));
+    function close(focusBack) {
+      pop.remove(); openMenus.delete(btn);
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', onOutside, true);
+      if (focusBack && btn.isConnected) btn.focus();
+      settlePeek();
     }
-    // The page you are on stays in view (after a resize, or once the fonts are in); not after opening a group by hand.
-    const cur = keepCurrent ? nav.querySelector('.nav-row[aria-current="page"]') : null;
-    if (cur) showRow(cur); else edges();
-  }
-  /** Marks the edges with more past them: rail.more-up, rail.more-down. */
-  function edges() {
-    const up = nav.scrollTop > 1;
-    const down = nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1;
-    rail.classList.toggle('more-up', up);
-    rail.classList.toggle('more-down', down);
-  }
-  /** Scrolls the scrolling middle so this row is fully in view, resting on a row edge, with one row of room past it. */
-  function showRow(el) {
-    if (!el || !nav.clientHeight) return;
-    const rows = rowsIn();
-    const navTop = nav.getBoundingClientRect().top;
-    const at = (r) => r.getBoundingClientRect().top - navTop + nav.scrollTop;
-    const i = rows.indexOf(el);
-    const top = at(el); const bottom = top + el.offsetHeight;
-    if (top >= nav.scrollTop && bottom <= nav.scrollTop + nav.clientHeight) { edges(); return; }
-    if (top < nav.scrollTop) { nav.scrollTop = i > 0 ? at(rows[i - 1]) : 0; edges(); return; }
-    // Past the bottom: scroll down by whole rows until it and the row after it (when there is one) are in view.
-    const want = (rows[i + 1] ? at(rows[i + 1]) + rows[i + 1].offsetHeight : bottom) - nav.clientHeight;
-    const start = rows.find((r) => at(r) >= want);
-    nav.scrollTop = start ? at(start) : want;
-    edges();
-  }
-  /** After a group opens: keep its heading in view and show as much of it as fits. */
-  function afterFold() { fit(false); }
-  nav.addEventListener('scroll', edges, { passive: true });
-  if (typeof window !== 'undefined' && window.addEventListener) {
-    const onResize = () => { if (!shell.isConnected) { window.removeEventListener('resize', onResize); return; } fit(); };
-    window.addEventListener('resize', onResize);
+    const onOutside = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(false); };
+    pop.addEventListener('keydown', (e) => {
+      const all = items(); const at = all.indexOf(document.activeElement);
+      const to = { ArrowDown: all[(at + 1) % all.length], ArrowUp: all[(at - 1 + all.length) % all.length], Home: all[0], End: all[all.length - 1] }[e.key];
+      if (to) { e.preventDefault(); to.focus({ preventScroll: true }); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); } else if (e.key === 'Tab') close(false);
+    });
+    pop.addEventListener('click', (e) => { if (e.target.closest('a[href]')) close(false); });
+    pop.append(...[build(close)].flat().filter(Boolean));
+    host.append(pop);
+    openMenus.set(btn, close);
+    btn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('pointerdown', onOutside, true);
+    const first = items()[0];
+    if (first) first.focus({ preventScroll: true });
+    return pop;
   }
 
-  // ---- phone: slim top bar, a labeled bottom bar, and a sheet with everything
-  const tabLinks = new Map();
-  // The bottom bar has room for about ten letters a label: long names get a short one there (the full name is the link's title).
-  const SHORT = { works: 'Work orders', notices: 'Notices', assetprograms: 'Programs', bulk: 'Bulk pickup', conditions: 'Mountain', lostfound: 'Lost items', availability: 'Availability', workforce: 'Staff', documents: 'Docs', shop: 'Shop', dashboard: 'Today', myshifts: 'My shifts', people: 'Customers', catalog: 'Products', park: 'Park', area: 'Summary', 'patrol-records': 'Records', 'patrol-access': 'Access log', 'patrol-review': 'Review' };
-  const tab = (key) => { const a = keep(key, h('a', { href: hrefOf(key), dataset: { key }, class: 'tab', title: byKey.get(key), 'aria-label': byKey.get(key) }, icon(iconOf(key), 22), h('span', { 'aria-hidden': 'true' }, SHORT[key] || byKey.get(key)))); tabLinks.set(key, a); return a; };
+  // ---- the account menu: everything that used to be pinned at the bottom of the side menu
+  // A patroller's Patrol access (their level and features), read once when the account menu or Jump to first needs it.
+  let patrolInfo = null;
+  let patrolAsked = false;
+  async function loadPatrol() {
+    try { patrolInfo = JSON.parse(sessionStorage.getItem('so.patrol.me') || 'null'); } catch (_) { patrolInfo = null; }
+    if (patrolInfo) return;
+    try { const { get } = await import('./api.js'); patrolInfo = await get('/patrol/me'); } catch (_) { patrolInfo = null; }
+  }
+  const mayOpen = (k) => byKey.has(k);
+  /** Where "Settings" goes for someone who has more than their own profile there, or null when they have only that. */
+  function settingsHome() {
+    if (!mayOpen('settings') || me.role === 'area') return null;
+    if (isManager()) return '#/settings/organization';
+    if (me.role === 'instructor' && schoolCan('director') && (!me.modules || me.modules.includes('school'))) return '#/settings/school';
+    if ((me.role === 'patrol' || me.on_patrol) && (me.patrol_lead || (patrolInfo && (patrolInfo.access_level === 'admin' || (patrolInfo.features || []).includes('manage_settings'))))) return '#/settings/patrol';
+    return null;
+  }
+  /**
+   * The account's rows, for the menu on a computer (inMenu) and the sheet on a phone: the person, their profile,
+   * Settings, Help and What's new (with its dot), the theme, Switch person on a shared computer, Sign out, the version.
+   */
+  function accountRows(close, inMenu) {
+    const item = inMenu ? 'menuitem' : null;
+    const go = (href, ico, text, extra) => h('a', { href, class: 'menu-row', role: item, 'aria-current': bare(href) === hrefNow() ? 'page' : null }, icon(ico, 18), h('span', null, text), extra || null);
+    const act = (ico, text, run) => { const b = h('button', { type: 'button', class: 'menu-row', role: item }, icon(ico, 18), h('span', null, text)); b.addEventListener('click', () => { close(false); run(); }); return b; };
+    const news = badges.get('help');
+    const settings = settingsHome();
+    return [
+      h('div', { class: 'menu-who' }, avatar(), h('span', { class: 'who-text' }, h('b', null, name), h('span', null, `${roleText}, ${me.tenant_name}`))),
+      h('hr', { role: inMenu ? 'separator' : null }),
+      mayOpen('settings') ? go('#/settings/profile', 'people', 'Your profile and sign-in') : null,
+      settings ? go(settings, 'settings', 'Settings') : null,
+      mayOpen('help') ? go('#/help', 'help', "Help and What's new", news && news.n ? h('span', { class: 'nav-badge dot', role: 'img', 'aria-label': 'new' }) : null) : null,
+      h('p', { class: 'menu-label', 'aria-hidden': 'true' }, 'Theme'),
+      themeRow(inMenu),
+      h('hr', { role: inMenu ? 'separator' : null }),
+      // A shared counter computer: the next person switches in with their PIN (signing out shows the PIN screen there).
+      terminal ? act('swap', 'Switch person', () => signOut()) : null,
+      act('signout', 'Sign out', () => signOut()),
+      whoVersion(inMenu),
+    ];
+  }
+  function openAccount() {
+    endMovedNote(false);
+    rail.classList.remove('peek'); // collapsed: the strip stays a strip and the menu opens beside the avatar
+    popMenu(acctBtn, { cls: 'acct-menu', says: 'Account', build: (close) => accountRows(close, true), host: foot });
+    // A patroller's Settings row depends on their Patrol access. It is read once, the first time the menu opens, and the
+    // menu is drawn again only if that adds the row.
+    if (menuOpen(acctBtn) && (me.role === 'patrol' || me.on_patrol) && !isManager() && !patrolAsked && !settingsHome()) {
+      patrolAsked = true;
+      loadPatrol().then(() => { if (menuOpen(acctBtn) && settingsHome()) { openMenus.get(acctBtn)(false); openAccount(); } });
+    }
+  }
+  acctBtn.addEventListener('click', openAccount);
+
+  // ---- for 14 days: "Settings, Help and Sign out moved here."
+  let movedNote = null;
+  function endMovedNote(dismissed) { if (movedNote) { movedNote.remove(); movedNote = null; } if (dismissed) movedHereDone(); }
+  function movedHere(cls) {
+    const got = h('button', { type: 'button', class: 'btn small' }, 'Got it');
+    const note = h('div', { class: `moved-here ${cls}`, role: 'note' }, h('span', null, 'Settings, Help and Sign out moved here.'), got);
+    got.addEventListener('click', () => { note.remove(); endMovedNote(true); });
+    return note;
+  }
+  if (movedHereDue()) { movedNote = movedHere('by-rail'); foot.append(movedNote); }
+
+  // ---- the top bar: where you are on the left, actions on the right
+  const whereApp = h('span', { class: 'where-app' });
+  const whereSep = h('span', { class: 'where-sep', 'aria-hidden': 'true', hidden: true }, '›');
+  const wherePart = h('span', { class: 'where-part', hidden: true });
+  const whereBox = h('div', { class: 'top-where' }, whereApp, whereSep, wherePart);
+  const star = h('span', { class: 'top-star' }); // pins.js fills it (frame.slots.star)
+  const jump = h('button', { type: 'button', class: 'top-jump', 'aria-label': 'Jump to a page, record or action', 'aria-keyshortcuts': 'Control+K' }, icon('search', 16), h('span', { class: 'top-jump-text' }, 'Jump to'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
+  const newSlot = h('div', { class: 'top-new', hidden: true });
+  // "Guest needs help": the same call as Mountain status and the Gate make, for the same people (staffhelp.js decides).
+  // A ski area's button: a municipality has no patrol to call.
+  const sos = !isMuni() && mayAskForHelp() ? h('button', { type: 'button', class: 'top-sos', 'data-act': 'staff-help', 'aria-label': 'Guest needs help here' }, icon('plus', 16), h('span', null, 'Guest needs help')) : null;
+  if (sos) sos.addEventListener('click', () => openStaffHelp());
+  // Ask: the assistant's side panel, loaded the first time it is opened. Hidden until the server says it is on.
+  const openAsk = () => import('./assistant.js').then((m) => m.openAssistant({ page: currentKey, views: viewKeys }));
+  const ask = h('button', { type: 'button', class: 'top-btn top-ask', 'aria-label': 'Ask the assistant', title: 'Ask the assistant', hidden: true }, icon('ask', 18));
+  ask.addEventListener('click', openAsk);
+  if (me.role !== 'area') import('./assistant.js').then((m) => m.assistantOn()).then((yes) => { ask.hidden = !yes; }).catch(() => {});
+  const have = (k) => byKey.has(k);
+  const inbox = have('inbox') ? track(h('a', { href: '#/inbox', class: 'top-btn top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox', title: 'Inbox' }, icon('inbox', 18)), appItem('inbox'), 'top', 'app') : null;
+  const help = h('a', { href: '#/help', class: 'top-btn top-help', 'aria-label': 'Help', title: 'Help', hidden: true }, icon('help', 18));
+  const topbar = h('header', { class: 'topbar' },
+    h('div', { class: 'top-brand' }, isMuni() ? null : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '32', height: '18' }), h('strong', null, me.tenant_name)),
+    whereBox, star, jump, newSlot, sos, ask, inbox, help);
+
+  // ---- + New: what this person may create (newmenu.js gives the list through setNew)
+  let newItems = [];
+  const newBtn = h('button', { type: 'button', class: 'btn primary top-new-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, icon('plus', 16), h('span', null, 'New'));
+  const newFab = h('button', { type: 'button', class: 'new-fab', 'aria-label': 'New', 'aria-haspopup': 'dialog', hidden: true }, icon('plus', 24));
+  newSlot.append(newBtn);
+  const newRow = (it, role) => h('a', { href: `#/${bare(it.href)}`, class: 'menu-row', role, dataset: { new: it.id } }, icon(it.icon || it.app, 18), h('span', null, it.label));
+  newBtn.addEventListener('click', () => popMenu(newBtn, { cls: 'new-menu', says: 'New', build: () => newItems.map((it) => newRow(it, 'menuitem')) }));
+  /** On a phone: the same list in a sheet, with the open app's own things first. */
+  newFab.addEventListener('click', () => {
+    const mine = newItems.filter((it) => it.app === currentKey);
+    const rest = newItems.filter((it) => it.app !== currentKey);
+    sheet('New', 'new-sheet', () => h('div', { class: 'sheet-body' }, h('div', { class: 'sheet-rows' }, mine.map((it) => newRow(it, null))), mine.length && rest.length ? h('hr') : null, h('div', { class: 'sheet-rows' }, rest.map((it) => newRow(it, null)))));
+  });
+  /** The round button shows on pages whose app has something to create, unless the page has a floating button of its own. */
+  function paintNew() {
+    newSlot.hidden = !newItems.length;
+    newFab.hidden = !newItems.some((it) => it.app === currentKey) || Boolean(main.querySelector && main.querySelector('.fab'));
+  }
+  function setNew(items) {
+    newItems = (Array.isArray(items) ? items : []).filter((it) => it && it.label && it.href);
+    if (!newItems.length && openMenus.has(newBtn)) openMenus.get(newBtn)(false);
+    paintNew();
+  }
+
+  // ---- phone: a bottom bar with the person's four places and Menu, and a sheet with everything
   const more = h('button', { type: 'button', class: 'tab tab-menu', 'aria-haspopup': 'dialog' }, icon('menu', 22), h('span', null, 'Menu'));
-  const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);
-  const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
-  const topInbox = have('inbox') ? keep('inbox', h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22))) : null;
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, isMuni() ? h('span', { class: 'top-word' }, 'Verdynt/OS') : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
+  const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, more);
+  function drawBar() {
+    forget('bar');
+    const tabs = barNow().map((p) => {
+      const a = track(h('a', { href: `#/${p.href}`, class: 'tab', dataset: { key: p.app }, title: p.label, 'aria-label': p.label }, icon(p.icon || p.app, 22), h('span', { class: 'tab-text', 'aria-hidden': 'true' }, barLabel(p))), p, 'bar', 'pin');
+      // A long press (or right-click) on the bar asks to choose what is on it.
+      if (canEdit) { a.addEventListener('contextmenu', (e) => { e.preventDefault(); if (pinsLive) askEdit(true); }); longPress(a, () => { if (pinsLive) askEdit(true); }); }
+      return a;
+    });
+    clear(tabbar).append(...tabs, more);
+    paintBadges('bar');
+    paintMenuDot();
+  }
+  /** The Menu button carries a dot when something new is in the sheet and not on the bar (What's new, in the account). */
+  function paintMenuDot() {
+    const news = [...badges].some(([k, st]) => st.dot && st.n && !barNow().some((p) => p.href === k));
+    more.classList.toggle('has-new', news);
+    if (news) more.setAttribute('aria-description', 'Something new in Help'); else more.removeAttribute('aria-description');
+    const dot = Boolean(badges.get('help') && badges.get('help').n);
+    acctBtn.classList.toggle('has-new', dot);
+    if (dot) acctBtn.setAttribute('aria-description', 'Something new in Help'); else acctBtn.removeAttribute('aria-description');
+  }
 
-  /** A sheet over the page (the phone menu and All apps). build(close) returns its content. The whole sheet scrolls as one. */
+  /** A sheet over the page (the phone's Menu, the account, + New). build(close) returns its content. The whole sheet scrolls as one. */
+  const sheets = []; // open sheets, the top one last: Escape closes only that one
   function sheet(title, cls, build) {
     const previous = document.activeElement;
     const closeBtn = h('button', { type: 'button', class: 'sheet-close', 'aria-label': `Close ${title.toLowerCase()}` }, icon('close', 20));
     const titleId = `sheet-${Math.random().toString(36).slice(2, 7)}`;
     const box = h('div', { class: `dialog menu-sheet ${cls}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId });
-    const overlay = h('div', { class: 'overlay menu-overlay' }, box);
-    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); for (let i = folds.length - 1; i >= 0; i--) if (!folds[i].btn.isConnected) folds.splice(i, 1); if (previous && previous.isConnected && previous.focus) previous.focus(); }
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const overlay = h('div', { class: `overlay menu-overlay ${cls}-overlay` }, box);
+    const self = { close };
+    function close(focusBack = true) {
+      if (!overlay.isConnected) return;
+      overlay.remove(); document.removeEventListener('keydown', onKey);
+      sheets.splice(sheets.indexOf(self), 1);
+      if (cls === 'phone-menu') forget('sheet');
+      if (focusBack && previous && previous.isConnected && previous.focus) previous.focus();
+    }
+    const onKey = (e) => { if (e.key === 'Escape' && sheets[sheets.length - 1] === self) { e.stopPropagation(); close(); } };
     box.append(h('header', null, h('h2', { id: titleId }, title), closeBtn), build(close));
-    box.addEventListener('click', (e) => { if (e.target.closest('a[href]')) close(); });
-    closeBtn.addEventListener('click', close);
+    // A link in a sheet goes to its page: every sheet closes on the way.
+    box.addEventListener('click', (e) => { if (e.target.closest('a[href]')) for (const s of [...sheets]) s.close(false); });
+    closeBtn.addEventListener('click', () => close());
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
     document.addEventListener('keydown', onKey);
     document.body.append(overlay);
-    paintFolds();
+    sheets.push(self);
     closeBtn.focus();
     return { close, box };
   }
-  const tile = (k) => h('a', { href: hrefOf(k), class: 'sheet-item', dataset: { key: k }, 'aria-current': hereKey() === k ? 'page' : null }, icon(iconOf(k), 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null);
-  const sheetGroups = (prefix) => plan.groups.map((g) => foldGroup(g, { prefix, item: tile }));
-  const sheetAllHead = () => (plan.groups.length ? h('p', { class: 'nav-all-head' }, 'All apps') : null);
 
-  /** All apps in a sheet (from Jump to): the four groups, folding the same way as in the side menu. */
-  function openAllApps() {
-    return sheet('All apps', 'all-apps', () => h('div', { class: 'sheet-body' },
-      plan.groups.length ? h('div', { class: 'sheet-groups' }, sheetGroups('all-g')) : h('p', { class: 'muted small' }, 'Every app you can use is in your menu.')));
-  }
+  /** A tile in the phone's Menu sheet. */
+  const tile = (item, kind) => rowMenu(track(h('a', { href: `#/${item.href}`, class: 'sheet-item', dataset: { key: item.app, ...(kind === 'pin' ? { pin: item.id } : {}) } }, icon(item.icon || item.app, 22), h('span', { class: 'sheet-item-text' }, item.label)), item, 'sheet', kind), item);
+  const grid = (items, kind) => h('div', { class: 'sheet-grid' }, items.map((it) => tile(it, kind)));
 
+  /**
+   * The phone's Menu: a search box, Guest needs help, Home, Pinned, then every section as a grid, all open, and one
+   * account row at the bottom.
+   */
   function openSheet() {
-    const searchBox = h('input', { type: 'search', class: 'sheet-search', placeholder: 'Jump to an app or page', 'aria-label': 'Jump to an app or page', autocomplete: 'off' });
+    forget('sheet');
     const s = sheet('Menu', 'phone-menu', (close) => {
-      searchBox.addEventListener('input', () => { const q = searchBox.value; close(); openPalette(q); });
-      const mine = [...plan.home.filter((k) => k !== 'inbox'), ...plan.apps];
-      const signOutBtn = outBtn('btn small');
-      signOutBtn.addEventListener('click', close, { capture: true });
-      const sw = switchBtn('btn small');
-      if (sw) sw.addEventListener('click', close, { capture: true });
-      const helpHere = staffHelpButton('sheet-help-here');
-      if (helpHere) helpHere.addEventListener('click', close, { capture: true });
+      const searchBox = h('button', { type: 'button', class: 'sheet-search' }, icon('search', 18), h('span', null, 'Jump to a page, record or action'));
+      searchBox.addEventListener('click', () => { close(false); openPalette(); });
+      const helpHere = sos ? h('button', { type: 'button', class: 'btn staff-help-btn sheet-help-here', 'data-act': 'staff-help' }, h('span', { class: 'sh-plus', 'aria-hidden': 'true' }, '+'), h('span', null, 'Guest needs help here')) : null;
+      if (helpHere) helpHere.addEventListener('click', () => { close(false); openStaffHelp(); });
+      const edit = canEdit && pinsLive ? h('button', { type: 'button', class: 'nav-edit', 'aria-label': 'Edit your pinned pages' }, 'Edit') : null;
+      if (edit) edit.addEventListener('click', () => { close(false); askEdit(false); });
+      const acct = h('button', { type: 'button', class: 'sheet-acct', 'aria-haspopup': 'dialog' }, avatar(), h('span', { class: 'who-text' }, h('b', null, shortName), h('span', null, `${roleText}. Settings, help, theme, sign out`)),
+        badges.get('help') && badges.get('help').n ? h('span', { class: 'nav-badge dot', role: 'img', 'aria-label': 'Something new in Help' }) : null, icon('chevron', 16));
+      acct.addEventListener('click', () => { endMovedNote(false); sheet('Account', 'acct-sheet', (shut) => h('div', { class: 'sheet-body sheet-rows' }, accountRows(() => { shut(false); close(false); }, false))); });
       return h('div', { class: 'sheet-body' }, searchBox, helpHere,
-        mine.length ? h('div', { class: 'sheet-group sheet-mine' }, h('div', { class: 'sheet-grid' }, mine.map(tile))) : null,
-        plan.groups.length ? h('div', { class: 'sheet-groups' }, sheetAllHead(), sheetGroups('sheet-g')) : null,
-        h('div', { class: 'sheet-foot' },
-          plan.bottom.map((k) => h('a', { href: `#/${k}`, class: 'sheet-row', 'aria-current': currentKey === k ? 'page' : null }, icon(k, 20), h('span', null, byKey.get(k)), dots.has(k) ? h('span', { class: 'nav-badge dot', 'aria-label': 'new' }) : null)),
-          h('div', { class: 'sheet-theme' }, h('span', { class: 'small muted' }, 'Theme'), themeControl('seg')),
-          h('div', { class: 'who sheet-who' }, h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(name)), h('span', { class: 'who-text' }, h('b', null, name), h('span', null, roleText)), sw, signOutBtn)));
+        plan.home.length ? h('div', { class: 'sheet-sec sheet-home' }, grid(plan.home.map(appItem), 'app')) : null,
+        pins.length ? h('div', { class: 'sheet-sec sheet-pins' }, h('div', { class: 'sheet-label' }, h('h3', null, 'Pinned'), edit), grid(pins, 'pin')) : null,
+        plan.sections.map((sec) => h('div', { class: 'sheet-sec', dataset: { section: sec.id } }, h('div', { class: 'sheet-label' }, h('h3', null, sec.name)), grid(sec.keys.map(appItem), 'app'))),
+        movedHereDue() ? movedHere('in-sheet') : null,
+        acct);
     });
+    paintBadges('sheet');
+    mark();
     return s;
   }
   more.addEventListener('click', openSheet);
@@ -395,12 +692,22 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
   function actions() {
     const list = [];
     if (isManager()) list.push({ id: 'kiosk', title: 'Open the time clock kiosk page', hint: 'New tab', icon: 'clock', words: 'kiosk tablet punch', run: () => window.open('/kiosk', '_blank', 'noopener') });
-    if (plan.groups.length) list.push({ id: 'all', title: 'All apps', hint: '', icon: 'apps', words: 'apps more everything groups', run: () => openAllApps() });
-    for (const [id, text, ico] of THEMES) list.push({ id: `theme-${id}`, title: id === 'device' ? 'Theme: same as this device' : `Theme: ${text.toLowerCase()}`, hint: themePick() === id ? 'On now' : '', icon: ico, words: 'theme dark light mode night day colors', run: () => setTheme(id) });
+    if (!onPhone()) list.push({ id: 'collapse', title: isCollapsed() ? 'Keep the menu open' : 'Collapse the menu', hint: collapseKeys, icon: isCollapsed() ? 'expand' : 'collapse', words: 'menu side bar sidebar collapse hide show narrow wide icons', run: () => setCollapsed(!isCollapsed()) });
+    for (const [id, , ico] of THEMES) list.push({ id: `theme-${id}`, title: id === 'device' ? 'Theme: same as this device' : `Theme: ${id}`, hint: themePick() === id ? 'On now' : '', icon: ico, words: 'theme dark light mode night day colors', run: () => setTheme(id) });
     if (!ask.hidden) list.push({ id: 'ask', title: 'Ask the assistant', hint: '', icon: 'ask', words: 'assistant question how do i ai chat', run: () => openAsk() });
     if (terminal) list.push({ id: 'switch', title: 'Switch person', hint: '', icon: 'swap', words: 'pin shared terminal change user', run: () => signOut() });
     list.push({ id: 'out', title: 'Sign out', hint: '', icon: 'signout', words: 'log out leave', run: () => signOut() });
     return list;
+  }
+  /** Commands from other modules (pins.js: Pin this page; newmenu.js: New work order), asked for each time Jump to opens. */
+  function added() {
+    const out = [];
+    for (const fn of commandFns) {
+      let items = [];
+      try { items = fn() || []; } catch (_) { items = []; }
+      for (const it of items) if (it && it.title && typeof it.run === 'function') out.push({ id: `cmd-${it.id || it.title}`, title: it.title, hint: it.hint || '', icon: it.icon || 'plus', words: `${it.title} ${it.words || ''}`, run: it.run });
+    }
+    return out;
   }
   function recent() { try { return JSON.parse(read(RECENT_KEY, '[]')).filter(have); } catch (_) { return []; } }
 
@@ -409,11 +716,11 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     const previous = document.activeElement;
     const box = h('input', { class: 'palette-input', type: 'text', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'palette-list', 'aria-autocomplete': 'list', 'aria-label': 'Go to a page or run a command', placeholder: 'Go to a page or run a command', autocomplete: 'off', spellcheck: 'false' });
     box.value = typeof start === 'string' ? start : '';
-    const list = h('ul', { class: 'palette-list', id: 'palette-list', role: 'listbox' });
-    const foot = h('div', { class: 'palette-foot' }, h('span', null, h('kbd', null, '↑'), h('kbd', null, '↓'), ' to move'), h('span', null, h('kbd', null, 'Enter'), ' to open'), h('span', null, h('kbd', null, 'Esc'), ' to close'));
-    const panel = h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Jump to a page' }, h('div', { class: 'palette-top' }, icon('search', 18), box), list, foot);
+    const listEl = h('ul', { class: 'palette-list', id: 'palette-list', role: 'listbox' });
+    const palFoot = h('div', { class: 'palette-foot' }, h('span', null, h('kbd', null, '↑'), h('kbd', null, '↓'), ' to move'), h('span', null, h('kbd', null, 'Enter'), ' to open'), h('span', null, h('kbd', null, 'Esc'), ' to close'));
+    const panel = h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Jump to a page' }, h('div', { class: 'palette-top' }, icon('search', 18), box), listEl, palFoot);
     const overlay = h('div', { class: 'overlay palette-overlay' }, panel);
-    let shown = []; let at = 0;
+    let rows = []; let at = 0;
     // Records as well as pages (2026.11.20): map items, assets, work orders, requests and people, from /jump, a moment
     // after typing stops. Only what this person's role and apps open comes back.
     const RECORD_ICON = { feature: 'assets', asset: 'assets', work_order: 'works', request: 'requests', person: 'workforce' };
@@ -435,13 +742,14 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
 
     // Pages inside apps (the tabs of row 1 and row 2), with the app's name, only those this person may open.
     const appName = (k) => byKey.get(k) || k;
-    const subs = () => subPagesFor(viewKeys, { manager: isManager(), role: ctx.me.role, school: ctx.me.school_access, patrol: patrolInfo, muni: isMuni() }).map((p) => ({
+    const subs = () => subPagesFor(viewKeys, { manager: isManager(), role: me.role, school: me.school_access, patrol: patrolInfo, muni: isMuni() }).map((p) => ({
       id: `sub-${p.href}`, title: p.title, app: appName(p.app), hint: location.hash === p.href ? 'You are here' : '', icon: p.app, words: `${p.title} ${appName(p.app)} ${p.words}`, run: () => { location.hash = p.href; },
     }));
     const everything = () => [
       ...views.map(([key, text]) => ({ id: `page-${key}`, title: text, hint: key === currentKey ? 'You are here' : '', icon: key, words: `${text} ${ALSO[key] || ''}`, run: () => { location.hash = `#/${key}`; } })),
       ...(have('patrol') ? PATROL_SECTIONS.map(([id, text]) => ({ id: `patrol-${id}`, title: `Patrol: ${text}`, hint: currentKey === 'patrol' && currentSection === id ? 'You are here' : '', icon: 'patrol', words: `patrol ${text}`, run: () => { location.hash = `#/patrol/${id}`; } })) : []),
       ...subs(),
+      ...added(),
       ...actions(),
     ];
     function score(item, q) {
@@ -456,42 +764,42 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     function paint() {
       const q = box.value.trim().toLowerCase();
       const all = everything();
-      let rows;
+      let lines;
       if (!q) {
         const rec = recent().filter((k) => k !== currentKey).slice(0, 3).map((k) => all.find((i) => i.id === `page-${k}`)).filter(Boolean);
         const rest = all.filter((i) => !rec.includes(i) && !i.app); // pages inside apps show once something is typed
-        rows = [...(rec.length ? [{ heading: 'Recent' }, ...rec] : []), { heading: rec.length ? 'Everything' : 'Pages and commands' }, ...rest];
+        lines = [...(rec.length ? [{ heading: 'Recent' }, ...rec] : []), { heading: rec.length ? 'Everything' : 'Pages and commands' }, ...rest];
       } else {
         const hits = all.map((i) => [i, score(i, q)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).map(([i]) => i);
         const records = found.q === q ? found.items : [];
-        rows = hits.length || records.length ? [...hits, ...(records.length ? [{ heading: 'Records' }, ...records] : [])] : [{ none: true }];
+        lines = hits.length || records.length ? [...hits, ...(records.length ? [{ heading: 'Records' }, ...records] : [])] : [{ none: true }];
         fetchRecords(q);
       }
-      shown = rows.filter((r) => !r.heading && !r.none);
-      if (at >= shown.length) at = 0;
-      clear(list);
+      rows = lines.filter((r) => !r.heading && !r.none);
+      if (at >= rows.length) at = 0;
+      clear(listEl);
       let n = -1;
-      for (const r of rows) {
-        if (r.heading) { list.append(h('li', { class: 'palette-heading', role: 'presentation' }, r.heading)); continue; }
-        if (r.none) { list.append(h('li', { class: 'palette-none', role: 'presentation' }, `Nothing matches "${box.value.trim()}". ${isMuni() ? 'Try a page name like Work orders or Requests, a tag like V-114, or a request number.' : 'Try a page name like Sell or Patrol.'}`)); continue; }
+      for (const r of lines) {
+        if (r.heading) { listEl.append(h('li', { class: 'palette-heading', role: 'presentation' }, r.heading)); continue; }
+        if (r.none) { listEl.append(h('li', { class: 'palette-none', role: 'presentation' }, `Nothing matches "${box.value.trim()}". ${isMuni() ? 'Try a page name like Work orders or Requests, a tag like V-114, or a request number.' : 'Try a page name like Sell or Patrol.'}`)); continue; }
         n += 1;
         const idx = n;
         const li = h('li', { class: 'palette-item', role: 'option', id: `pal-${idx}`, 'aria-selected': String(idx === at) }, icon(r.icon, 18), h('span', { class: 'p-title' }, r.title, r.app ? h('span', { class: 'p-app' }, ` in ${r.app}`) : null), r.hint ? h('span', { class: 'p-hint' }, r.hint) : null);
-        li.addEventListener('mousemove', () => { if (at !== idx) { at = idx; mark(); } });
+        li.addEventListener('mousemove', () => { if (at !== idx) { at = idx; markRow(); } });
         li.addEventListener('click', () => choose(idx));
-        list.append(li);
+        listEl.append(li);
       }
-      mark();
+      markRow();
     }
-    function mark() {
-      [...list.querySelectorAll('.palette-item')].forEach((li, i) => li.setAttribute('aria-selected', String(i === at)));
-      const cur = list.querySelector(`#pal-${at}`);
+    function markRow() {
+      [...listEl.querySelectorAll('.palette-item')].forEach((li, i) => li.setAttribute('aria-selected', String(i === at)));
+      const cur = listEl.querySelector(`#pal-${at}`);
       if (cur) { box.setAttribute('aria-activedescendant', cur.id); if (cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' }); } else box.removeAttribute('aria-activedescendant');
     }
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); if (previous && previous.isConnected && previous.focus) previous.focus(); }
-    function choose(i) { const it = shown[i]; if (!it) return; close(); it.run(); }
+    function choose(i) { const it = rows[i]; if (!it) return; close(); it.run(); }
     function onKey(e) {
-      if (e.key === 'Escape') { e.preventDefault(); close(); } else if (e.key === 'ArrowDown') { e.preventDefault(); at = shown.length ? (at + 1) % shown.length : 0; mark(); } else if (e.key === 'ArrowUp') { e.preventDefault(); at = shown.length ? (at - 1 + shown.length) % shown.length : 0; mark(); } else if (e.key === 'Enter') { e.preventDefault(); choose(at); } else if (e.key === 'Tab') { e.preventDefault(); }
+      if (e.key === 'Escape') { e.preventDefault(); close(); } else if (e.key === 'ArrowDown') { e.preventDefault(); at = rows.length ? (at + 1) % rows.length : 0; markRow(); } else if (e.key === 'ArrowUp') { e.preventDefault(); at = rows.length ? (at - 1 + rows.length) % rows.length : 0; markRow(); } else if (e.key === 'Enter') { e.preventDefault(); choose(at); } else if (e.key === 'Tab') { e.preventDefault(); }
     }
     box.addEventListener('input', () => { at = 0; paint(); });
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
@@ -502,92 +810,108 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     // Patrol's pages depend on the person's Patrol access: load it once, then show those pages too.
     if (have('patrol') && !patrolInfo && !isManager()) loadPatrol().then(() => { if (overlay.isConnected) paint(); });
   }
-  let patrolInfo = null;
-  async function loadPatrol() {
-    try { patrolInfo = JSON.parse(sessionStorage.getItem('so.patrol.me') || 'null'); } catch (_) { patrolInfo = null; }
-    if (patrolInfo) return;
-    try { const { get } = await import('./api.js'); patrolInfo = await get('/patrol/me'); } catch (_) { patrolInfo = null; }
-  }
-  search.addEventListener('click', () => openPalette());
-  topSearch.addEventListener('click', () => openPalette());
+  jump.addEventListener('click', () => openPalette());
   const onGlobalKey = (e) => {
     if (!shell.isConnected) { document.removeEventListener('keydown', onGlobalKey); return; }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '') || (e.target && e.target.isContentEditable);
-    if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); openPalette(); } else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openPalette(); }
+    if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); openPalette(); } else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openPalette(); } else if (e.key === '\\' && (e.ctrlKey || e.metaKey) && !e.altKey) { e.preventDefault(); setCollapsed(!isCollapsed()); }
   };
   document.addEventListener('keydown', onGlobalKey);
-
-  shell.append(rail, h('div', { class: 'frame' }, topbar, main), tabbar);
-  paintFolds();
-  // Once the page is on screen and its fonts are in, the scrolling middle is cut to whole rows.
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => fit());
-  // And again whenever the rail, its pinned top or its foot change size (the stylesheet or fonts arriving late, the
-  // Ask button appearing, a zoom): the cut is always made against the room there really is.
-  if (typeof ResizeObserver === 'function') {
-    let queued = false;
-    const ro = new ResizeObserver(() => {
-      if (!shell.isConnected) { ro.disconnect(); return; }
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => { queued = false; fit(); });
-    });
-    for (const el of [rail, rail.firstChild, foot]) ro.observe(el);
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    // With no choice kept on this device the menu follows the window: a strip under 1280 px, open from there up.
+    const onResize = () => { if (!shell.isConnected) { window.removeEventListener('resize', onResize); return; } if (keptCollapsed() === null) paintCollapsed(); };
+    window.addEventListener('resize', onResize);
+    // A tab change inside a page does not draw the page again, but a pin to that tab is lit (or no longer lit).
+    const onHash = () => { if (!shell.isConnected) { window.removeEventListener('hashchange', onHash); return; } if (currentKey) mark(); };
+    window.addEventListener('hashchange', onHash);
   }
-  try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fit()); } catch (_) { /* fit on the next page */ }
+
+  // The first stop for the Tab key: past the menu, straight to the page.
+  const skip = h('button', { type: 'button', class: 'skip-link' }, 'Skip to the page');
+  skip.addEventListener('click', () => main.focus());
+  shell.append(skip, rail, h('div', { class: 'frame' }, topbar, main), tabbar, newFab);
+  paintCollapsed();
+  drawPins();
+  paintFolds();
 
   /**
-   * Marks where the person is: the app in the menus (Patrol's part is marked on the Patrol page itself). The group of
-   * All apps holding it opens and stays open, and the side menu scrolls so the app is in view under the pinned top.
+   * Says which app is open (before its page is drawn): the menus mark it, its section opens if it was folded, the row
+   * comes into view, and the top bar names it. The part of the app follows from setWhere once the page is there.
    */
-  /** The menu item for where the person is: a shortcut when the address is its page (Patrol, Records requests), else the app. */
-  function hereKey() {
-    const at = (typeof location !== 'undefined' && location.hash) || '';
-    const tab = (hsh) => { try { return new URLSearchParams(hsh.split('?')[1] || '').get('tab'); } catch (_) { return null; } };
-    for (const [k, l] of Object.entries(links || {})) {
-      const want = `#/${l.href}`;
-      if (anchorsFor(k) && at.split('?')[0] === want.split('?')[0] && tab(at) === tab(want)) return k;
-    }
-    return currentKey;
-  }
-  const anchorsFor = (k) => (links_.get(k) || []).length > 0;
-  function mark() {
-    const key = hereKey();
-    for (const [k, anchors] of links_) for (const a of anchors) { if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
-    more.classList.toggle('on', !tabLinks.has(key));
-  }
   function setCurrent(key, params = []) {
     currentKey = key;
     currentSection = key === 'patrol' ? patrolSection(params) : null;
     mark();
     paintFolds();
-    fit(); // cuts the middle to whole rows and scrolls the open app into view
+    paintNew();
+    paintWhere(null);
+    help.hidden = true;
+    // The open page stays in view in the list: when none of its rows is (it was opened from Jump to, say), the list
+    // moves just far enough to show its row in its section. A press on a row that is in view never moves the list.
+    if (list.clientHeight) {
+      const box = list.getBoundingClientRect();
+      const inView = (el) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= box.top && r.bottom <= box.bottom; };
+      const lit = [...list.querySelectorAll('.nav-row[aria-current="page"]')];
+      const home = lit.find((el) => !el.dataset.pin) || lit[0];
+      if (home && home.scrollIntoView && !lit.some(inView)) home.scrollIntoView({ block: 'nearest' });
+    }
     const rec = [key, ...recent().filter((k) => k !== key)].slice(0, 5);
     write(RECENT_KEY, JSON.stringify(rec));
   }
-  // A tab change inside a page does not draw the page again, but a shortcut to that tab is lit (or no longer lit).
-  if (typeof window !== 'undefined' && window.addEventListener && links && Object.keys(links).length) {
-    const onHash = () => { if (!shell.isConnected) { window.removeEventListener('hashchange', onHash); return; } if (currentKey) mark(); };
-    window.addEventListener('hashchange', onHash);
+  function paintWhere(part) {
+    const app = byKey.get(currentKey) || '';
+    // With a part showing, the app's name is the way back to the app's first page.
+    const first = part ? h('a', { href: `#/${currentKey}` }, app) : app;
+    clear(whereApp).append(first);
+    whereSep.hidden = !part; wherePart.hidden = !part;
+    wherePart.textContent = part || '';
+    return part ? `${app}: ${part}` : app;
   }
   /**
-   * A count on a page's menu links (unread messages on Inbox). 0 removes it. With { dot: true } it is a small dot
-   * instead of a number (Help, when What's new has something): quiet, and repeated on the phone's Menu button when
-   * the page sits inside the menu sheet there.
+   * Says which part of the app is on screen, once the page is drawn and after every tab change: part is its name (or
+   * nothing), help the page's Help address. Tells the other modules too (nav:page), once per change.
    */
-  function setBadge(key, n, { dot = false, says = 'unread' } = {}) {
-    for (const a of links_.get(key) || []) {
-      let b = a.querySelector('.nav-badge');
-      if (!n) { if (b) b.remove(); a.removeAttribute('aria-description'); continue; }
-      if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); a.append(b); }
-      b.classList.toggle('dot', dot);
-      b.textContent = dot ? '' : n > 99 ? '99+' : String(n);
-      a.setAttribute('aria-description', dot ? says : `${n} ${says}`);
-    }
-    if (dot) {
-      if (n) dots.add(key); else dots.delete(key);
-      more.classList.toggle('has-new', [...dots].some((k) => !tabLinks.has(k)));
-      if (more.classList.contains('has-new')) more.setAttribute('aria-description', 'Something new in Help'); else more.removeAttribute('aria-description');
-    }
+  function setWhere({ part = null, help: helpTo = null } = {}) {
+    if (!currentKey) return;
+    const text = paintWhere(part);
+    if (helpTo) { help.href = helpTo.href; help.setAttribute('aria-label', helpTo.label || 'Help'); help.title = helpTo.label || 'Help'; }
+    help.hidden = !helpTo;
+    paintNew();
+    mark();
+    const now = { key: currentKey, href: hrefNow(), label: text };
+    if (now.key === where.key && now.href === where.href && now.label === where.label) return;
+    where = now;
+    api.page = { ...now };
+    tell('nav:page', { ...now });
   }
-  return { shell, setCurrent, openPalette, openAllApps, openSheet, setBadge, plan };
+
+  /**
+   * The person's pins and phone bar, from pins.js. pins: [{ id, label, href, app, icon? }]; bar: up to four
+   * { label, href, app, icon? }, or null for the default (the start screen, the pins, then Home). A pin whose app the
+   * person may not open is left out.
+   */
+  function setPins(next, nextBar = null) {
+    pinsLive = true;
+    pins = me.role === 'area' ? [] : usablePins(next);
+    const chosen = usablePins(nextBar).slice(0, 4);
+    bar = chosen.length ? chosen : null;
+    drawPins();
+  }
+  /**
+   * A count on an app, wherever it shows at its own address: its row in its section, a pin to the app itself, the
+   * collapsed icon, the phone bar and the sheet tile (and Inbox's button in the top bar). 0 removes it. alert: red, for
+   * overdue or urgent. dot: a small dot instead of a number (Help, when What's new has something): on the account row
+   * and, on a phone, the Menu button.
+   */
+  function setBadge(key, n, { dot = false, says = 'unread', alert = false } = {}) {
+    if (n) badges.set(key, { n, dot, says, alert }); else badges.delete(key);
+    for (const s of shown) if (s.app === key && s.href === s.app) paintBadge(s.el, badges.get(key));
+    paintMenuDot();
+  }
+  function addCommands(fn) { if (typeof fn === 'function') commandFns.push(fn); }
+
+  // page: the page on screen now ({ key, href, label }, as nav:page last said it), for a module that starts after the
+  // first nav:page (pins.js loads on its own and may arrive late). null until the first page is drawn.
+  const api = { shell, plan, canEdit, slots: { star }, page: null, setCurrent, setWhere, setPins, setBadge, setNew, addCommands, openPalette, openSheet };
+  return api;
 }

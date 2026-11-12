@@ -292,7 +292,7 @@ test('the SPA knows the kind: isMuni and orgWord, municipal views with stubs, gr
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'js', 'views', file)), file);
   }
   assert.match(main, /const VIEW_MODULE = \{ requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings', monthreport: 'assets' \};/); // 2026.11.20: the monthly report
-  // The menu plan uses the municipal groups for a municipality, and the ski groups otherwise.
+  // The menu plan uses the municipal sections for a municipality, and the ski sections otherwise.
   const os = require('os'); const { pathToFileURL } = require('url');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'so-muni-'));
   fs.cpSync(path.join(__dirname, '..', 'public', 'js'), path.join(tmp, 'js'), { recursive: true });
@@ -305,14 +305,15 @@ test('the SPA knows the kind: isMuni and orgWord, municipal views with stubs, gr
   const views = ['dashboard', 'inbox', 'myshifts', 'requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'workforce', 'messages', 'documents', 'settings', 'help'].map((k) => [k, k]);
   const plan = nav.menuPlan(views, { apps: ['requests', 'works', 'assets', 'workforce'], start: 'dashboard' });
   assert.deepEqual(plan.home, ['dashboard', 'inbox', 'myshifts']);
-  assert.deepEqual(plan.groups.map((g) => g.name), ['Residents', 'Public works', 'Back office']);
-  assert.deepEqual(plan.groups.flatMap((g) => g.keys).sort(), ['assetprograms', 'buildings', 'bulk', 'documents', 'messages', 'notices'].sort());
+  assert.deepEqual(plan.sections.map((g) => g.name), ['Residents', 'Public works', 'Back office']);
+  assert.deepEqual(plan.sections.flatMap((g) => g.keys), ['requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'workforce', 'messages', 'documents'], 'every app, pinned or not, in its section (2026.11.21)');
+  assert.deepEqual(plan.pins.map((p) => p.href), ['requests', 'works', 'assets', 'workforce'], 'the role\'s menu is the starting pins');
   assert.equal(nav.roleName({ role: 'staff', org_type: 'municipality' }), 'Crew');
   assert.equal(nav.roleName({ role: 'counter', org_type: 'municipality' }), 'Front desk');
   assert.equal(nav.roleName({ role: 'staff' }), 'Lift and mountain staff', 'a ski area keeps its names');
   ui2.ctx.me = { role: 'owner' };
   assert.equal(ui2.orgWord(), 'mountain');
-  assert.deepEqual(nav.menuPlan([['conditions', 'Mountain status'], ['patrol', 'Patrol']], { apps: [], start: 'dashboard' }).groups.map((g) => g.name), ['On the hill']);
+  assert.deepEqual(nav.menuPlan([['conditions', 'Mountain status'], ['patrol', 'Patrol']], { apps: [], start: 'dashboard' }).sections.map((g) => g.name), ['Mountain']);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
