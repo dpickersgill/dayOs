@@ -54,7 +54,7 @@ export const SHORT = {
   conditions: 'Mountain', park: 'Park', patrol: 'Patrol', area: 'Summary', assets: 'Assets',
   school: 'Lessons', programs: 'Programs', availability: 'Availability',
   catalog: 'Products', money: 'Money', workforce: 'Staff', messages: 'Messages', documents: 'Documents',
-  requests: 'Requests', notices: 'Notices', bulk: 'Bulk pickup', works: 'Work orders', assetprograms: 'Programs', buildings: 'Buildings',
+  requests: 'Requests', notices: 'Notices', bulk: 'Trash', works: 'Work orders', assetprograms: 'Programs', buildings: 'Buildings',
   monthreport: 'Report', water: 'Water', sewer: 'Sewer', stormwater: 'Stormwater', settings: 'Settings', help: 'Help',
 };
 export const BAR_LABEL_MAX = 12;
@@ -128,7 +128,7 @@ const ALSO = {
   monthreport: 'monthly report council month totals cost hours department fund liquid fuels ms-965 response times',
   water: 'water main break valve shut customers out boil water repair history', sewer: 'sewer chapter 94 ch94 flow pump station run hours gpm mgd edu connections overflow sso dep',
   stormwater: 'stormwater ms4 permit outfall screening illicit discharge idde case minimum control measures education construction bmp good housekeeping training annual report',
-  bulk: 'bulk trash pickup furniture appliance large item booking route order', buildings: 'building inspections life safety fire extinguisher sprinkler alarm elevator boiler backflow generator playground binder certificate vendor round calendar',
+  bulk: 'trash recycling garbage refuse collection calendar schedule zones missed pickup cart tonnage landfill report bulk pickup furniture appliance large item booking route order yard waste leaves holiday', buildings: 'building inspections life safety fire extinguisher sprinkler alarm elevator boiler backflow generator playground binder certificate vendor round calendar',
 };
 const RECENT_KEY = 'so.recent';
 const FOLDED_KEY = 'so.nav.folded'; // the sections this device keeps folded (ids)

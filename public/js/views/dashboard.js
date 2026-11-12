@@ -350,9 +350,6 @@ export const MUNI_TODAY = [
   ['requests', '/requests/today', () => true],
   ['requests', '/street-notices/today', () => true],
   ['solidwaste', '/solid-waste/today', () => true],
-  // Collection routes and Hauler oversight (2026.11.22): each answers 403 when its add-on is off, and is then left out.
-  ['solidwaste', '/solid-waste/routes/today', () => can('counter')],
-  ['solidwaste', '/solid-waste/hauler/today', () => can('counter')],
   // Water, Sewer and Stormwater cards are for the crew and managers, as their routes are (routes/utilities.js), so the
   // front desk's Today does not ask for cards it may not read.
   ['water', '/water/today', () => can('staff')],

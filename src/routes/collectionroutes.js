@@ -23,7 +23,7 @@
 //   PUT  /routes/:id/crew               who is on it (managers)
 //   POST /routes/:id/finish             odometer, hours, landfill and recycling tickets
 // Hauler oversight (`hauler`):
-//   GET  /hauler/today, GET/PUT /hauler/contract, GET /hauler/missed, POST /hauler/missed/:requestId/forward,
+//   GET/PUT /hauler/contract, GET /hauler/missed, POST /hauler/missed/:requestId/forward,
 //   POST /hauler/forwards/:id/collected, GET /hauler/scorecard?month=, GET /hauler/scorecards?months=
 // Public (no sign-in; the page word 'hauler' belongs to Trash and recycling, and the hauler add-on must be on):
 //   GET  /public/:slug/hauler/:token, POST /public/:slug/hauler/:token/collected
@@ -142,17 +142,6 @@ router.post('/routes/:id/finish', crew, validate(z.object({
 
 // ---------------------------------------------------------------- hauler oversight
 router.use('/hauler', haulerOn);
-router.get('/hauler/today', office, todayRoute(async (req) => {
-  const t = req.auth.tenantId;
-  const s = await R.settingsOf(pool, t);
-  if (s.model !== 'contract') return [];
-  const { forwards, not_sent: notSent } = await R.forwardsList(req, { show: 'open' });
-  const late = forwards.filter((f) => f.late).length;
-  const cards = [];
-  if (forwards.length) cards.push({ title: 'Missed pickups with the hauler', count: forwards.length, text: late ? `${late} past the contract's time to collect` : 'All within the contract\'s time so far', href: '#/bulk?tab=hauler' });
-  if (notSent.length) cards.push({ title: 'Missed pickups not sent to the hauler', count: notSent.length, text: 'Send them from the Hauler tab', href: '#/bulk?tab=hauler' });
-  return cards;
-}));
 router.get('/hauler/contract', office, async (req, res) => {
   const t = req.auth.tenantId; const mgr = ['owner', 'manager'].includes(req.auth.role);
   const s = await R.settingsOf(pool, t);
@@ -194,6 +183,20 @@ router.get('/hauler/scorecards', managers, async (req, res) => {
   let [y, m] = now.split('-').map(Number);
   for (let i = 0; i < months; i += 1) { list.push(await R.scorecard(req, `${y}-${String(m).padStart(2, '0')}`)); m -= 1; if (!m) { m = 12; y -= 1; } }
   res.json({ months: list.map(({ by_zone, by_week, complaints, ...x }) => x) });
+});
+
+// ---------------------------------------------------------------- Today (Trash and recycling's GET /solid-waste/today)
+// Both add-ons add their cards to the app's own Today answer (lib/collection.js addTodayCards); each adds nothing when off.
+R.C.addTodayCards(async (req) => (['owner', 'manager', 'counter'].includes(req.auth.role) && await R.addonOn(req.auth.tenantId, 'collectionroutes') ? R.todayCards(req) : []));
+R.C.addTodayCards(async (req) => {
+  if (!['owner', 'manager', 'counter'].includes(req.auth.role) || !(await R.addonOn(req.auth.tenantId, 'hauler'))) return [];
+  if ((await R.settingsOf(pool, req.auth.tenantId)).model !== 'contract') return [];
+  const { forwards, not_sent: notSent } = await R.forwardsList(req, { show: 'open' });
+  const late = forwards.filter((f) => f.late).length;
+  const cards = [];
+  if (forwards.length) cards.push({ title: 'Missed pickups with the hauler', count: forwards.length, text: late ? `${late} past the contract's time to collect` : 'All within the contract\'s time so far', href: '#/bulk?tab=hauler' });
+  if (notSent.length) cards.push({ title: 'Missed pickups not sent to the hauler', count: notSent.length, text: 'Send them from the Hauler tab', href: '#/bulk?tab=hauler' });
+  return cards;
 });
 
 // ---------------------------------------------------------------- the hauler's link (public)

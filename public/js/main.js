@@ -52,7 +52,7 @@ const VIEWS = [
   ['notices', 'Street notices', () => can('counter', 'staff'), () => import('./views/street-notices.js')],
   ['works', 'Work orders', () => can('staff'), () => import('./views/works.js')],
   ['assetprograms', 'Programs', () => can('staff'), () => import('./views/asset-programs.js')],
-  ['bulk', 'Bulk pickup', () => can('counter', 'staff'), () => import('./views/bulk-pickup.js')],
+  ['bulk', 'Trash and recycling', () => can('counter', 'staff'), () => import('./views/bulk-pickup.js')], // 2026.11.22: the whole app; the key stays bulk
   ['buildings', 'Buildings', () => can('counter', 'staff'), () => import('./views/buildings.js')],
   ['monthreport', 'Monthly report', () => isManager(), () => import('./views/month-report.js')], // 2026.11.20: for the manager and council
   // 2026.11.20: main breaks (Water), Chapter 94 and overflows (Sewer), MS4 and illicit discharge cases (Stormwater).

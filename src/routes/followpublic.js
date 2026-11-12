@@ -163,6 +163,8 @@ jobs.post('/guests', jobAuth, async (req, res) => {
     out.bulk_reminders = await require('../lib/bulkpickup').remindDue(baseUrl(req)).catch((e) => ({ error: e.message }));
     // Missed pickups where a contracted hauler collects go to the hauler by email (2026.11.22, Hauler oversight add-on).
     out.hauler_forwards = await require('../lib/collectionroutes').forwardDue(baseUrl(req)).catch((e) => ({ error: e.message }));
+    // The collection calendar's night-before reminders, from 6 PM local (2026.11.22, lib/collectionremind.js).
+    out.collection_reminders = await require('../lib/collectionremind').remindDue(baseUrl(req)).catch((e) => ({ error: e.message }));
     res.json(out);
   } finally {
     await conn.query("SELECT RELEASE_LOCK('summitops_guests_job')").catch(() => {});

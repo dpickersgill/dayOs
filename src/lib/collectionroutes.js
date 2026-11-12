@@ -48,14 +48,7 @@ const { addDays, weekdayOf, todayIn, nowIn } = require('./util');
 const { bad, conflict, forbidden, notFound } = require('./errors');
 const { audit } = require('./audit');
 
-/** The schedule workstream's library when it is there; a phase-1 stand-in with the same signatures when it is not. */
-function load(real, stub) {
-  try { return require(real); } catch (err) {
-    if (err.code !== 'MODULE_NOT_FOUND' || !String(err.message).startsWith(`Cannot find module '${real}'`)) throw err;
-    return require(stub);
-  }
-}
-const C = load('./collection', './collection-stub');
+const C = require('./collection');
 /** tonnage's addTicket(conn, tenantId, ticket, { by }) when it is there; a stand-in that keeps nothing when it is not. */
 function addTicketFn() {
   try { const T = require('./tonnage'); if (typeof T.addTicket === 'function') return T.addTicket; } catch (err) { if (err.code !== 'MODULE_NOT_FOUND' || !String(err.message).startsWith("Cannot find module './tonnage'")) throw err; }
@@ -252,6 +245,7 @@ async function routeView(req, id) {
   const stops = (await rows(pool, `${STOP_SQL} WHERE s.tenant_id = ? AND s.route_id = ? ORDER BY s.position, s.id`, [t, r.id])).map(stopShape);
   const out = { ...routeShape(r, stops, crew), today, stops, can_work: mayWork(req, r, crew, today) && date === today && r.status !== 'delayed' && r.status !== 'done', can_manage: isMgr(req), reasons: Object.entries(REASONS).map(([key, words]) => ({ key, words })) };
   out.bulk = r.stream_kind === 'trash' ? await bulkStopsFor(t, r, date) : [];
+  out.carts = await cartStopsOn(t, r, date);
   out.pretrip_check = r.asset_id ? await pretripOf(pool, t, Number(r.asset_id), date) : null;
   out.trucks = out.can_work || isMgr(req) ? await trucks(t, date) : [];
   return out;
@@ -274,6 +268,29 @@ async function bulkStopsFor(t, r, date) {
   }
   const order = await require('./bulkroute').order(pool, t, weekdayOf(date), out);
   return order.stops.map(({ id, street, unit, ...x }) => x);
+}
+
+/**
+ * That day's cart deliveries (workstream tonnage's lib/carts.js cartStopsFor, when it is there) in this route's zone, or
+ * with no zone on the day's first route. Shown on the route; delivered and marked in Carts. Never a resident's contact.
+ */
+async function cartStopsOn(t, r, date) {
+  let CT;
+  try { CT = require('./carts'); } catch (err) { if (err.code === 'MODULE_NOT_FOUND' && String(err.message).startsWith("Cannot find module './carts'")) return []; throw err; }
+  if (typeof CT.cartStopsFor !== 'function') return [];
+  let list;
+  try { list = (await CT.cartStopsFor(pool, t, date)) || []; } catch (_) { return []; }
+  if (!list.length) return [];
+  const first = await one(pool, 'SELECT id FROM collection_routes WHERE tenant_id = ? AND on_date = ? ORDER BY sort, id LIMIT 1', [t, date]);
+  const out = [];
+  for (const c of list) {
+    const streetId = Number(c.street_id || 0); const no = c.house_number || null;
+    const z = streetId ? await C.zoneFor(pool, t, { streetId, houseNo: no }) : null;
+    const mine = z && z.zoneId ? z.zoneId === Number(r.zone_id) : first && Number(first.id) === Number(r.id);
+    if (!mine) continue;
+    out.push({ id: c.id ? Number(c.id) : null, words: c.address || c.words || `${no ? `${no} ` : ''}${c.street || ''}`.trim(), what: c.what || c.label || [c.kind, c.stream, c.size ? `${c.size} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered_at || c.done || c.status === 'delivered') });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- trucks and the pre-trip check
@@ -628,18 +645,21 @@ async function routeCheck(conn, t, { streetId, houseNo: no, streamId = null, dat
   const list = await rows(conn, `SELECT id, status, moved_to, delayed_reason FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND zone_id = ? ${streamId ? 'AND stream_id = ?' : ''} ORDER BY id`, streamId ? [t, date, z.zoneId, streamId] : [t, date, z.zoneId]);
   if (!list.length) {
     const plan = (await C.dayRoutes(conn, t, date)).find((p) => p.zoneId === z.zoneId && (!streamId || p.streamId === Number(streamId)));
-    return plan ? { outcome: 'not_yet' } : null;
+    return plan ? { outcome: 'not_yet', message: 'The truck is still on its route today.' } : null;
   }
   const r = list[0];
-  if (r.status === 'delayed') return { outcome: 'not_yet', delayed: true, reason: r.delayed_reason, moved_to: ymd(r.moved_to) };
+  if (r.status === 'delayed') {
+    const to = ymd(r.moved_to);
+    return { outcome: 'not_yet', delayed: true, reason: r.delayed_reason === 'snow' ? 'snow' : 'weather', moved_to: to, message: `Today's pickup on your street is delayed for ${r.delayed_reason === 'snow' ? 'snow' : 'weather'}${to ? `. It is now ${dayWords(to)}` : ''}.` };
+  }
   const stops = await rows(conn, 'SELECT id, kind, from_no, to_no, side, status, reason, marked_at, photo_id FROM collection_route_stops WHERE tenant_id = ? AND route_id = ? AND street_id = ? ORDER BY marked_at DESC', [t, r.id, streetId]);
   const hit = stops.filter((s) => covers(s, no));
   const done = hit.find((s) => s.status === 'done');
-  if (done) return { outcome: 'done', at: dt(done.marked_at) };
+  if (done) return { outcome: 'done', at: dt(done.marked_at), message: `The crew marked your street done at ${require('./util').clock(dt(done.marked_at))}. Tell us what was missed and we will send someone back.` };
   const skipped = hit.find((s) => s.status === 'skipped');
-  if (skipped) return { outcome: 'skipped', at: dt(skipped.marked_at), reason: skipped.reason, reason_words: REASONS[skipped.reason], photo: Boolean(skipped.photo_id) };
+  if (skipped) return { outcome: 'skipped', at: dt(skipped.marked_at), reason: REASONS[skipped.reason].toLowerCase(), reason_key: skipped.reason, reason_words: REASONS[skipped.reason], photo: Boolean(skipped.photo_id), message: `The crew could not collect on your street today: ${REASONS[skipped.reason].toLowerCase()}. You can still report it, and we will send someone back.` };
   if (r.status === 'done') return null; // finished without that street marked: the check's own rule
-  return { outcome: 'not_yet' };
+  return { outcome: 'not_yet', message: 'The truck is still on its route today.' };
 }
 
 // ---------------------------------------------------------------- snow days
@@ -648,8 +668,6 @@ async function settingsOf(db, t) {
 }
 /** The next day trucks run after this one (Sunday is skipped). */
 const nextRunDay = (d) => { const x = addDays(d, 1); return weekdayOf(x) === 0 ? addDays(x, 1) : x; };
-const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const noticeCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
 
 /**
  * Declares a snow day (managers): the changes, the routes Delayed for snow, and a DRAFT street notice to the streets of
@@ -684,30 +702,16 @@ async function declareSnowDay(req, b) {
     // That day's routes kept already (today): Delayed for snow.
     const affected = hit.map((p) => p.zoneId);
     const [del] = await conn.query("UPDATE collection_routes SET status = 'delayed', delayed_reason = 'snow', moved_to = ? WHERE tenant_id = ? AND on_date = ? AND zone_id IN (?) AND status IN ('planned','started')", [moves[0].to, t, b.on_date, affected]);
-    // The street notice, drafted for the manager to read over and send (Street notices).
-    const town = await one(conn, 'SELECT name FROM tenants WHERE id = ?', [t]);
-    const streams = [...new Set(hit.map((p) => p.streamName))];
-    const what = streams.length > 2 ? 'trash and recycling' : streams.join(' and ').toLowerCase() || 'trash and recycling';
-    const more = moves.length > 1 ? ' Later pickups this week move one day later too.' : '';
-    const sms = moves[0].to
-      ? `${town.name}: Because of snow, ${dayWords(b.on_date)}'s ${what} pickup moves to ${dayWords(moves[0].to)}.${more} Put carts out the night before.`
-      : `${town.name}: Because of snow, ${dayWords(b.on_date)}'s ${what} pickup is canceled. Put it out on your next regular day.`;
-    const title = `${what.charAt(0).toUpperCase()}${what.slice(1)} delayed for snow`.slice(0, 120);
-    const body = `${sms}\n\n${zoneIds.length ? `Zones: ${hit.map((p) => p.zoneName).filter((v, i, a) => a.indexOf(v) === i).join(', ')}.` : 'Every zone.'}${b.note ? `\n\n${b.note}` : ''}`;
-    let noticeId = null;
-    for (let i = 0; i < 6 && !noticeId; i += 1) {
-      try {
-        const [ins] = await conn.query("INSERT INTO street_notices (tenant_id, code, type, title, sms_text, body, starts_at, ends_expected_at, created_by) VALUES (?, ?, 'trash_change', ?, ?, ?, ?, ?, ?)",
-          [t, noticeCode(), title, sms.slice(0, 320), body, `${b.on_date} 00:00:00`, `${moves[moves.length - 1].to || b.on_date} 23:59:00`, req.auth.userId]);
-        noticeId = Number(ins.insertId);
-      } catch (err) { if (err.code !== 'ER_DUP_ENTRY') throw err; }
-    }
-    const areas = await rows(conn, 'SELECT DISTINCT street_id, from_no, to_no, side FROM collection_zone_streets WHERE tenant_id = ? AND zone_id IN (?) AND not_collected = 0', [t, affected]);
-    for (const a of areas) await conn.query('INSERT INTO street_notice_areas (tenant_id, notice_id, street_id, from_no, to_no, side) VALUES (?, ?, ?, ?, ?, ?)', [t, noticeId, a.street_id, a.from_no === null || a.from_no < 0 ? null : a.from_no, a.to_no === null || a.to_no < 0 ? null : a.to_no, a.side]);
-    await conn.query('UPDATE collection_changes SET notice_id = ? WHERE tenant_id = ? AND id IN (?)', [noticeId, t, changeIds]);
+    // The street notice: the schedule's own draft for a moved or canceled day (routes/collection.js draftNotice), aimed
+    // at the zones affected, for the manager to read over and send from Street notices.
+    const more = moves.length > 1 ? 'Pickups later this week move one day later too.' : '';
+    const noticeId = await require('../routes/collection').draftNotice(conn, req, { id: changeIds[0], on_date: b.on_date, moved_to: moves[0].to, reason: 'snow', note: [more, b.note].filter(Boolean).join(' ') || null, zone_ids: zoneIds.length ? zoneIds : [...new Set(affected)] });
+    if (noticeId) await conn.query('UPDATE collection_changes SET notice_id = ? WHERE tenant_id = ? AND id IN (?)', [noticeId, t, changeIds]);
+    const nt = noticeId ? await one(conn, 'SELECT title, sms_text FROM street_notices WHERE tenant_id = ? AND id = ?', [t, noticeId]) : null;
+    const streetsN = noticeId ? n((await one(conn, 'SELECT COUNT(*) AS c FROM street_notice_areas WHERE tenant_id = ? AND notice_id = ?', [t, noticeId])).c) : 0;
     const [sd] = await conn.query('INSERT INTO collection_snow_days (tenant_id, on_date, zone_ids, change_ids, notice_id, note, declared_by, declared_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, b.on_date, JSON.stringify(zoneIds), JSON.stringify(changeIds), noticeId, b.note || null, req.auth.userId, now]);
     await audit(conn, req, 'snow_day', 'collection_snow_days', sd.insertId, { on_date: b.on_date, zones: zoneIds, rule, changes: moves.length, notice_id: noticeId });
-    return { id: Number(sd.insertId), rule, changes: moves.map((m) => ({ from: m.from, to: m.to })), notice_id: noticeId, notice: { title, sms_text: sms, streets: areas.length }, delayed: del.affectedRows };
+    return { id: Number(sd.insertId), rule, changes: moves.map((m) => ({ from: m.from, to: m.to })), notice_id: noticeId, notice: nt ? { title: nt.title, sms_text: nt.sms_text, streets: streetsN } : null, delayed: del.affectedRows };
   });
 }
 async function undoSnowDay(req, id) {
@@ -882,7 +886,8 @@ async function forwardDue(base) {
   }
   return { found: list.length, sent };
 }
-const addonOn = (t, key) => (C.addonOn ? C.addonOn(t, key) : require('./modules').stateOf(t).then((s) => s.org === 'municipality' && s.on.has('solidwaste') && s.on.has(key)));
+/** Is this add-on on for the tenant (a municipality, active, with Trash and recycling)? */
+const addonOn = async (t, key) => { const s = await require('./modules').stateOf(t); return s.org === 'municipality' && s.status === 'active' && s.on.has('solidwaste') && s.on.has(key); };
 
 /** The hauler's page, by its link: the address, stream and times only. null when the link is unknown or has expired. */
 async function byToken(slug, token) {

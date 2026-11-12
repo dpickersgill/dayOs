@@ -3,12 +3,8 @@
 // hauler oversight (the Hauler oversight add-on, `hauler`). Loaded by db/migrate.js. Additive and safe to run twice, on
 // MySQL 8.4 and MariaDB.
 //
-// SHARED tables (the schedule workstream's db/steps/trash-schedule.js makes them; these copies are the same definitions
-// from the release spec, guarded by tableExists, so this file works on its own until the two are merged and the assembler
-// keeps one): collection_settings, collection_streams, collection_zones, collection_zone_days, collection_zone_streets,
-// collection_holidays, collection_events, collection_changes.
-//
-// This workstream's own tables:
+// The shared collection tables (collection_settings, _streams, _zones, _zone_days, _zone_streets, _holidays, _events,
+// _changes) are made by db/steps/trash-schedule.js, which runs first. This workstream's own tables:
 //   collection_trucks        which fleet trucks collect, whether they also plow, and how each is set up now
 //   collection_routes        one truck's route on one day: a zone and a stream (Monday north, Trash), its truck, the
 //                            odometer at the start and end, the pre-trip check, status (Delayed for snow), its costs
@@ -22,109 +18,6 @@
 //   collection_snow_days     a snow day a manager declared: the changes it made and the street notice it drafted
 //   hauler_contracts         the contracted hauler's terms: dates, the service level, price per household, penalties
 //   hauler_forwards          a missed pickup sent to the hauler: the link (hashed token, 30 days), when it was collected
-
-const SHARED = ({ tableExists }) => [
-  ['collection_settings', (c) => tableExists(c, 'collection_settings'), `CREATE TABLE collection_settings (
-    tenant_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-    model          ENUM('inhouse','contract','subscription') NOT NULL DEFAULT 'inhouse',
-    hauler_name    VARCHAR(120) NULL,
-    hauler_phone   VARCHAR(40) NULL,
-    hauler_email   VARCHAR(255) NULL,
-    hauler_url     VARCHAR(255) NULL,
-    holiday_rule   ENUM('shift','none','skip') NOT NULL DEFAULT 'shift',
-    reminder_hour  TINYINT NOT NULL DEFAULT 18,
-    setup_done_at  DATETIME NULL,
-    updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_collection_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_streams', (c) => tableExists(c, 'collection_streams'), `CREATE TABLE collection_streams (
-    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id     BIGINT UNSIGNED NOT NULL,
-    name          VARCHAR(60) NOT NULL,
-    kind          ENUM('trash','recycling','yard','food','other') NOT NULL DEFAULT 'other',
-    frequency     ENUM('weekly','biweekly','monthly') NOT NULL DEFAULT 'weekly',
-    anchor_date   DATE NULL,
-    season_start  CHAR(5) NULL,
-    season_end    CHAR(5) NULL,
-    color         VARCHAR(7) NULL,
-    materials     TEXT NULL,
-    not_accepted  TEXT NULL,
-    sort          INT NOT NULL DEFAULT 0,
-    active        TINYINT(1) NOT NULL DEFAULT 1,
-    UNIQUE KEY uq_collection_streams_tenant_id (tenant_id, id),
-    CONSTRAINT fk_collection_streams_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_zones', (c) => tableExists(c, 'collection_zones'), `CREATE TABLE collection_zones (
-    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id  BIGINT UNSIGNED NOT NULL,
-    name       VARCHAR(60) NOT NULL,
-    sort       INT NOT NULL DEFAULT 0,
-    active     TINYINT(1) NOT NULL DEFAULT 1,
-    UNIQUE KEY uq_collection_zones_tenant_id (tenant_id, id),
-    CONSTRAINT fk_collection_zones_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_zone_days', (c) => tableExists(c, 'collection_zone_days'), `CREATE TABLE collection_zone_days (
-    tenant_id  BIGINT UNSIGNED NOT NULL,
-    zone_id    BIGINT UNSIGNED NOT NULL,
-    stream_id  BIGINT UNSIGNED NOT NULL,
-    weekday    TINYINT NOT NULL,
-    PRIMARY KEY (tenant_id, zone_id, stream_id),
-    CONSTRAINT fk_collection_zone_days_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    CONSTRAINT fk_collection_zone_days_zone FOREIGN KEY (tenant_id, zone_id) REFERENCES collection_zones(tenant_id, id),
-    CONSTRAINT fk_collection_zone_days_stream FOREIGN KEY (tenant_id, stream_id) REFERENCES collection_streams(tenant_id, id)
-  ) ENGINE=InnoDB`],
-  ['collection_zone_streets', (c) => tableExists(c, 'collection_zone_streets'), `CREATE TABLE collection_zone_streets (
-    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id      BIGINT UNSIGNED NOT NULL,
-    zone_id        BIGINT UNSIGNED NULL,
-    street_id      BIGINT UNSIGNED NOT NULL,
-    from_no        INT NULL,
-    to_no          INT NULL,
-    side           ENUM('both','odd','even') NOT NULL DEFAULT 'both',
-    not_collected  TINYINT(1) NOT NULL DEFAULT 0,
-    UNIQUE KEY uq_collection_zone_streets_tenant_id (tenant_id, id),
-    KEY ix_collection_zone_streets_street (tenant_id, street_id),
-    CONSTRAINT fk_collection_zone_streets_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    CONSTRAINT fk_collection_zone_streets_zone FOREIGN KEY (tenant_id, zone_id) REFERENCES collection_zones(tenant_id, id),
-    CONSTRAINT fk_collection_zone_streets_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB`],
-  ['collection_holidays', (c) => tableExists(c, 'collection_holidays'), `CREATE TABLE collection_holidays (
-    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id  BIGINT UNSIGNED NOT NULL,
-    on_date    DATE NOT NULL,
-    name       VARCHAR(80) NOT NULL,
-    UNIQUE KEY uq_collection_holidays_tenant_id (tenant_id, id),
-    UNIQUE KEY uq_collection_holidays_date (tenant_id, on_date),
-    CONSTRAINT fk_collection_holidays_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_events', (c) => tableExists(c, 'collection_events'), `CREATE TABLE collection_events (
-    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id  BIGINT UNSIGNED NOT NULL,
-    kind       ENUM('leaf','tree','hazardous','other') NOT NULL DEFAULT 'other',
-    name       VARCHAR(120) NOT NULL,
-    starts_on  DATE NOT NULL,
-    ends_on    DATE NOT NULL,
-    notes      TEXT NULL,
-    zone_ids   JSON NULL,
-    UNIQUE KEY uq_collection_events_tenant_id (tenant_id, id),
-    CONSTRAINT fk_collection_events_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_changes', (c) => tableExists(c, 'collection_changes'), `CREATE TABLE collection_changes (
-    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id   BIGINT UNSIGNED NOT NULL,
-    on_date     DATE NOT NULL,
-    moved_to    DATE NULL,
-    zone_ids    JSON NULL,
-    reason      ENUM('snow','weather','holiday','other') NOT NULL DEFAULT 'other',
-    note        VARCHAR(255) NULL,
-    notice_id   BIGINT UNSIGNED NULL,
-    created_by  BIGINT UNSIGNED NULL,
-    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_collection_changes_tenant_id (tenant_id, id),
-    KEY ix_collection_changes_date (tenant_id, on_date),
-    CONSTRAINT fk_collection_changes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-];
 
 const OWN = ({ tableExists }) => [
   ['collection_trucks', (c) => tableExists(c, 'collection_trucks'), `CREATE TABLE collection_trucks (
@@ -378,5 +271,4 @@ const OWN = ({ tableExists }) => [
   ) ENGINE=InnoDB`],
 ];
 
-module.exports = (h) => [...SHARED(h), ...OWN(h)];
-module.exports.SHARED = SHARED;
+module.exports = (h) => OWN(h);

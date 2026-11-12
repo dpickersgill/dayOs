@@ -6,6 +6,7 @@
 // the same function its Today card reads (lib/waiting.js, lib/crewday.js), so the menu and Today cannot disagree:
 //
 //   requests  new requests nobody has decided on        the front desk, managers        Today: New requests
+//   bulk      missed pickups nobody has decided on      the front desk, managers        Today: Missed pickups
 //   works     overdue work orders (red)                  managers: all of them           Today: Overdue work orders
 //                                                        crew: only their own            Today: My work today, Overdue
 //   patrol    my open cases, and reports to review       patrollers; the review group    Patrol's home: My open cases, Waiting for review
@@ -55,9 +56,14 @@ async function countsFor(req) {
   const { a, on, muni, tz } = s;
   const t = a.tenantId;
   const put = (key, n, says, alert) => { if (n > 0) out[key] = { n, says, ...(alert ? { alert: true } : {}) }; };
+  /** Adds to an app's count (summed with what is there; the words of the first kept, or "waiting" when they differ). */
+  const add = (key, n, says, alert) => { if (!(n > 0)) return; if (!out[key]) { put(key, n, says, alert); return; } out[key].n += n; if (out[key].says !== says) out[key].says = 'waiting'; if (alert) out[key].alert = true; };
   if (muni) {
     // Requests: new ones wait for the desk or a manager to decide what to do (routes/requests.js desk).
     if (on.has('requests') && has(a, 'counter')) put('requests', await W.newRequests(pool, t), 'new');
+    // Trash and recycling: missed pickups nobody has decided on, for the desk and managers (Today: Missed pickups).
+    // The key 'bulk' is shared: other Trash and recycling counts (the routes' go-backs) add to it with add('bulk', ...).
+    if (on.has('solidwaste') && on.has('requests') && has(a, 'counter')) add('bulk', await W.missedPickups(pool, t), 'missed pickups waiting');
     // Work orders: overdue. A manager's is every overdue one; a crew member's is only what is assigned to them.
     if (on.has('assets') && isMgr(a)) put('works', (await W.workOrders(pool, t, todayIn(tz))).overdue, 'overdue', true);
     else if (on.has('assets') && a.role === 'staff' && a.staffId) {
@@ -70,7 +76,7 @@ async function countsFor(req) {
       const CR = require('./collectionroutes');
       if (await CR.addonOn(t, 'collectionroutes')) {
         const g = await CR.gobacksWaiting(pool, t, todayIn(tz), isMgr(a) ? null : a.userId);
-        if (g > 0) out.bulk = out.bulk ? { ...out.bulk, n: out.bulk.n + g, says: `${out.bulk.says}, or to go back for` } : { n: g, says: 'to go back for' };
+        add('bulk', g, 'to go back for');
       }
     }
     return out;
@@ -113,6 +119,7 @@ async function creatable(req) {
     add('request', on.has('requests') && has(a, 'staff', 'counter')); // routes/requests.js: taken for a resident
     add('street_notice', on.has('requests') && has(a, 'staff') && await require('../routes/streetnotices').canSend(req)); // managers, and a crew lead a manager allowed
     add('bulk_booking', on.has('solidwaste') && has(a, 'counter')); // routes/bulkpickup.js office
+    add('missed_pickup', on.has('solidwaste') && on.has('requests') && has(a, 'counter')); // routes/requests.js, the Missed pickup category
     add('main_break', on.has('water') && has(a, 'staff')); // routes/mainbreaks.js
     add('message', on.has('messages') && isMgr(a));
     return out;

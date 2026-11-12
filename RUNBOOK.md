@@ -634,3 +634,14 @@ Step file `db/steps/m2-utilities.js` (map_features.street_id and pump_gpm, main_
 - A hauler says the link does not work: links last 30 days and a resend replaces the old one. Press Send again.
 - Snow day declared by mistake: Routes, Snow days, Undo. A notice already sent needs a follow-up from Street notices.
 - Money: `/solid-waste/routes` and `/solid-waste/hauler` are in `lib/nomoney.js`; only owners and managers get costs, rates, fees, price and penalties.
+## Trash and recycling: the collection schedule (release 2026.11.22)
+- Migration: `db/steps/trash-schedule.js` (the shared collection tables, reminder log, education log, the Missed pickup
+  rename by code, billing rows). Safe to run twice.
+- Demo: `node db/demo-municipal.js demo-borough` runs `45-collection.js` (four zones, federal holidays 2026 and 2027,
+  leaf collection in November, 24 reminder sign-ups). Nothing is sent.
+- Reminders run in the 5-minute guests job (`POST /api/v1/internal/jobs/guests`, `collection_reminders` in its reply).
+  A resident says no reminder came: check the sign-up is active with the trash topic, its phone or email confirmed and
+  not stopped, and the calendar published; `collection_reminder_sends` has a row per phone or email per day (status
+  sent, failed or opted_out).
+- The calendar page shows "not published yet" until a manager presses Finish setup (Schedule, Setup).
+- A municipality's lookup limit is `COLLECTION_LOOKUP_LIMIT` (60 per 10 minutes per address and municipality).

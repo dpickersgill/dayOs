@@ -1,5 +1,6 @@
-// Bulk pickup (muni release 1, the Trash and recycling app). Residents book and pay online at /bulk-pickup/<slug>;
-// here staff work with those bookings.
+// The Trash and recycling app (#/bulk). Release 2026.11.22 made it the whole app: Calendar, Missed pickups and Schedule
+// are in views/trash-schedule.js; the add-ons register their tabs in ../trashtabs.js. Bulk pickup (muni release 1):
+// residents book and pay online at /bulk-pickup/<slug>; here staff work with those bookings.
 //   Collection day   the stop list for a day, in the route's driving order (or by street name), with counts by size. On a phone the crew taps
 //                    Picked up, Not out or Not accepted (a photo is required for the last two). Print view for the office.
 //   Route order      the order streets are driven on each collection weekday, and which way house numbers go (managers set it).
@@ -10,6 +11,8 @@ import { get, post, put, del, download, sendBytes, fetchBlob } from '../api.js';
 import { routeTab } from './bulk-route.js';
 import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtDateTime, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs } from '../ui.js';
 import { whenNew } from '../newmenu.js';
+import { TABS } from '../trashtabs.js';
+import * as S from './trash-schedule.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const office = () => can('counter');
@@ -23,11 +26,23 @@ const clock = (t) => { const [hh, mm] = String(t || '').split(':').map(Number); 
 const itemsText = (b) => b.items.map((i) => `${i.quantity} ${i.name}`).join(', ');
 const payState = (b) => (b.status === 'cancelled' || b.status === 'expired' ? state(b.status === 'expired' ? 'Not paid in time' : 'Canceled', 'neutral') : state(...(PAY_STATE[b.pay_status] || [b.pay_status, 'neutral'])));
 
+// 2026.11.22: this view is the whole Trash and recycling app (the key stays bulk, so #/bulk keeps working). Its own tabs
+// carry an order; the add-ons' tabs register in ../trashtabs.js (from ../trash-routes.js and ../trash-tonnage.js) and
+// are placed by theirs. A missing add-on file is skipped.
 export async function render(root) {
-  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Bulk pickup'), h('p', { class: 'muted' }, 'Bulk trash pickups residents book online or by phone, and the crew’s stop list.')));
-  const items = [['day', 'Collection day', dayTab], ['bookings', 'Bookings', bookingsTab], ['route', 'Route order', routeTab]]; // route: 2026.11.20 (bulk-route.js)
-  if (isManager()) items.push(['settings', 'Settings', settingsTab], ['report', 'Report', reportTab]);
-  root.append(tabs(items, hashParam('tab') || 'day'));
+  root.append(h('div', { class: 'page-head' }, h('h1', null, 'Trash and recycling'), h('p', { class: 'muted' }, 'The collection schedule and calendar, missed pickups, and bulk pickups residents book online or by phone.')));
+  await Promise.all(['../trash-routes.js', '../trash-tonnage.js'].map((f) => import(f).catch(() => null)));
+  let shell = { model: 'inhouse', setup_done: false, on: (ctx.me && ctx.me.modules) || [] };
+  try { shell = await get('/solid-waste/collection/shell'); } catch (_) { /* the app's own tabs still work */ }
+  const c = { me: ctx.me, role: ctx.me && ctx.me.role, manager: isManager(), on: shell.on, model: shell.model, setup_done: shell.setup_done };
+  const own = [[10, 'calendar', 'Calendar', S.calendarTab], [20, 'missed', 'Missed pickups', S.missedTab],
+    [50, 'day', 'Bulk pickup', dayTab], [55, 'bookings', 'Bulk bookings', bookingsTab], [60, 'route', 'Bulk route order', routeTab]]; // route: 2026.11.20 (bulk-route.js)
+  if (isManager()) own.push([80, 'schedule', 'Schedule', S.scheduleTab], [85, 'settings', 'Bulk settings', settingsTab], [90, 'report', 'Bulk report', reportTab]);
+  const added = TABS.filter((t) => { try { return Boolean(t.show(c)); } catch (_) { return false; } })
+    .map((t) => [t.order, t.id, t.label, (el) => t.render(el, { ...c, query: new URLSearchParams(String(location.hash).split('?')[1] || '') })]);
+  const items = [...own, ...added].sort((a, b) => a[0] - b[0]).map(([, id, label, fn]) => [id, label, fn]);
+  const first = crewRole() && !office() ? (items.find((i) => i[0] === 'routes') ? 'routes' : 'day') : 'calendar';
+  root.append(tabs(items, hashParam('tab') || first));
 }
 
 // ---------------------------------------------------------------- collection day

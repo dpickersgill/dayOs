@@ -208,7 +208,7 @@ export async function deskToday(root, list) {
     }).catch((err) => clear(oncallHost).append(errorBox(err)));
   }
   const cards = await cardsFrom(list);
-  const desk = cards.filter((c) => /^(New requests|Open past target|Active street notices)$/.test(c.title) || /bulk pickup/i.test(c.title));
+  const desk = cards.filter((c) => /^(New requests|Open past target|Active street notices|Missed pickups|Collection today)$/.test(c.title) || /bulk pickup/i.test(c.title));
   clear(cardsHost).append(...(desk.length ? desk.map((c) => fullCard(c, { action: needsAction(c) })) : [empty('Nothing waiting at the desk.')]));
 }
 
