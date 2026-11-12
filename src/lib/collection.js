@@ -301,15 +301,25 @@ async function pickupCheck(conn, tenantId, { streetId, houseNo, streamId = null,
 }
 /**
  * Route progress for the check, from the Collection routes add-on when it is on and its library answers
- * (lib/collectionroutes.js streetStatus). null when there is none, so the check falls back to the clock.
+ * (lib/collectionroutes.js routeCheck(conn, tenantId, { streetId, houseNo, streamId, date }) -> null or
+ * { outcome: 'not_yet' | 'done' | 'skipped', at?, reason? }). null when there is none, so the check falls back to the clock.
  */
+const ROUTE_WORDS = {
+  not_yet: () => 'The truck is still on its route today.',
+  done: (r) => `The crew marked your street done${r.at ? ` at ${String(r.at).slice(11, 16)}` : ''}. Tell us what was missed and we will send someone back.`,
+  skipped: (r) => `The crew could not collect on your street${r.reason ? `: ${r.reason}` : ''}. You can still report it.`,
+};
 async function routeStatus(conn, tenantId, args) {
   if (!args.items.length) return null;
   let R;
   try { R = require('./collectionroutes'); } catch (_) { return null; }
-  if (!R || typeof R.streetStatus !== 'function') return null;
+  if (!R || typeof R.routeCheck !== 'function') return null;
   if (!(await require('./modules').stateOf(tenantId)).on.has('collectionroutes')) return null;
-  try { return (await R.streetStatus(conn, tenantId, args)) || null; } catch (_) { return null; }
+  const it = args.items[args.items.length - 1];
+  let r;
+  try { r = await R.routeCheck(conn, tenantId, { streetId: args.streetId, houseNo: args.houseNo, streamId: it.streamId, date: it.date }); } catch (_) { return null; }
+  if (!r || !ROUTE_WORDS[r.outcome]) return null;
+  return { outcome: r.outcome, message: r.message || ROUTE_WORDS[r.outcome](r), ...(r.at ? { at: r.at } : {}), ...(r.reason ? { reason: r.reason } : {}) };
 }
 
 // ---------------------------------------------------------------- holidays and zones as street areas

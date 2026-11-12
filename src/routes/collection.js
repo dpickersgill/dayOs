@@ -102,6 +102,12 @@ router.get('/collection/shell', anyone, async (req, res) => {
   res.json({ model: s.model, setup_done: Boolean(s.setup_done_at), on, missed_waiting: await missedWaiting(pool, t) });
 });
 
+// The plain lists other screens pick from (the routes and tonnage workstreams' pickers): active streams and zones.
+router.get('/collection/streams', anyone, async (req, res) => { res.json({ data: await C.streamsOf(pool, req.auth.tenantId) }); });
+router.get('/collection/zones', anyone, async (req, res) => {
+  res.json({ data: (await rows(pool, 'SELECT id, name, sort FROM collection_zones WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [req.auth.tenantId])).map((z) => ({ id: Number(z.id), name: z.name, sort: Number(z.sort) })) });
+});
+
 router.get('/collection/setup', anyone, async (req, res) => {
   const t = req.auth.tenantId;
   const town = await townOf(t);

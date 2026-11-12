@@ -56,11 +56,14 @@ async function countsFor(req) {
   const { a, on, muni, tz } = s;
   const t = a.tenantId;
   const put = (key, n, says, alert) => { if (n > 0) out[key] = { n, says, ...(alert ? { alert: true } : {}) }; };
+  /** Adds to an app's count (summed with what is there; the words of the first kept, or "waiting" when they differ). */
+  const add = (key, n, says, alert) => { if (!(n > 0)) return; if (!out[key]) { put(key, n, says, alert); return; } out[key].n += n; if (out[key].says !== says) out[key].says = 'waiting'; if (alert) out[key].alert = true; };
   if (muni) {
     // Requests: new ones wait for the desk or a manager to decide what to do (routes/requests.js desk).
     if (on.has('requests') && has(a, 'counter')) put('requests', await W.newRequests(pool, t), 'new');
     // Trash and recycling: missed pickups nobody has decided on, for the desk and managers (Today: Missed pickups).
-    if (on.has('solidwaste') && on.has('requests') && has(a, 'counter')) put('bulk', await W.missedPickups(pool, t), 'missed pickups waiting');
+    // The key 'bulk' is shared: other Trash and recycling counts (the routes' go-backs) add to it with add('bulk', ...).
+    if (on.has('solidwaste') && on.has('requests') && has(a, 'counter')) add('bulk', await W.missedPickups(pool, t), 'missed pickups waiting');
     // Work orders: overdue. A manager's is every overdue one; a crew member's is only what is assigned to them.
     if (on.has('assets') && isMgr(a)) put('works', (await W.workOrders(pool, t, todayIn(tz))).overdue, 'overdue', true);
     else if (on.has('assets') && a.role === 'staff' && a.staffId) {

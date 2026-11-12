@@ -67,14 +67,15 @@ function agenda(setup) {
     const rowsOut = [];
     for (let d = c.from; d <= c.to; d = addDays(d, 1)) {
       const holiday = c.holidays.find((x) => String(x.on_date).slice(0, 10) === d);
-      const events = c.events.filter((e) => String(e.starts_on).slice(0, 10) <= d && String(e.ends_on).slice(0, 10) >= d);
+      // A seasonal collection shows on its first day (or the first day here, when it started earlier), with its last day.
+      const events = c.events.filter((e) => { const st = String(e.starts_on).slice(0, 10); const en = String(e.ends_on).slice(0, 10); return en >= d && (st === d || (d === c.from && st < d)); });
       const zones = c.zones.map((z) => ({ z, items: z.days.filter((x) => x.date === d) })).filter((x) => x.items.length);
       if (!zones.length && !holiday && !events.length) continue;
       rowsOut.push(h('li', { class: `cl-day${d === c.today ? ' cl-today' : ''}`, dataset: { date: d } },
         h('div', { class: 'cl-date' }, h('b', null, fmtDate(d)), d === c.today ? state('Today', 'good') : null),
         h('div', { class: 'stack tight' },
           holiday ? h('p', { class: 'cl-holiday' }, `${holiday.name} (holiday)`) : null,
-          ...events.map((e) => h('p', { class: 'cl-event' }, `${e.name}${e.zone_ids.length ? ` (${e.zone_ids.length === 1 ? 'one zone' : `${e.zone_ids.length} zones`})` : ''}`)),
+          ...events.map((e) => h('p', { class: 'cl-event' }, `${e.name}${String(e.ends_on).slice(0, 10) !== String(e.starts_on).slice(0, 10) ? `, until ${fmtDate(e.ends_on)}` : ''}${e.zone_ids.length ? ` (${e.zone_ids.length === 1 ? 'one zone' : `${e.zone_ids.length} zones`})` : ''}`)),
           ...zones.map(({ z, items }) => h('p', { class: 'cl-zone' }, h('span', { class: 'cl-zname' }, z.name), ' ', ...items.map((x) => chip(x.streamName, colors.get(x.streamId), x.moved ? `(${MOVED[x.reason] || 'moved'})` : null)))),
           zones.length ? h('p', null, button('Streets', () => streetsOfDay(d), { small: true })) : null)));
     }
@@ -139,12 +140,12 @@ async function setupPart(box) {
   const redraw = async () => { try { await reloadSetup(); } catch (err) { fail(err); return; } clear(box); draw(); };
   function draw() {
     const c = S.check;
-    appendAll(box,
+    appendAll(box, h('div', { class: 'stack' },
       statusPanel(c, redraw),
       settingsPanel(redraw),
       streamsPanel(redraw),
       zonesPanel(redraw),
-      unzonedPanel(redraw));
+      unzonedPanel(redraw)));
   }
   draw();
 }
@@ -154,8 +155,8 @@ function statusPanel(c, redraw) {
   return h('section', { class: `panel stack cl-status${c.ok ? ' ok' : ''}`, 'aria-labelledby': 'cl-status-h' },
     h('h2', { id: 'cl-status-h' }, done ? 'The calendar is published' : 'Finish setup to publish the calendar'),
     done ? h('p', null, 'Residents look up their days at ', h('a', { href: S.page, target: '_blank', rel: 'noopener' }, S.page), '. Link it from your website’s trash page.') : h('p', null, 'Residents see the calendar once every street is in a zone or marked "not collected".'),
-    c.problems.length ? h('ul', { class: 'cl-problems' }, c.problems.map((p) => h('li', null, p))) : h('p', null, state('Every street is in a zone or marked not collected', 'good')),
-    c.partial.length ? h('p', { class: 'muted small' }, `Split by house numbers, so check the ranges cover every house: ${c.partial.map((s) => s.name).join(', ')}.`) : null,
+    c.problems.length ? h('ul', { class: 'cl-problems' }, c.problems.map((p) => h('li', null, p))) : h('p', null, state('Every street is covered', 'good')),
+    c.partial.length ? h('p', { class: 'muted small' }, `Split by house numbers or sides, so check every house is covered: ${c.partial.map((s) => s.name).join(', ')}.`) : null,
     done ? null : h('div', { class: 'row' }, button('Finish setup', async () => {
       try { const r = await post('/solid-waste/collection/setup/finish'); toast('Published. Residents can look up their days now.'); await redraw(); return r; } catch (err) { fail(err); return null; }
     }, { kind: 'primary' })));
@@ -308,7 +309,7 @@ async function daysPart(box) {
   const zoneNames = (ids) => (ids.length ? ids.map((id) => (S.zones.find((z) => z.id === id) || {}).name).filter(Boolean).join(', ') : 'Every zone');
   function draw() {
     const year = Number(S.today.slice(0, 4));
-    appendAll(box,
+    appendAll(box, h('div', { class: 'stack' },
       h('section', { class: 'panel stack', 'aria-labelledby': 'cl-changes-h' }, h('div', { class: 'spread' }, h('h2', { id: 'cl-changes-h' }, 'Moved or canceled days'), button('Move or cancel a day', () => changeDialog(redraw), { kind: 'primary', small: true })),
         h('p', { class: 'muted small' }, 'For snow, weather or anything else. The calendar, the feed and the reminders follow at once. A street notice to those zones is drafted for you to check and send.'),
         S.changes.length ? table([
@@ -331,7 +332,7 @@ async function daysPart(box) {
           { head: 'When', cell: (e) => (e.starts_on === e.ends_on ? fmtDay(e.starts_on) : `${fmtDate(e.starts_on)} to ${fmtDay(e.ends_on)}`) },
           { head: 'Zones', cell: (e) => zoneNames(e.zone_ids) },
           { actions: true, cell: (e) => h('div', { class: 'row' }, button('Edit', () => eventDialog(e, redraw), { small: true }), button('Delete', () => confirmDialog(`Delete ${e.name}?`, 'It comes off the calendar and the feed.', 'Delete', async () => { await del(`/solid-waste/collection/events/${e.id}`); await redraw(); }, { danger: true }), { small: true })) },
-        ], S.events) : empty('No seasonal collections coming up.')));
+        ], S.events) : empty('No seasonal collections coming up.'))));
   }
   draw();
 }
@@ -385,14 +386,14 @@ async function residentsPart(box) {
   try { [rem, edu] = await Promise.all([get('/solid-waste/collection/reminders'), get('/solid-waste/collection/education')]); } catch (err) { box.append(errorBox(err)); return; }
   const year = Number(S.today.slice(0, 4));
   const redraw = async () => { clear(box); await residentsPart(box); };
-  appendAll(box,
+  appendAll(box, h('div', { class: 'stack' },
     h('section', { class: 'panel stack', 'aria-labelledby': 'cl-rem-h' }, h('h2', { id: 'cl-rem-h' }, 'Night-before reminders'),
-      h('p', null, `${plural(rem.signups, 'sign-up gets', 'sign-ups get')} reminders: ${plural(rem.texts, 'by text', 'by text')}, ${plural(rem.emails, 'by email', 'by email')}. They go out from ${rem.hour > 12 ? rem.hour - 12 : rem.hour} PM the evening before.`),
+      h('p', null, `${plural(rem.signups, 'sign-up gets', 'sign-ups get')} reminders: ${rem.texts} by text, ${rem.emails} by email. They go out from ${rem.hour > 12 ? rem.hour - 12 : rem.hour} PM the evening before.`),
       rem.streams.length ? h('p', { class: 'muted small' }, rem.streams.map((s) => `${s.name}: ${s.signups}`).join(' · ')) : null,
       h('p', { class: 'muted small' }, 'Residents sign up on the calendar page. They confirm their phone with a code or their email with a link, and a STOP or the link in any email stops them. You never see who signed up here.')),
     h('section', { class: 'panel stack', 'aria-labelledby': 'cl-edu-h' }, h('div', { class: 'spread' }, h('h2', { id: 'cl-edu-h' }, 'Act 101 education log'),
       h('div', { class: 'row' }, button(`Print the ${year} mailer`, () => mailer(year), { small: true }), button('Add an entry', () => eduDialog(edu.kinds, redraw), { small: true }))),
-      h('p', null, edu.overdue ? state(`Residents are due a reminder${edu.last_at ? ` (the last was ${fmtDay(edu.last_at)})` : ''}`, 'bad') : state(`Next reminder due by ${fmtDay(edu.next_due)}`, 'good'), ' ',
+      h('p', { class: 'row' }, edu.overdue ? state(`Residents are due a reminder${edu.last_at ? ` (the last was ${fmtDay(edu.last_at)})` : ''}`, 'bad') : state(`Next reminder due by ${fmtDay(edu.next_due)}`, 'good'), ' ',
         edu.printed_this_year ? state(`A printed form went out in ${year}`, 'good') : state(`No printed form yet in ${year}`, 'warn')),
       h('p', { class: 'muted small' }, 'Act 101 asks you to remind residents at least every six months, with at least one printed form a year. Street notices about trash or leaves, and each month’s reminders, are added here by themselves.'),
       edu.entries.length ? table([
@@ -400,7 +401,7 @@ async function residentsPart(box) {
         { head: 'What', cell: (e) => [h('b', null, e.title), h('div', { class: 'muted small' }, e.kind_label)] },
         { head: 'Who it reached', cell: (e) => [e.audience || '', e.copies ? ` (${e.copies} copies)` : ''] },
         { actions: true, cell: (e) => (e.own && isManager() ? button('Delete', () => confirmDialog('Delete this entry?', 'It comes off the education log.', 'Delete', async () => { await del(`/solid-waste/collection/education/${e.id}`); await redraw(); }, { danger: true }), { small: true }) : '') },
-      ], edu.entries) : empty('Nothing logged yet.')));
+      ], edu.entries) : empty('Nothing logged yet.'))));
 }
 
 function eduDialog(kinds, done) {
@@ -424,8 +425,10 @@ async function mailer(year) {
   const sheets = m.zones.map((z) => h('article', { class: 'sheet mailer-sheet', dataset: { sheet: 'mailer' } },
     h('header', null, h('h2', null, `${m.municipality}: trash and recycling ${year}`), h('p', null, h('b', null, z.name), ` · ${z.streams.map((s) => `${s.name} ${s.how_often}`).join(' · ')}`)),
     h('div', { class: 'mailer-months' }, months.map((mo) => {
-      const ds = z.days.filter((d) => d.date.startsWith(mo));
-      return h('section', null, h('h3', null, monthOf(`${mo}-15`)), h('ul', null, ds.map((d) => h('li', null, `${Number(d.date.slice(8, 10))} ${d.stream}${d.moved ? '*' : ''}`))));
+      // One line a day: "5 Trash, Recycling*".
+      const by = new Map();
+      for (const d of z.days.filter((x) => x.date.startsWith(mo))) { if (!by.has(d.date)) by.set(d.date, []); by.get(d.date).push(`${d.stream}${d.moved ? '*' : ''}`); }
+      return h('section', null, h('h3', null, monthOf(`${mo}-15`)), h('ul', null, [...by].map(([d, list]) => h('li', null, `${Number(d.slice(8, 10))} ${list.join(', ')}`))));
     })),
     h('p', { class: 'small' }, '* moved for a holiday. ', m.holiday_rule, '.', m.curb_by ? ` ${m.curb_by}.` : ''),
     z.events.length ? h('p', { class: 'small' }, h('b', null, 'Seasonal: '), z.events.map((e) => `${e.name} ${fmtDate(e.starts_on)}${e.ends_on !== e.starts_on ? ` to ${fmtDate(e.ends_on)}` : ''}`).join('; ')) : null,

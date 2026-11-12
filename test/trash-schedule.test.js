@@ -437,6 +437,8 @@ test('each municipality sees and changes only its own schedule', async () => {
   assert.deepEqual(cal.zones, []);
   assert.equal((await pub(B, `/year?zone=${A.zone}&year=2026`)).status, 404);
   assert.equal((await api('GET', `/solid-waste/collection/lookup?street_id=${A.streets['Main Street']}&house_number=1`, { token: B.token })).body.found, false);
+  assert.deepEqual(ok(await api('GET', '/solid-waste/collection/streams', { token: B.token })).data.map((x) => x.id), [B.trash, B.rec]);
+  assert.deepEqual(ok(await api('GET', '/solid-waste/collection/zones', { token: crew.token })).data.map((x) => x.id).sort(), [A.zone, A.zone2].sort());
   const setup = ok(await api('GET', '/solid-waste/collection/setup', { token: B.token }));
   assert.ok(!setup.zones.some((z) => z.id === A.zone));
   assert.ok(!setup.streams.some((s) => s.id === A.trash));
