@@ -49,7 +49,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 test('the demo borough: every demo file in order, twice, with nothing added the second time', async () => {
   const out = run();
   const files = [...out.matchAll(/^(\d\d-[a-z]+\.js):$/gm)].map((m) => m[1]);
-  assert.deepEqual(files, ['00-base.js', '20-assets.js', '30-requests.js', '40-trash.js', '50-notices.js', '60-buildings.js'], 'every workstream\'s demo file, in name order');
+  assert.deepEqual(files, ['00-base.js', '20-assets.js', '30-requests.js', '40-trash.js', '50-notices.js', '60-buildings.js', '70-utilities.js'], 'every workstream\'s demo file, in name order');
   const [[t]] = await pool.query('SELECT id, org_type FROM tenants WHERE slug = ?', [demo]);
   T = Number(t.id);
   const first = await rowCounts(T);

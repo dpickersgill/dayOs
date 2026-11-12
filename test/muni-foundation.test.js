@@ -406,7 +406,8 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
     };
   };
   const first = await counts();
-  assert.deepEqual(first, { users: 7, crew: 4, desk: 1, streets: 40, assets: 8, plans: 12, open: 6, done: 10 });
+  // open: the foundation's 6, and 70-utilities.js's pothole job at 111 Market Street (2026.11.20, for the duplicate warning).
+  assert.deepEqual(first, { users: 7, crew: 4, desk: 1, streets: 40, assets: 8, plans: 12, open: 7, done: 10 });
   run();
   assert.deepEqual(await counts(), first, 'the second run adds nothing');
   // Its owner signs in, has every municipal app, and sees the Today cards for work orders.
