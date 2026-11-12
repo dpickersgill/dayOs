@@ -25,7 +25,7 @@ const DEFAULT_CATEGORIES = [
   ['Storm drain or flooding', 0, 0, '#1565c0'],
   ['Water leak or low pressure', 0, 1, '#00838f'],
   ['Sewer backup', 1, 1, '#4e342e'],
-  ['Missed trash or recycling', 1, 0, '#2e7d32'],
+  ['Missed pickup', 1, 0, '#2e7d32'], // code 'missed' (2026.11.22): the schedule checks it (lib/collection.js pickupCheck)
   ['Tree or branch down', 0, 0, '#558b2f'],
   ['Other', 0, 0, '#5b6770'],
 ];
@@ -50,7 +50,7 @@ async function ensureSetup(conn, tenantId) {
     const n = await one(c, 'SELECT COUNT(*) AS n FROM request_categories WHERE tenant_id = ?', [tenantId]);
     if (Number(n.n)) return; // set up before the settings row existed
     for (const [i, [name, contact, after, color]] of DEFAULT_CATEGORIES.entries()) {
-      await c.query('INSERT IGNORE INTO request_categories (tenant_id, name, needs_contact, after_hours, color, sort) VALUES (?, ?, ?, ?, ?, ?)', [tenantId, name, contact, after, color, (i + 1) * 10]);
+      await c.query('INSERT IGNORE INTO request_categories (tenant_id, name, needs_contact, after_hours, color, sort, code) VALUES (?, ?, ?, ?, ?, ?, ?)', [tenantId, name, contact, after, color, (i + 1) * 10, name === 'Missed pickup' ? 'missed' : null]);
     }
   });
 }
@@ -65,8 +65,8 @@ async function settingsOf(conn, tenantId) {
 
 async function categoriesOf(conn, tenantId, { all = false } = {}) {
   await ensureSetup(conn, tenantId);
-  return (await rows(conn, `SELECT id, name, needs_contact, after_hours, color, active, sort FROM request_categories WHERE tenant_id = ? ${all ? '' : 'AND active = 1'} ORDER BY sort, name`, [tenantId]))
-    .map((c) => ({ id: Number(c.id), name: c.name, needs_contact: Boolean(c.needs_contact), after_hours: Boolean(c.after_hours), color: c.color, active: Boolean(c.active), sort: Number(c.sort) }));
+  return (await rows(conn, `SELECT id, name, needs_contact, after_hours, color, active, sort, code FROM request_categories WHERE tenant_id = ? ${all ? '' : 'AND active = 1'} ORDER BY sort, name`, [tenantId]))
+    .map((c) => ({ id: Number(c.id), name: c.name, needs_contact: Boolean(c.needs_contact), after_hours: Boolean(c.after_hours), color: c.color, active: Boolean(c.active), sort: Number(c.sort), ...(c.code ? { code: c.code } : {}) }));
 }
 
 async function standardsOf(conn, tenantId) {

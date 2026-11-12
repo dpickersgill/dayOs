@@ -49,7 +49,7 @@ function picture(color, stage, seed) {
 // in 10 days, a water leak or a sewer backup made safe in 2 hours.
 const STANDARDS = [
   ['Pothole', 24, 120, 30], ['Street light out', null, 240, 18], ['Sign down or damaged', 4, 72, 8], ['Sidewalk or curb', 48, 720, 7],
-  ['Storm drain or flooding', 8, 72, 8], ['Water leak or low pressure', 2, 24, 6], ['Sewer backup', 2, 24, 4], ['Missed trash or recycling', null, 48, 10],
+  ['Storm drain or flooding', 8, 72, 8], ['Water leak or low pressure', 2, 24, 6], ['Sewer backup', 2, 24, 4], ['Missed pickup', null, 48, 10],
   ['Tree or branch down', 4, 72, 7], ['Other', null, null, 2],
 ];
 const ARTERIAL = ['Main Street', 'Bridge Street', 'Nutt Road', 'Ridge Avenue'];
@@ -64,7 +64,7 @@ const WORDS = {
   'Storm drain or flooding': ['Inlet clogged with leaves', 'Water ponding across the road', 'Storm grate loose'],
   'Water leak or low pressure': ['Water bubbling up through the pavement', 'Low water pressure since this morning', 'Leak at the curb box'],
   'Sewer backup': ['Sewer smell and water in the basement drain', 'Manhole overflowing'],
-  'Missed trash or recycling': ['Recycling not picked up', 'Trash missed on our side of the street', 'Bulk item left behind'],
+  'Missed pickup': ['Recycling not picked up', 'Trash missed on our side of the street', 'Bulk item left behind'],
   'Tree or branch down': ['Large branch blocking half the road', 'Tree leaning on the wires', 'Limb down on the sidewalk'],
   Other: ['Graffiti on the bus shelter', 'Abandoned shopping cart'],
 };
