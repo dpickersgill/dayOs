@@ -156,6 +156,8 @@ function shape(f, org) {
     accuracy_m: num(f.accuracy_m), placed_how: f.placed_how, updated_at: f.updated_at,
     condition_score: num(f.condition_score), criticality: num(f.criticality), ownership: f.ownership || null, risk: riskOf(f.condition_score, f.criticality),
     open_orders: f.open_orders === undefined ? undefined : Number(f.open_orders || 0), last_inspected: f.last_inspected === undefined ? undefined : f.last_inspected,
+    // The street it is on (2026.11.20), when set.
+    street_id: f.street_id === null || f.street_id === undefined ? null : Number(f.street_id), street: f.street_name || null,
   };
 }
 

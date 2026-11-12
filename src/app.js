@@ -354,8 +354,13 @@ function createApp() {
   // The municipal edition (muni release 1). The street list is mounted ahead of any other /requests router, so a route
   // like /requests/:id never reads "streets" as an id.
   api.use('/requests/streets', require('./routes/streets').router);
+  api.use('/requests/checks', require('./routes/requestchecks').router); // 2026.11.20: repeat callers and duplicates
   // The Water, Sewer and Stormwater add-ons' Today cards (their maps, inspections and programs are in Assets and fleet).
   { const U = require('./routes/utilities'); api.use('/water', U.water); api.use('/sewer', U.sewer); api.use('/stormwater', U.stormwater); }
+  // 2026.11.20: main breaks (Water), Chapter 94 and overflows (Sewer), MS4 and illicit discharge cases (Stormwater).
+  api.use('/water', require('./routes/mainbreaks').router);
+  api.use('/sewer', require('./routes/chapter94').router);
+  api.use('/stormwater', require('./routes/ms4').router);
   api.use('/messages', messagesRoutes.router);
   api.use('/online-shop', shopRoutes.router);
   api.use('/online-shop', shopAdmin.router);
@@ -429,6 +434,7 @@ function createApp() {
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type
   api.use('/assets', assetRoutes);
+  api.use('/solid-waste', require('./routes/bulkroute')); // 2026.11.20: the driving order of the stop list
   api.use('/solid-waste', require('./routes/bulkpickup').router); // muni release 1: bulk trash pickup (Trash and recycling)
   api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
@@ -439,6 +445,7 @@ function createApp() {
   api.use('/reports', reports);
   api.use('/board', board);
   api.use('/calendar', require('./routes/mountaincal').router); // 2026.11.10: the Mountain calendar
+  api.use('/street-notices', require('./routes/serviceaddresses')); // 2026.11.20: the water customer list and door hangers
   api.use('/street-notices', require('./routes/streetnotices').router); // muni release 1: street notices and resident alerts
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports
 

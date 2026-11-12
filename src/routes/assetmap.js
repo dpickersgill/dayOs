@@ -46,20 +46,26 @@ const fields = {
   condition_score: score,
   criticality: score,
   ownership: nullable(z.enum(['own', 'authority', 'private', 'state', 'other'])),
+  // The street it is on (2026.11.20): finds it by street, and lists a main's valves along the same street.
+  street_id: nullable(z.number().int().positive()),
 };
-const EDIT = ['name', 'tag', 'size', 'material', 'depth_ft', 'installed_year', 'status', 'notes', 'asset_id', 'accuracy_m', 'placed_how', 'condition_score', 'criticality', 'ownership'];
+const EDIT = ['name', 'tag', 'size', 'material', 'depth_ft', 'installed_year', 'status', 'notes', 'asset_id', 'accuracy_m', 'placed_how', 'condition_score', 'criticality', 'ownership', 'street_id'];
 
 // Each feature with its open work orders and when it was last inspected (for the map's markers and the panel).
-const SQL = `SELECT f.*, a.name AS asset_name, a.asset_tag,
+const SQL = `SELECT f.*, a.name AS asset_name, a.asset_tag, st.name AS street_name,
     (SELECT COUNT(*) FROM work_orders w WHERE w.tenant_id = f.tenant_id AND w.map_feature_id = f.id AND w.status NOT IN ('done','cancelled')) AS open_orders,
     (SELECT MAX(i.done_at) FROM asset_inspections i WHERE i.tenant_id = f.tenant_id AND i.map_feature_id = f.id) AS last_inspected
   FROM map_features f
-  LEFT JOIN ops_assets a ON a.tenant_id = f.tenant_id AND a.id = f.asset_id WHERE f.tenant_id = ?`;
+  LEFT JOIN ops_assets a ON a.tenant_id = f.tenant_id AND a.id = f.asset_id
+  LEFT JOIN streets st ON st.tenant_id = f.tenant_id AND st.id = f.street_id WHERE f.tenant_id = ?`;
 const dupTag = (err) => { if (err && err.code === 'ER_DUP_ENTRY') throw conflict('That tag is already on another map item'); throw err; };
 const blank = (v) => (typeof v === 'string' && !v.trim() ? null : v);
 
 async function checkAsset(tenantId, assetId) {
   if (assetId && !(await one(pool, 'SELECT id FROM ops_assets WHERE tenant_id = ? AND id = ?', [tenantId, assetId]))) throw notFound('Asset');
+}
+async function checkStreet(tenantId, streetId) {
+  if (streetId && !(await one(pool, 'SELECT id FROM streets WHERE tenant_id = ? AND id = ?', [tenantId, streetId]))) throw notFound('Street');
 }
 
 /** Where the map opens: the mountain's saved view, else the middle of what is already on it, else nowhere. */
@@ -108,14 +114,15 @@ router.post('/features', validate(z.object(fields)), async (req, res) => {
   const clean = MF.cleanPoints(geometry, b.points);
   if (clean.error) throw bad(clean.error);
   await checkAsset(t, b.asset_id);
+  await checkStreet(t, b.street_id);
   const [lat, lng] = MF.anchorOf(geometry, clean.points);
   let r;
   try {
-    [r] = await pool.query(`INSERT INTO map_features (tenant_id, kind, geometry, name, tag, points, lat, lng, size, material, depth_ft, installed_year, status, notes, asset_id, accuracy_m, placed_how, created_by, condition_score, criticality, ownership)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [r] = await pool.query(`INSERT INTO map_features (tenant_id, kind, geometry, name, tag, points, lat, lng, size, material, depth_ft, installed_year, status, notes, asset_id, accuracy_m, placed_how, created_by, condition_score, criticality, ownership, street_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [t, b.kind, geometry, blank(b.name) ?? null, blank(b.tag) ?? null, JSON.stringify(clean.points), lat, lng, blank(b.size) ?? null, blank(b.material) ?? null, b.depth_ft ?? null,
       b.installed_year ?? null, b.status || 'in_service', blank(b.notes) ?? null, b.asset_id ?? null, b.accuracy_m ?? null, b.placed_how || 'map', req.auth.userId || null,
-      b.condition_score ?? null, b.criticality ?? null, b.ownership ?? null]);
+      b.condition_score ?? null, b.criticality ?? null, b.ownership ?? null, b.street_id ?? null]);
   } catch (err) { dupTag(err); }
   await audit(pool, req, 'create', 'map_features', r.insertId, { kind: b.kind, points: clean.points.length, how: b.placed_how || 'map' });
   res.status(201).json(MF.shape(await one(pool, `${SQL} AND f.id = ?`, [t, r.insertId]), org));
@@ -141,6 +148,7 @@ router.patch('/features/:id', validate(z.object({ ...fields, kind: fields.kind.o
     set.push('points = ?', 'lat = ?', 'lng = ?'); vals.push(JSON.stringify(clean.points), lat, lng);
   }
   if (b.asset_id) await checkAsset(t, b.asset_id);
+  if (b.street_id) await checkStreet(t, b.street_id);
   for (const k of EDIT) if (b[k] !== undefined) { set.push(`${k} = ?`); vals.push(blank(b[k])); }
   if (!set.length) throw bad('Nothing to change');
   try { await pool.query(`UPDATE map_features SET ${set.join(', ')} WHERE tenant_id = ? AND id = ?`, [...vals, t, id]); } catch (err) { dupTag(err); }
@@ -193,7 +201,42 @@ router.get('/features/:id', async (req, res) => {
     last_inspection: inspections.length ? { id: inspections[0].id, template_name: inspections[0].template_name, result: inspections[0].result, done_at: inspections[0].done_at, inspector: inspections[0].inspector } : null,
     work_orders: orders, photos: pics, programs,
     run_hours: hours.pumps.length ? hours : null,
+    // 2026.11.20: a water main's breaks, an outfall's illicit discharge cases, a pump station's rated flows (lib/utilitypanel.js)
+    ...(await require('../lib/utilitypanel').extras(pool, t, raw)),
   });
+});
+
+/**
+ * Finds map items by tag, name, kind or street ("V-114", "hydrant", "Market Street main"), for a work order's picker, a
+ * main break and Jump to. ?kinds=valve,potable_line narrows it. At most 30, the closest matches first.
+ */
+router.get('/search', async (req, res) => {
+  const t = req.auth.tenantId;
+  const q = String(req.query.q || '').trim().slice(0, 60);
+  const kinds = String(req.query.kinds || '').split(',').filter((k) => MF.KIND_KEYS.includes(k));
+  const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 30);
+  if (q.length < 1 && !kinds.length) return res.json({ data: [] });
+  const { org } = await appsOf(t);
+  const where = ['f.tenant_id = ?']; const params = [t];
+  if (kinds.length) { where.push('f.kind IN (?)'); params.push(kinds); }
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    // A word that names a kind ("hydrant", "valve", "manhole", "main") finds every item of that kind.
+    const words = q.toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !['street', 'avenue', 'road', 'lane', 'drive', 'place', 'line', 'water', 'the'].includes(w));
+    const named = MF.KINDS.filter((k) => words.some((w) => k.label.toLowerCase().includes(w.replace(/s$/, '')) || (w.startsWith('main') && k.key === 'potable_line'))).map((k) => k.key);
+    const parts = ['f.tag LIKE ?', 'f.name LIKE ?', 'st.name LIKE ?'];
+    params.push(like, like, like);
+    if (named.length) { parts.push('f.kind IN (?)'); params.push(named); }
+    where.push(`(${parts.join(' OR ')})`);
+  }
+  const list = await rows(pool, `SELECT f.id, f.kind, f.geometry, f.name, f.tag, f.lat, f.lng, f.status, f.street_id, st.name AS street_name FROM map_features f
+    LEFT JOIN streets st ON st.tenant_id = f.tenant_id AND st.id = f.street_id WHERE ${where.join(' AND ')} AND f.status <> 'abandoned'
+    ORDER BY (f.tag = ?) DESC, (f.tag LIKE ?) DESC, f.kind, f.tag, f.name, f.id LIMIT ?`, [...params, q, `${q}%`, limit]);
+  res.json({ data: list.map((f) => {
+    const k = MF.kindOf(f.kind) || { label: f.kind };
+    return { id: Number(f.id), kind: f.kind, kind_label: k.label, system: MF.systemFor(k, org), geometry: f.geometry, name: f.name, tag: f.tag, street_id: f.street_id === null ? null : Number(f.street_id), street: f.street_name || null,
+      lat: Number(f.lat), lng: Number(f.lng), status: f.status, label: [k.label, f.tag, f.name && f.name !== f.tag ? f.name : null, f.street_name && !(f.name || '').includes(f.street_name) ? `on ${f.street_name}` : null].filter(Boolean).join(' ') };
+  }) });
 });
 
 /** An inspection done on a map item (a valve exercised, a hydrant flushed, a manhole looked at). */

@@ -253,10 +253,13 @@ async function addressesOf(tenantId, pairs) {
 /**
  * The people a notice of this type on these areas would reach now: { send: [{ resident_id, channel, to }], opted_out: [...same], residents, no_number }.
  * One entry per address and channel. Sign-ups whose phone or email was never confirmed are not counted at all.
+ * A water or sewer notice also reaches the water customer list (lib/serviceaddresses.js, 2026.11.20): its entries carry
+ * service_address_id instead of resident_id, and `service` says how many customer addresses it reaches by text or email
+ * and how many are left for a door hanger. opts.withDoorList adds door_list, those addresses (no names or contacts).
  */
-async function audienceOf(tenantId, type, areas) {
+async function audienceOf(tenantId, type, areas, opts = {}) {
   const [where, vals] = areaSql(areas);
-  const found = await rows(pool, `SELECT s.id, s.resident_id, s.phone, s.email, s.by_text, s.by_email, s.house_no FROM alert_signups s
+  const found = await rows(pool, `SELECT s.id, s.resident_id, s.phone, s.email, s.by_text, s.by_email, s.house_no, s.street_id, s.house_number, s.unit FROM alert_signups s
     WHERE s.tenant_id = ? AND s.status = 'active' AND s.resident_id IS NOT NULL AND FIND_IN_SET(?, s.topics) > 0 AND ${where} ORDER BY s.id`, [tenantId, TYPE[type].topic, ...vals]);
   const wanted = [];
   for (const s of found) {
@@ -265,24 +268,30 @@ async function audienceOf(tenantId, type, areas) {
   }
   const addrs = await addressesOf(tenantId, wanted.map((w) => [w.channel, w.key]));
   const no = await phonesSaidNo(tenantId, [...new Set(wanted.filter((w) => w.channel === 'sms').map((w) => w.key))]);
-  const seen = new Set(); const send = []; const optedOut = [];
+  const seen = new Set(); const send = []; const optedOut = []; const places = new Set();
+  const SA = require('./serviceaddresses');
   for (const w of wanted) {
     const id = `${w.channel}:${w.key}`;
-    if (seen.has(id)) continue;
+    if (seen.has(id)) { if (send.some((x) => `${x.channel}:${addrKey(x.channel, x.to)}` === id)) places.add(SA.placeKey(w.s.street_id, w.s.house_number, w.s.unit)); continue; }
     seen.add(id);
     const a = addrs.get(id);
     if (!a || !a.confirmed_at) continue; // never confirmed: not on the list
     const item = { resident_id: Number(w.s.resident_id), channel: w.channel, to: w.to };
-    if (a.stopped_at || (w.channel === 'sms' && no.has(w.key))) optedOut.push(item); else send.push(item);
+    if (a.stopped_at || (w.channel === 'sms' && no.has(w.key))) optedOut.push(item); else { send.push(item); places.add(SA.placeKey(w.s.street_id, w.s.house_number, w.s.unit)); }
   }
-  return { send, opted_out: optedOut, residents: new Set(send.map((x) => x.resident_id)).size, no_number: found.filter((s) => s.house_no === null).length };
+  // The water customer list: a phone or email the sign-ups already reach gets one message, and an address a sign-up there
+  // already reaches is not on the door hanger list.
+  const cust = await SA.reach(tenantId, type, areas, { reached: new Set(send.map((x) => `${x.channel}:${addrKey(x.channel, x.to)}`)), places });
+  send.push(...cust.send); optedOut.push(...cust.opted_out);
+  return { send, opted_out: optedOut, residents: new Set(send.filter((x) => x.resident_id).map((x) => x.resident_id)).size, no_number: found.filter((s) => s.house_no === null).length,
+    service: { with_consent: cust.with_consent, door_hangers: cust.door_hangers, total: cust.total }, ...(opts.withDoorList ? { door_list: cust.list } : {}) };
 }
 
 /** The list a follow-up goes to: the first send's addresses, checked again for STOP. Same shape as audienceOf. */
 async function followupAudience(tenantId, noticeId) {
   const first = await one(pool, "SELECT id FROM street_notice_updates WHERE tenant_id = ? AND notice_id = ? AND kind = 'first' AND status IN ('queued','done') ORDER BY id LIMIT 1", [tenantId, noticeId]);
   if (!first) return { send: [], opted_out: [], residents: 0, no_number: 0 };
-  const was = await rows(pool, "SELECT resident_id, channel, to_addr FROM street_notice_deliveries WHERE tenant_id = ? AND update_id = ? AND status <> 'opted_out' AND to_addr IS NOT NULL ORDER BY id", [tenantId, first.id]);
+  const was = await rows(pool, "SELECT resident_id, service_address_id, channel, to_addr FROM street_notice_deliveries WHERE tenant_id = ? AND update_id = ? AND status <> 'opted_out' AND to_addr IS NOT NULL ORDER BY id", [tenantId, first.id]);
   const pairs = was.map((d) => [d.channel, addrKey(d.channel, d.to_addr)]);
   const addrs = await addressesOf(tenantId, pairs);
   const no = await phonesSaidNo(tenantId, [...new Set(pairs.filter((p) => p[0] === 'sms').map((p) => p[1]))]);
@@ -290,15 +299,22 @@ async function followupAudience(tenantId, noticeId) {
   for (const d of was) {
     const key = addrKey(d.channel, d.to_addr);
     const a = addrs.get(`${d.channel}:${key}`);
-    const item = { resident_id: Number(d.resident_id), channel: d.channel, to: d.to_addr };
+    // A water customer gets the follow-up only while the address is still on the list with the same phone or email and its consent.
+    if (d.service_address_id && !(await require('./serviceaddresses').stillContact(pool, tenantId, Number(d.service_address_id), d.channel, d.to_addr))) continue;
+    const item = d.service_address_id ? { resident_id: null, service_address_id: Number(d.service_address_id), channel: d.channel, to: d.to_addr } : { resident_id: Number(d.resident_id), channel: d.channel, to: d.to_addr };
     if (!a || a.stopped_at || (d.channel === 'sms' && no.has(key))) optedOut.push(item); else send.push(item);
   }
-  return { send, opted_out: optedOut, residents: new Set(send.map((x) => x.resident_id)).size, no_number: 0 };
+  return { send, opted_out: optedOut, residents: new Set(send.filter((x) => x.resident_id).map((x) => x.resident_id)).size, no_number: 0 };
 }
 
-/** Counts for the screen: { texts, emails, residents, opted_out, no_number }. */
+/**
+ * Counts for the screen: { texts, emails, residents, opted_out, no_number, service_addresses, door_hangers, customers }:
+ * the signed-up residents reached, the water customer addresses reached by text or email (with consent), and the customer
+ * addresses left to notify by door hanger or mail.
+ */
 const countsOf = (aud) => ({ texts: aud.send.filter((x) => x.channel === 'sms').length, emails: aud.send.filter((x) => x.channel === 'email').length,
-  residents: aud.residents, opted_out: aud.opted_out.length, no_number: aud.no_number });
+  residents: aud.residents, opted_out: aud.opted_out.length, no_number: aud.no_number,
+  service_addresses: aud.service ? aud.service.with_consent : 0, door_hangers: aud.service ? aud.service.door_hangers : 0, customers: aud.service ? aud.service.total : 0 });
 
 // ---------------------------------------------------------------- queueing a send
 /** When a send of this notice type may go out: now, or 8 AM for a non-urgent notice in quiet hours. UTC 'YYYY-MM-DD HH:MM:SS'. */
@@ -324,8 +340,8 @@ async function queueUpdate(tenantId, updateId) {
   const all = [...aud.send.map((x) => [x, 'queued']), ...aud.opted_out.map((x) => [x, 'opted_out'])];
   for (let i = 0; i < all.length; i += 500) {
     const part = all.slice(i, i + 500);
-    await pool.query(`INSERT IGNORE INTO street_notice_deliveries (tenant_id, notice_id, update_id, resident_id, channel, to_addr, status, error, send_after) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
-      part.flatMap(([x, st]) => [tenantId, notice.id, u.id, x.resident_id, x.channel, x.to, st, st === 'opted_out' ? 'Said no to these messages' : null, when.at]));
+    await pool.query(`INSERT IGNORE INTO street_notice_deliveries (tenant_id, notice_id, update_id, resident_id, service_address_id, channel, to_addr, status, error, send_after) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+      part.flatMap(([x, st]) => [tenantId, notice.id, u.id, x.resident_id || null, x.service_address_id || null, x.channel, x.to, st, st === 'opted_out' ? 'Said no to these messages' : null, when.at]));
   }
   if (u.kind === 'first') await pool.query("UPDATE street_notices SET status = 'active', sent_at = COALESCE(sent_at, UTC_TIMESTAMP()) WHERE tenant_id = ? AND id = ? AND status IN ('draft','scheduled')", [tenantId, notice.id]);
   if (!aud.send.length) await pool.query("UPDATE street_notice_updates SET status = 'done' WHERE tenant_id = ? AND id = ?", [tenantId, u.id]);
@@ -365,8 +381,11 @@ function smsBody(t, u) {
   const base = baseOf(u);
   return `${t.name}: ${lead}${u.sms_text}${base ? `\nDetails: ${publicLink(base, t.slug, u.code)}` : ''}\nReply STOP to stop texts.`;
 }
-/** The email: subject, plain text and html, with the notice's page and a manage link (List-Unsubscribe too). */
-function emailOf(t, u, addressId) {
+/**
+ * The email: subject, plain text and html, with the notice's page and a manage link (List-Unsubscribe too). customer: the
+ * email is on the water customer list (not an alert sign-up), so the footer says why it came and how to stop it.
+ */
+function emailOf(t, u, addressId, { customer = false } = {}) {
   const base = baseOf(u);
   const type = TYPE[u.type];
   const subject = `${u.kind === 'update' ? 'Update: ' : u.kind === 'ended' ? 'Ended: ' : ''}${u.title}`.slice(0, 200);
@@ -375,7 +394,8 @@ function emailOf(t, u, addressId) {
   const link = base ? publicLink(base, t.slug, u.code) : null;
   const manage = base && addressId ? manageLink(base, t.slug, t.id, addressId) : null;
   const lines = [words, `Streets: ${where}`, link ? `Updates: ${link}` : null].filter(Boolean);
-  const foot = `You get this because you signed up for ${t.name} alerts.${manage ? ` To change or stop them: ${manage}` : ''}`;
+  const why = customer ? `You get this because this email is on file with ${t.name} for water service on these streets.` : `You get this because you signed up for ${t.name} alerts.`;
+  const foot = `${why}${manage ? ` To ${customer ? 'stop these emails' : 'change or stop them'}: ${manage}` : ''}`;
   const text = `${lines.join('\n\n')}\n\n--\n${foot}`;
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#12303a;line-height:1.55">
 <p style="font-size:13px;color:#55687a;margin:0 0 4px">${esc(t.name)}: ${esc(type ? type.label : 'Notice')}</p>
@@ -384,7 +404,7 @@ ${words.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).jo
 <p><strong>Streets:</strong> ${esc(where)}</p>
 ${link ? `<p><a href="${esc(link)}">See updates on this notice</a></p>` : ''}
 <hr style="border:none;border-top:1px solid #d3dce1;margin:24px 0 12px">
-<p style="font-size:12px;color:#55687a">You get this because you signed up for ${esc(t.name)} alerts.${manage ? ` <a href="${esc(manage)}">Change or stop these alerts</a>` : ''}</p></div>`;
+<p style="font-size:12px;color:#55687a">${esc(why)}${manage ? ` <a href="${esc(manage)}">${customer ? 'Stop these emails' : 'Change or stop these alerts'}</a>` : ''}</p></div>`;
   return { subject, text, html, manage };
 }
 
@@ -407,7 +427,7 @@ async function deliverOne(d) {
       status = r.ok ? 'sent' : 'failed'; error = r.ok ? null : r.error; providerId = r.id || null;
     } else {
       const a = await one(pool, "SELECT id FROM alert_addresses WHERE tenant_id = ? AND channel = 'email' AND addr = ?", [t.id, addrKey('email', d.to_addr)]);
-      const m = emailOf(t, u, a ? Number(a.id) : null);
+      const m = emailOf(t, u, a ? Number(a.id) : null, { customer: Boolean(d.service_address_id) });
       const r = await mailer.send({ tenantId: t.id, to: d.to_addr, fromName: t.name, replyTo: t.reply_to || undefined, subject: m.subject, text: m.text, html: m.html, tag: 'street-notice',
         headers: m.manage ? [{ Name: 'List-Unsubscribe', Value: `<${m.manage}>` }] : undefined });
       status = r.ok ? 'sent' : 'failed'; error = r.ok ? null : r.error; providerId = r.id || null;
@@ -433,7 +453,7 @@ async function drain({ budgetMs = 240_000 } = {}) {
     const claim = crypto.randomBytes(8).toString('hex');
     const [c] = await pool.query("UPDATE street_notice_deliveries SET status = 'sending', claim = ?, sent_at = UTC_TIMESTAMP() WHERE status = 'queued' AND send_after <= UTC_TIMESTAMP() ORDER BY id LIMIT ?", [claim, BATCH]);
     if (!c.affectedRows) break;
-    const batch = await rows(pool, 'SELECT id, tenant_id, update_id, resident_id, channel, to_addr, claim FROM street_notice_deliveries WHERE claim = ? ORDER BY id', [claim]);
+    const batch = await rows(pool, 'SELECT id, tenant_id, update_id, resident_id, service_address_id, channel, to_addr, claim FROM street_notice_deliveries WHERE claim = ? ORDER BY id', [claim]);
     const queue = [...batch];
     await Promise.all(Array.from({ length: WORKERS }, async () => {
       for (let d = queue.shift(); d; d = queue.shift()) { const st = await deliverOne(d); out[st] = (out[st] || 0) + 1; }
@@ -509,7 +529,7 @@ async function purge(days) {
 
 module.exports = {
   TOPICS, TOPIC_KEYS, TYPES, TYPE, TYPE_KEYS, OPERATOR_RULE, operatorCertified, NOT_CERTIFIED, blanksIn, houseNo, areaWords, areasWords, areasOf, areaSql,
-  phoneAddr, emailAddr, addrKey, addressRow, confirmAddress, stopAddress, recordAnswer, textReply,
+  phoneAddr, emailAddr, addrKey, addressRow, addressesOf, phonesSaidNo, confirmAddress, stopAddress, recordAnswer, textReply,
   tokenFor, readToken, manageToken, signupRef, emailToken, publicLink, manageLink,
   audienceOf, followupAudience, countsOf, queueUpdate, sendAfterFor, smsBody, emailOf, drain, kick, idle, tick, purge, forget,
 };
