@@ -99,6 +99,13 @@ export const SUB_PAGES = [
   ['workforce', 'On call', '#/workforce?tab=oncall', 'on call oncall on-call after hours rotation swap holiday callout call-out who is on call', (w) => w.muni && w.manager], // 2026.11.20
   ['workforce', 'Overtime', '#/workforce?tab=overtime', 'overtime over 40 hours week callouts call-outs ot', (w) => w.muni && w.manager],
   // The municipal edition's apps (2026.11.20)
+  // Trash and recycling (2026.11.22): the app's tabs; the add-ons' tabs (routes, carts, tonnage, the report) add theirs.
+  ['bulk', 'Collection calendar', '#/bulk?tab=calendar', 'trash recycling collection calendar schedule day zone what day is my pickup address lookup'],
+  ['bulk', 'Missed pickups', '#/bulk?tab=missed', 'missed pickup trash recycling not picked up complaint'],
+  ['bulk', 'Collection schedule setup', '#/bulk?tab=schedule', 'schedule setup zones streams streets holidays trash recycling yard waste', mgr],
+  ['bulk', 'Holidays and moved days', '#/bulk?tab=schedule&part=days', 'holiday snow day weather moved canceled leaf collection christmas trees hazardous', mgr],
+  ['bulk', 'Act 101 education log', '#/bulk?tab=schedule&part=residents', 'act 101 education reminder mailer print recycling report reminders sign-ups', mgr],
+  ['bulk', 'Bulk pickup bookings', '#/bulk?tab=bookings', 'bulk pickup bookings furniture'],
   ['requests', 'Ledger (repair record)', '#/requests?tab=ledger', 'ledger repair record right to know claim response standard met target'],
   ['requests', 'Requests map', '#/requests?tab=map', 'map where'],
   ['requests', 'Done requests', '#/requests?tab=done', 'fixed closed finished'],

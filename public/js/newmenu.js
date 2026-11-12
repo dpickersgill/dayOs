@@ -20,6 +20,7 @@ const ITEMS = {
   request: { label: 'Request', href: 'requests?new=1', app: 'requests', words: 'resident report pothole phone complaint' },
   street_notice: { label: 'Street notice', href: 'notices?new=1', app: 'notices', words: 'alert text residents closure boil water outage' },
   bulk_booking: { label: 'Bulk pickup booking', href: 'bulk?tab=bookings&new=1', app: 'bulk', words: 'trash pickup book' },
+  missed_pickup: { label: 'Missed pickup', href: 'requests?new=1&category=missed', app: 'bulk', words: 'trash recycling not picked up missed collection resident called' },
   main_break: { label: 'Main break', href: 'water?new=1', app: 'water', words: 'water leak break record' },
   // A ski area
   sale: { label: 'Sale', href: 'sell', app: 'sell', words: 'ticket pass sell order' },

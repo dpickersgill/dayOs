@@ -87,7 +87,8 @@ router.get('/today', todayRoute(async (req) => {
   if (next) {
     cards.push(card({ title: `Next bulk pickup: ${B.longDay(next.date)}`, count: next.booked, text: `${next.booked} of ${next.capacity} stops booked, ${next.left} open${next.closed ? '. Booking has closed' : `. Booking closes ${B.cutoffWords(next.cutoff_at)}`}`, href: `#/bulk?tab=day&date=${next.date}` }));
   }
-  return cards;
+  // The collection schedule's cards, and any another part of Trash and recycling adds (lib/collection.js addTodayCards).
+  return [...(await require('../lib/collection').todayCards(req)), ...cards];
 }));
 
 // ---------------------------------------------------------------- settings

@@ -105,6 +105,17 @@ async function editor(id) {
   const title = input({ name: 'title', value: n.title, maxlength: 120, required: true, placeholder: 'For example: Water main break on Dayton Street' });
   const areas = h('div', { class: 'stack tight' }, ...(n.areas.length ? n.areas : [{}]).map(areaRow));
   const addArea = button('Add a street', () => { areas.append(areaRow()); count(); }, { small: true });
+  // 2026.11.22: a trash schedule change or leaf notice can be aimed at Trash and recycling's collection zones instead.
+  const zoneList = setup.collection_zones || [];
+  const chosenZones = new Set((() => { try { return Array.isArray(n.collection_zone_ids) ? n.collection_zone_ids : JSON.parse(n.collection_zone_ids || '[]'); } catch (_) { return []; } })().map(Number));
+  const zoneChecks = zoneList.map((zn) => { const cb = h('input', { type: 'checkbox', value: String(zn.id), checked: chosenZones.has(zn.id) }); cb.addEventListener('change', () => { syncZones(); count(); }); return h('label', { class: 'check' }, cb, zn.name); });
+  const zonesPicked = () => zoneChecks.map((l) => l.querySelector('input')).filter((cb) => cb.checked).map((cb) => Number(cb.value));
+  const zoneBox = zoneList.length ? h('fieldset', { class: 'stack tight' }, h('legend', null, 'Collection zones (optional)'), h('span', { class: 'hint' }, 'Pick zones and the notice goes to every street in them. Leave all unticked to pick streets below.'), h('div', { class: 'row' }, ...zoneChecks)) : null;
+  const streetsBox = h('div', { class: 'field' });
+  const syncZones = () => {
+    if (zoneBox) zoneBox.hidden = !['trash_change', 'leaf_collection'].includes(type.value);
+    streetsBox.hidden = Boolean(zoneBox && !zoneBox.hidden && zonesPicked().length);
+  };
   const starts = input({ type: 'datetime-local', name: 'starts_at', value: local(n.starts_at) });
   const ends = input({ type: 'datetime-local', name: 'ends_expected_at', value: local(n.ends_expected_at) });
   const sms = h('textarea', { name: 'sms_text', rows: 3, maxlength: 320, required: true }, n.sms_text);
@@ -116,7 +127,8 @@ async function editor(id) {
   const reach = h('p', { class: 'muted', 'aria-live': 'polite' });
   // {streets}, {start} and {until} come from the form: this button fills them in, and so does saving.
   const fillIn = () => {
-    const streets = [...areas.children].map((r) => r.words()).filter(Boolean).join(', ');
+    const picked = streetsBox.hidden ? zoneList.filter((zn) => zonesPicked().includes(zn.id)).map((zn) => zn.name) : [];
+    const streets = picked.length ? `the ${picked.join(', ')} collection zone${picked.length === 1 ? '' : 's'}` : [...areas.children].map((r) => r.words()).filter(Boolean).join(', ');
     for (const el of [sms, long]) el.value = el.value.replace(/\{streets\}/g, streets || '{streets}').replace(/\{start\}/g, starts.value ? sayWhen(starts.value) : '{start}').replace(/\{until\}/g, ends.value ? sayWhen(ends.value) : '{until}');
     sync();
   };
@@ -137,31 +149,34 @@ async function editor(id) {
     clearTimeout(timer);
     timer = setTimeout(async () => {
       const list = [...areas.children].map((r) => r.value()).filter(Boolean);
-      if (!list.length) { reach.textContent = 'Pick at least one street.'; return; }
-      try { reach.textContent = reachWords(await post('/street-notices/preview', { type: type.value, areas: list })); } catch (err) { reach.textContent = err.message; }
+      const zones = streetsBox.hidden ? zonesPicked() : [];
+      if (!list.length && !zones.length) { reach.textContent = 'Pick at least one street.'; return; }
+      try { reach.textContent = reachWords(await post('/street-notices/preview', zones.length ? { type: type.value, collection_zone_ids: zones } : { type: type.value, areas: list })); } catch (err) { reach.textContent = err.message; }
     }, 250);
   };
   type.addEventListener('change', () => {
     const t = typeOf(type.value);
     if (!touched || window.confirm('Replace the message with the template for this type?')) { sms.value = t.sms; long.value = t.body; touched = false; }
-    sync(); count();
+    syncZones(); sync(); count();
   });
   for (const el of [sms, long]) el.addEventListener('input', () => { touched = true; sync(); });
   areas.addEventListener('change', count); areas.addEventListener('input', count);
   const fields = h('div', { class: 'stack' },
     field('Type', type), field('Title (residents see it)', title),
-    h('div', { class: 'field' }, h('span', null, 'Streets affected'), h('span', { class: 'hint' }, 'A whole street, or a range of house numbers. Leave From and To empty for the whole street.'), areas, addArea),
+    zoneBox,
+    appendAll(streetsBox, h('span', null, 'Streets affected'), h('span', { class: 'hint' }, 'A whole street, or a range of house numbers. Leave From and To empty for the whole street.'), areas, addArea),
     reach,
     h('div', { class: 'row' }, field('Starts', starts), field('Expected to end', ends, 'Optional')),
     operatorBox,
     field('Text message', sms), counter, field('Longer version (email and the notice’s page)', long, 'Optional. Without it, the text is used.'), blankNote, fill);
-  sync(); count();
+  syncZones(); sync(); count();
   formDialog(id ? 'Edit notice' : 'New notice', fields, async () => {
     // Saving fills in what the form knows; anything still in braces has to be typed over before the notice is saved.
     fillIn();
     const left = [...new Set([...blanksOf(sms), ...blanksOf(long)])];
     if (left.length) { (blanksOf(sms).length ? sms : long).focus(); throw new Error(`Fill in ${left.join(', ')} before saving: see the note above.`); }
-    const body = { type: type.value, title: title.value.trim(), sms_text: sms.value.trim(), body: long.value.trim() || null, areas: [...areas.children].map((r) => r.value()).filter(Boolean),
+    const zones = streetsBox.hidden ? zonesPicked() : [];
+    const body = { type: type.value, title: title.value.trim(), sms_text: sms.value.trim(), body: long.value.trim() || null, ...(zones.length ? { collection_zone_ids: zones } : { areas: [...areas.children].map((r) => r.value()).filter(Boolean) }),
       starts_at: starts.value || null, ends_expected_at: ends.value || null, issued_by_user_id: typeOf(type.value).operator && operator.value ? Number(operator.value) : null };
     const saved = id ? await put(`/street-notices/${id}`, body) : await post('/street-notices', body);
     toast('Saved as a draft');

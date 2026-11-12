@@ -5,7 +5,7 @@
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
 const api = `/api/v1/public/${encodeURIComponent(slug)}`;
 const root = document.getElementById('app');
-const S = { page: null, step: 'what', cat: null, street: '', house: '', cross: '', pos: null, files: [], desc: '', name: '', phone: '', email: '', texts: false, emails: false, rid: null, sending: false };
+const S = { page: null, step: 'what', cat: null, stream: null, check: null, street: '', house: '', cross: '', pos: null, files: [], desc: '', name: '', phone: '', email: '', texts: false, emails: false, rid: null, sending: false };
 const KEY = `so.report.${slug}`;
 
 // ---------------------------------------------------------------- helpers
@@ -59,6 +59,10 @@ async function start() {
   }
   document.title = `Report a problem: ${S.page.municipality}`;
   if (st) { status(st); return; }
+  // From the collection calendar's "Report a missed pickup" link (2026.11.22): straight to where.
+  const preset = new URLSearchParams(location.search).get('category');
+  const missed = preset === 'missed' && S.page.missed ? S.page.categories.find((c) => c.id === S.page.missed.category_id) : null;
+  if (missed) { S.cat = missed; where(); return; }
   what();
 }
 window.addEventListener('hashchange', () => { const st = (location.hash.match(/s=([0-9a-f]{32})/) || [])[1]; if (st) status(st); });
@@ -87,18 +91,37 @@ function where() {
       gps.className = 'got'; gps.textContent = `Your location is added (within about ${Math.round(S.pos.acc)} m).${S.pos.acc > 100 ? ' That is rough: add the street too if you can.' : ''}`;
     }, () => { gps.className = 'err'; gps.textContent = 'Your location was not shared. Type the street instead, or allow location for this page.'; }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   });
-  const next = () => {
+  // A missed pickup (2026.11.22): which stream, the street and house number, and the schedule's check before going on.
+  const missed = isMissed();
+  const stream = missed ? h('select', { id: 'f-stream' }, h('option', { value: '' }, 'Pick one'), S.page.missed.streams.map((x) => h('option', { value: x.id, selected: S.stream === x.id }, x.name))) : null;
+  const said = h('div', { role: 'status' });
+  const next = async () => {
     S.street = street.value.trim(); S.house = house.value.trim(); S.cross = cross.value.trim();
+    err.textContent = ''; said.replaceChildren();
     if (S.street && !streetId()) { err.textContent = 'Pick the street from the list, or leave it empty and type the nearest cross street.'; street.focus(); return; }
+    if (missed) {
+      S.stream = Number(stream.value) || null;
+      if (!S.stream) { err.textContent = 'Pick what was missed.'; stream.focus(); return; }
+      if (!streetId() || !S.house) { err.textContent = 'Type your street and house number, so we can check your collection day.'; (streetId() ? house : street).focus(); return; }
+      try { S.check = await call('GET', `/collection/check?street=${streetId()}&no=${encodeURIComponent(S.house)}&stream=${S.stream}`); } catch (e) { S.check = null; }
+      if (S.check && !S.check.may_send) {
+        said.replaceChildren(h('div', { class: 'note' }, h('strong', null, S.check.message)), h('p', { class: 'small' }, h('a', { href: `/collection/${encodeURIComponent(slug)}` }, 'See your collection calendar')));
+        return;
+      }
+      photos();
+      return;
+    }
     if (!streetId() && !S.cross && !S.pos) { err.textContent = 'Say where: the street, the nearest cross street, or your location.'; street.focus(); return; }
     photos();
   };
-  show(org(), step(2), h('h2', null, `Where is the ${S.cat.name.toLowerCase()}?`), afterHours(),
+  show(org(), step(2), h('h2', null, missed ? 'What was missed, and where?' : `Where is the ${S.cat.name.toLowerCase()}?`), afterHours(),
+    missed ? [h('label', { for: 'f-stream' }, 'What was missed'), stream] : null,
     h('label', { for: 'f-street' }, 'Street'), street, list,
-    h('label', { for: 'f-house' }, 'House number ', h('span', { class: 'muted' }, '(the nearest one)')), house,
-    h('label', { for: 'f-cross' }, 'Or the nearest cross street'), cross,
-    locate, gps, err, btn('Next', next, 'pri'), btn('Back', what));
+    h('label', { for: 'f-house' }, 'House number ', h('span', { class: 'muted' }, missed ? '' : '(the nearest one)')), house,
+    missed ? null : [h('label', { for: 'f-cross' }, 'Or the nearest cross street'), cross, locate, gps],
+    said, err, btn(missed ? 'Check and go on' : 'Next', next, 'pri'), btn('Back', what));
 }
+const isMissed = () => Boolean(S.page.missed && S.cat && S.cat.id === S.page.missed.category_id);
 const streetId = () => { const s = S.page.streets.find((x) => x.name.toLowerCase() === S.street.toLowerCase()); return s ? s.id : null; };
 
 // ---------------------------------------------------------------- 3. photos and words
@@ -114,7 +137,7 @@ function photos() {
   file.addEventListener('change', () => { S.files = [...S.files, ...file.files].filter((f) => f.size < 12 * 1024 * 1024).slice(0, 3); pick.disabled = S.files.length >= 3; file.value = ''; draw(); });
   const desc = h('textarea', { id: 'f-desc', maxlength: 1000 }, S.desc);
   draw();
-  show(org(), step(3), h('h2', null, 'Photos and a few words'), h('p', { class: 'muted small' }, 'Both are optional. Up to 3 photos.'),
+  show(org(), step(3), h('h2', null, 'Photos and a few words'), isMissed() && S.check ? h('p', { class: 'got' }, S.check.message) : null, h('p', { class: 'muted small' }, 'Both are optional. Up to 3 photos.'),
     pick, file, thumbs, h('label', { for: 'f-desc' }, 'What should the crew know? ', h('span', { class: 'muted' }, '(optional)')), desc,
     btn('Next', () => { S.desc = desc.value.trim(); contact(); }, 'pri'), btn('Back', () => { S.desc = desc.value.trim(); where(); }));
 }
@@ -153,7 +176,7 @@ async function submit(button, err) {
   const body = {
     category_id: S.cat.id, street_id: streetId(), house_number: S.house || null, cross_street: S.cross || null, description: S.desc || null,
     ...(S.pos ? { lat: S.pos.lat, lng: S.pos.lng, accuracy: Math.round(S.pos.acc) } : {}),
-    name: S.name || null, phone: S.phone || null, email: S.email || null, texts_ok: S.texts, emails_ok: S.emails, rid: S.rid,
+    name: S.name || null, phone: S.phone || null, email: S.email || null, texts_ok: S.texts, emails_ok: S.emails, rid: S.rid, ...(isMissed() && S.stream ? { stream_id: S.stream } : {}),
     website: (document.getElementById('f-website') || {}).value || '',
   };
   try {

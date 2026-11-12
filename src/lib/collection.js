@@ -312,6 +312,33 @@ async function routeStatus(conn, tenantId, args) {
   try { return (await R.streetStatus(conn, tenantId, args)) || null; } catch (_) { return null; }
 }
 
+// ---------------------------------------------------------------- holidays and zones as street areas
+/**
+ * The US federal holidays of a year as observed (a Saturday holiday on the Friday before, a Sunday one on the Monday
+ * after): [{ on_date, name }]. A borough removes the ones its crews work.
+ */
+function federalHolidays(year) {
+  const y = Number(year);
+  const iso = (m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const observed = (d) => { const w = isoDay(d); return w === 6 ? addDays(d, -1) : w === 7 ? addDays(d, 1) : d; };
+  const nth = (m, weekday, n) => { let d = iso(m, 1); while (isoDay(d) !== weekday) d = addDays(d, 1); return addDays(d, 7 * (n - 1)); };
+  const last = (m, weekday) => { let d = addDays(iso(m + 1 > 12 ? 1 : m + 1, 1).replace(/^\d{4}/, String(m + 1 > 12 ? y + 1 : y)), -1); while (isoDay(d) !== weekday) d = addDays(d, -1); return d; };
+  return [
+    [observed(iso(1, 1)), 'New Year\'s Day'], [nth(1, 1, 3), 'Martin Luther King Jr. Day'], [nth(2, 1, 3), 'Presidents\' Day'], [last(5, 1), 'Memorial Day'],
+    [observed(iso(6, 19)), 'Juneteenth'], [observed(iso(7, 4)), 'Independence Day'], [nth(9, 1, 1), 'Labor Day'], [nth(10, 1, 2), 'Columbus Day'],
+    [observed(iso(11, 11)), 'Veterans Day'], [nth(11, 4, 4), 'Thanksgiving Day'], [observed(iso(12, 25)), 'Christmas Day'],
+  ].map(([onDate, name]) => ({ on_date: onDate, name }));
+}
+
+/** The streets of these zones as street notice areas: [{ street_id, from_no, to_no, side }] (lib/streetnotices.js). */
+async function zoneAreas(conn, tenantId, zoneIds) {
+  const ids = asList(zoneIds);
+  if (!ids.length) return [];
+  return (await rows(conn, `SELECT DISTINCT r.street_id, r.from_no, r.to_no, r.side FROM collection_zone_streets r JOIN collection_zones z ON z.tenant_id = r.tenant_id AND z.id = r.zone_id
+    WHERE r.tenant_id = ? AND r.zone_id IN (?) AND r.not_collected = 0 ORDER BY r.street_id, r.from_no`, [tenantId, ids]))
+    .map((r) => ({ street_id: Number(r.street_id), from_no: r.from_no === null ? null : Number(r.from_no), to_no: r.to_no === null ? null : Number(r.to_no), side: r.side || 'both' }));
+}
+
 // ---------------------------------------------------------------- Today cards (other workstreams add theirs)
 const TODAY = [];
 /** Another part of the app adds Today cards to Trash and recycling's: fn(req) returns cards (lib/today.js card shape). */
@@ -327,5 +354,5 @@ module.exports = {
   DAY_NAMES, KINDS, KIND_WORDS, FREQUENCIES, REASON_WORDS, SEND_OK, LATE_DAYS,
   zoneFor, collectionDays, nextFor, dayRoutes, requireAddon,
   pickupCheck, howOften, dayWords, longDay, settingsOf, streamsOf, zoneDaysOf, houseNumber, covers, isoDay, mondayOf, inSeason, runsOn, todayFor, tzOf, asList, isDate,
-  addTodayCards, todayCards,
+  addTodayCards, todayCards, federalHolidays, zoneAreas,
 };
