@@ -405,7 +405,7 @@ export function start(frame) {
       if (live !== self) return [];
       const at = pinHref(page.href);
       const on = Boolean(at && pinAt(at));
-      const words = 'pin pins pinned unpin star favorite favourite bookmark menu shortcut';
+      const words = 'pin pins pinned unpin star favorite bookmark menu shortcut';
       return [
         ...(at ? [{ id: 'pin-page', title: on ? 'Unpin this page' : 'Pin this page', hint: page.label || '', icon: 'star', words, run: () => (on ? unpin(at) : pin(page)) }] : []),
         { id: 'pins-edit', title: 'Edit my pins', hint: '', icon: 'star', words: `${words} reorder rename reset arrange`, run: () => openEditor() },
