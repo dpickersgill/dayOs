@@ -210,7 +210,7 @@ What changed in the app with this release:
 - Offline patrol notes on phones are sealed with a key made from `LINK_SECRET` and the person's login. Before rotating
   `LINK_SECRET`, make sure patrol phones have sent everything waiting, or those notes cannot be opened afterwards.
 - Close mountain (console, Manage): paused now, deleted by the daily job after the window. The console's history of it is kept.
-- The daily job also deletes website requests older than two years, sign-in records over a month old, and forecast data snapshots older than three years. Morning briefs, and the record of who was sent them, go after 30 days (`bash scripts/brief-job.sh` sends them; DEPLOY.md, Morning brief).
+- The daily job also deletes website requests older than two years, sign-in records over a month old, and forecast data snapshots older than three years. Forecast data is kept for ski areas only: a municipality has none (release 2026.11.21 removes what was written for municipalities before, in the migration, and `node scripts/snapshot-backfill.js` no longer lists them). Morning briefs, and the record of who was sent them, go after 30 days (`bash scripts/brief-job.sh` sends them; DEPLOY.md, Morning brief).
 - Every push to GitHub runs `.github/workflows/ci.yml`: the tests, `npm audit` and CodeQL.
 
 ## Keeping an eye on it (set up once)
