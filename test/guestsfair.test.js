@@ -29,7 +29,13 @@ let failCharges = false; let lastSetupMeta = null;
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PW = 'correct-horse-battery';
 const q = async (sql, params) => (await pool.query(sql, params))[0];
-const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+// The mountain's clock is a time zone where it is now between 4 AM and 9 PM, so a scan moved back 3 hours is still today
+// whatever the hour the test runs.
+const localHour = (tz) => Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+// (and on the same date as UTC, as the claims list counts by day).
+const sameDate = (tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()) === new Date().toISOString().slice(0, 10);
+const TZ = ['America/New_York', 'Europe/London', 'Asia/Tokyo'].find((tz) => localHour(tz) >= 4 && localHour(tz) < 21 && sameDate(tz)) || 'America/New_York';
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 const plus = (d, k) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
 const DEVICE = 'test-device-0123456789abcdef';
 async function call(prefix, method, path, { token, body, headers } = {}) {
@@ -109,7 +115,7 @@ test.before(async () => {
   earlyP = await mk({ kind: 'day_ticket', name: 'Saver day', base_price_cents: 6000, online: 1, advance_days: 7, advance_percent: 20 });
   passP = await mk({ kind: 'season_pass', name: 'Season pass', base_price_cents: 45000, valid_days: 200, online: 1 });
   ok(await api('PUT', '/tenant/profile', { token: A.owner, body: { online_shop: true } }));
-  await q('UPDATE tenants SET scan_passback_seconds = 0 WHERE id = ?', [A.id]); // the same pass is scanned again and again here
+  await q('UPDATE tenants SET scan_passback_seconds = 0, timezone = ? WHERE id = ?', [TZ, A.id]); // the same pass is scanned again and again here
 });
 test.after(async () => { config.stripe.publicUrl = ''; await new Promise((r) => server.close(r)); await new Promise((r) => stripeMock.close(r)); await new Promise((r) => pmMock.close(r)); await pool.end(); });
 

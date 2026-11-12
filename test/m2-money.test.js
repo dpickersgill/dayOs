@@ -156,8 +156,8 @@ test('labor rates are a manager\'s; Mark done records crew hours, equipment, par
   assert.equal(m.total_cents, 54550);
   assert.equal(m.labor_cents, 21000); assert.equal(m.equipment_cents, 21250); assert.equal(m.parts_cents, 8700); assert.equal(m.materials_cents, 3600);
   const c = (await call('GET', `/assets/work-orders/${woRoad}/costs`, { token: crew.token })).body;
-  assert.equal(c.labor_cents, null); assert.equal(c.total_cents, null);
-  assert.ok(c.labor.every((l) => l.rate_cents === null), 'a person\'s rate is pay');
+  assert.equal(c.labor_cents, undefined); assert.equal(c.total_cents, undefined); // no money at all for the crew (2026.11.20)
+  assert.ok(c.labor.every((l) => l.rate_cents === undefined), 'a person\'s rate is pay');
   assert.equal(c.labor_hours, 6);
 
   // A manager closes the truck repair with an outside bill and time out of service.
@@ -182,7 +182,7 @@ test('the asset\'s Costs tab and the Done tab show real numbers', async () => {
   is(d, 200);
   assert.equal(d.body.totals.count, 2); assert.equal(d.body.totals.labor_hours, 7.5); assert.equal(d.body.totals.cost_cents, 54550 + 42000 + 6750);
   const crewView = (await call('GET', `/ops/work-orders?status=closed&from=${today}&to=${today}&totals=1`, { token: crew.token })).body;
-  assert.equal(crewView.totals.cost_cents, null); assert.equal(crewView.data[0].cost_cents, undefined);
+  assert.equal(crewView.totals.cost_cents, undefined); assert.equal(crewView.totals.labor_hours, 7.5, "the crew sees the hours"); assert.equal(crewView.data[0].cost_cents, undefined);
   assert.equal((await call('GET', '/ops/work-orders?status=closed&from=2000-01-01&to=2000-01-31&totals=1', { token: mgr.token })).body.totals.count, 0);
   is(await call('GET', '/ops/work-orders?status=closed&from=yesterday', { token: mgr.token }), 400);
 });

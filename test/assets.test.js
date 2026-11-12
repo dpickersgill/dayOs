@@ -161,7 +161,10 @@ test('parts: stock moves are counted, issued to a work order at cost, returned, 
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/labor`, { token: T.staff, body: { worker: 'Sam Mechanic', hours: 0.5 } }));
   is(await api('PATCH', `/assets/work-orders/${D.brakeWo}/costs`, { token: T.staff, body: { vendor_cost_cents: 100 } }), 403);
   ok(await api('PATCH', `/assets/work-orders/${D.brakeWo}/costs`, { token: o, body: { vendor_id: D.vendor, vendor_cost_cents: 12000 } }));
-  const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: T.staff }));
+  // Money is for owners and managers (2026.11.20): staff see the hours and quantities only.
+  const cs = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: T.staff }));
+  assert.equal(cs.labor_hours, 2); assert.equal(cs.labor_cents, undefined); assert.equal(cs.total_cents, undefined);
+  const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: o }));
   assert.equal(c.labor_cents, 1.5 * 4500 + 0.5 * 6000, 'each labor entry keeps the rate of its day');
   assert.equal(c.parts_cents, 6500);
   assert.equal(c.total_cents, 6750 + 3000 + 6500 + 12000);
@@ -200,7 +203,7 @@ test('the overview and the lifecycle report add it all up; staff do not see the 
   assert.ok(ov.replace.some((r) => r.id === D.lift));
   assert.ok(ov.spend_month_cents > 0);
   const st = ok(await api('GET', '/assets/overview', { token: T.staff }));
-  assert.equal(st.spend_month_cents, null);
+  assert.equal(st.spend_month_cents, undefined, 'no money for staff');
   assert.deepEqual(st.replace, []);
   is(await api('GET', '/assets/lifecycle', { token: T.staff }), 403);
   const lc = ok(await api('GET', '/assets/lifecycle', { token: o })).data.find((x) => x.id === D.truck);
@@ -237,8 +240,9 @@ test('review fixes: no price leaks, a plan marked once per order, returns at iss
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: 2 } }));
   ok(await api('PATCH', `/assets/parts/${bolt}`, { token: o, body: { unit_cost_cents: 1500 } }));
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));
-  const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: s }));
+  const c = ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: o }));
   assert.equal(c.parts.find((p) => p.part_id === bolt).cost, 1000);
+  assert.equal(ok(await api('GET', `/assets/work-orders/${D.brakeWo}/costs`, { token: s })).parts.find((p) => p.part_id === bolt).cost, undefined, 'staff see the part, not its cost');
   // parts come back off a canceled order, but nothing new goes on it
   ok(await api('POST', `/ops/work-orders/${D.brakeWo}/status`, { token: o, body: { status: 'cancelled' } }));
   ok(await api('POST', `/assets/work-orders/${D.brakeWo}/parts`, { token: s, body: { part_id: bolt, qty: -1 } }));

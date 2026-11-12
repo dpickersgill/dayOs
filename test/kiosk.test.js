@@ -184,9 +184,11 @@ test('punch: identify, then confirm; a stray tap cannot flip the state, and the 
   assert.deepEqual(log.map((l) => l.action), ['kiosk_clock_in', 'kiosk_clock_out']);
   assert.equal(log[0].user_id, null);
   // the existing manager screens show the same local time the kiosk did
-  const entries = ok(await api('GET', `/workforce/time/entries?from=${today}&to=${today}&staff_id=${sam}`, { token: A.owner })).data;
+  // From the day before: the clock-in was moved back 90 minutes, which is yesterday just after midnight.
+  const dayBefore = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const entries = ok(await api('GET', `/workforce/time/entries?from=${dayBefore}&to=${today}&staff_id=${sam}`, { token: A.owner })).data;
   assert.equal(entries.length, 1);
-  assert.ok(entries[0].clock_in.startsWith(today));
+  assert.ok(entries[0].clock_in.startsWith(today) || entries[0].clock_in.startsWith(dayBefore));
 });
 
 test('a punch links to the shift that is on now', async () => {
