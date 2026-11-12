@@ -70,7 +70,13 @@ async function checkChoice(db, b, tenantId) {
  * changes it straight away (charging or crediting the difference) and the apps change to match.
  */
 router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (req, res) => {
-  const t = req.auth.tenantId; const c = req.body;
+  await saveChoice(req, req.body);
+  res.json({ ok: true });
+});
+
+/** The plan choice (PUT /billing/choice), also used by Settings, Apps to add or remove one add-on (2026.11.20). */
+async function saveChoice(req, c) {
+  const t = req.auth.tenantId;
   await checkChoice(pool, c, t);
   const b = await rowOf(pool, t);
   if (b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status)) {
@@ -97,7 +103,75 @@ router.put('/billing/choice', managers, ownerOnly, validate(choiceBody), async (
   });
   await audit(pool, req, 'billing_choice', 'tenant_billing', t, c);
   B.invalidate(t);
-  res.json({ ok: true });
+}
+
+// ---------------------------------------------------------------- Settings, Apps (2026.11.20)
+// What is on, what each add-on costs, and Add or Remove for the owner. Adding or removing goes through the plan choice
+// above, so with a subscription Stripe changes it (charging or crediting the difference) and the apps follow the paid
+// plan. Without one (the free trial, no charge, or paid by invoice outside Stripe) the choice is saved for when it is paid
+// and the app is turned on or off straight away. Managers see the page and cannot change it.
+const M = require('../lib/modules');
+// What each app does, in a municipality's words (the shared blurbs in lib/modules.js are written for a ski area).
+const MUNI_BLURBS = {
+  assets: 'Trucks, plows, pumps and building systems, and the map of mains, valves, hydrants and inlets: inspections, service plans, work orders, parts and costs.',
+  workforce: 'Staff, the schedule, on call, the time clock, overtime and certifications such as CDLs and operator licenses.',
+  documents: 'Files by category with versions, search and read-and-accepted tracking.',
+  doc_ocr: 'Reads the words in scanned PDFs and pictures so they can be searched.',
+  messages: 'Email and text messages to residents who agreed to hear from you.',
+  assistant_plus: 'Ask questions about your own records in plain words. The assistant drafts; a person approves before anything is sent.',
+};
+async function appsOf(t, role) {
+  const org = await M.orgTypeOf(t);
+  const b = await rowOf(pool, t);
+  const all = await B.plansFor(t);
+  const plans = all.filter((p) => p.kind === 'plan' && p.active);
+  const plan = plans.find((p) => p.id === Number(b.plan_id)) || null;
+  const chosen = B.ids(b.addons);
+  const on = await M.enabledKeys(t);
+  const live = Boolean(b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status));
+  const apps = M.modulesFor(org).map((m) => {
+    const row = all.find((p) => p.kind === 'addon' && p.active && p.modules.includes(m.key));
+    return {
+      key: m.key, label: m.label.replace(/ \(add-on\)$/, ''), blurb: (org === 'municipality' && MUNI_BLURBS[m.key]) || m.blurb, on: on.includes(m.key), addon: M.isAddon(m, org), priced: Boolean(row), // an add-on with no price on the list is turned on by Verdynt/OS on request
+      addon_id: row ? row.id : null, chosen: Boolean(row && chosen.includes(row.id)), in_plan: Boolean(plan && plan.modules.includes(m.key)),
+      monthly_cents: row ? Number(row.monthly_cents || 0) : null, yearly_cents: row ? Number(row.yearly_cents || 0) : null, needs: m.needs || [],
+    };
+  });
+  return { org_type: org, can_change: role === 'owner', live, comped: Boolean(Number(b.comped)), interval: b.plan_id ? b.billing_interval || 'month' : (org === 'municipality' ? 'year' : 'month'), plan: plan ? { id: plan.id, name: plan.name } : null, apps };
+}
+
+router.get('/billing/apps', managers, async (req, res) => { res.json(await appsOf(req.auth.tenantId, req.auth.role)); });
+
+router.post('/billing/apps', managers, ownerOnly, validate(z.object({ module: z.string().min(1).max(40), on: z.boolean() })), async (req, res) => {
+  const t = req.auth.tenantId;
+  const now = await appsOf(t, req.auth.role);
+  const app = now.apps.find((a) => a.key === req.body.module);
+  if (!app) throw bad('That app is not offered to you');
+  if (!app.addon) throw bad(`${app.label} is part of your plan, not an add-on`);
+  if (!app.priced) throw bad(`${app.label} is turned on by Verdynt/OS. Ask us to add it.`);
+  const b = await rowOf(pool, t);
+  const all = await B.plansFor(t);
+  const planId = Number(b.plan_id) || (all.find((p) => p.kind === 'plan' && p.active && p.monthly_cents) || {}).id;
+  if (!planId) throw conflict('Choose a plan on Billing and plan first');
+  const addons = new Set(B.ids(b.addons).filter((id) => all.some((p) => p.id === id && p.kind === 'addon' && p.active)));
+  if (req.body.on) addons.add(app.addon_id); else addons.delete(app.addon_id);
+  await saveChoice(req, { plan_id: planId, addons: [...addons], interval: now.interval });
+  // Not paid through Stripe or by invoice yet (a trial, or no charge): the apps do not follow the plan until it is paid,
+  // so this one app is turned on or off now, with what it needs (or what needs it).
+  const after = await one(pool, 'SELECT stripe_subscription_id, paid_until FROM tenant_billing WHERE tenant_id = ?', [t]);
+  if (!after.stripe_subscription_id && !B.dateOf(after.paid_until)) {
+    await tx(async (conn) => {
+      const saved = await rows(conn, 'SELECT module, enabled FROM tenant_modules WHERE tenant_id = ?', [t]);
+      const want = Object.fromEntries(saved.map((r) => [r.module, Boolean(r.enabled)]));
+      const list = M.apply(want, { [app.key]: req.body.on }, now.org_type);
+      for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)', [t, k, list.includes(k) ? 1 : 0]);
+      await require('../lib/templatepacks').seed(conn, t); // an add-on brings its built-in checklists, once
+      await B.event(conn, t, req.body.on ? 'app_added' : 'app_removed', app.label, { userId: req.auth.userId });
+    });
+    M.invalidate(t);
+  }
+  await audit(pool, req, req.body.on ? 'app_added' : 'app_removed', 'tenant_modules', t, { module: app.key });
+  res.json(await appsOf(t, req.auth.role));
 });
 
 /** Pay by card or US bank account: Stripe's hosted page. Any trial days left are kept. */

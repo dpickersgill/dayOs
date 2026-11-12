@@ -100,21 +100,32 @@ test.after(async () => {
   await pool.end();
 });
 
-test('Today: cards from every municipal app, for the owner, the crew and the front desk', skip(), async () => {
-  const titles = async (user) => {
+test('Today by role: the crew board and prioritized cards for the owner, my work for the crew, the desk\'s cards and on call for the front desk', skip(), async () => {
+  const open = async (user) => {
     const root = await show(user, 'dashboard', '#/dashboard');
+    await settle(); await settle();
     clean(root, `Today for ${user}`);
     assert.ok(root.querySelector('[data-today="municipal"]'), 'the municipal Today');
-    return [...root.querySelectorAll('.bd-muni h2')].map((x) => x.textContent);
+    return root;
   };
-  const owner = await titles('owner');
-  for (const t of ['Open work orders', 'New requests', 'Active street notices', 'Water work orders', 'Sewer work orders', 'Stormwater work orders', 'Building checks due this week']) assert.ok(owner.includes(t), `owner: ${t} in ${owner.join(' | ')}`);
+  const titles = (root) => [...root.querySelectorAll('[data-card]')].map((x) => x.dataset.card);
+  const ownerRoot = await open('owner');
+  const owner = titles(ownerRoot);
+  for (const t of ['Open work orders', 'New requests', 'Active street notices', 'Water work orders', 'Sewer work orders', 'Building checks due this week']) assert.ok(owner.includes(t), `owner: ${t} in ${owner.join(' | ')}`);
   assert.ok(owner.some((t) => /bulk pickup/i.test(t)), 'owner: a bulk pickup card');
   assert.ok(owner.some((t) => /valves|hydrant/i.test(t)), 'owner: a program in progress');
-  assert.deepEqual(await titles('crew1'), owner, 'the crew sees the same cards');
-  const desk = await titles('frontdesk');
-  assert.ok(desk.includes('New requests') && desk.includes('Active street notices') && desk.includes('Building checks due this week') && desk.some((t) => /bulk pickup/i.test(t)));
+  assert.ok(ownerRoot.querySelector('.cb-board'), 'the crew board');
+  assert.ok(/Luis Ortega/.test(ownerRoot.querySelector('.cb-board').textContent) && /On call/.test(ownerRoot.querySelector('.cb-board').textContent));
+  assert.ok(ownerRoot.querySelectorAll('.bd-action').length < owner.length, 'only some cards are full cards: the rest are grouped');
+  const crewRoot = await open('crew1');
+  assert.ok(crewRoot.querySelector('[data-today="crew"]') && /My work today/.test(crewRoot.textContent), 'my work today');
+  assert.deepEqual(titles(crewRoot), [], 'the crew sees no manager cards');
+  assert.ok(/Patch potholes on Bridge Street/.test(crewRoot.textContent), 'their own work order');
+  const deskRoot = await open('frontdesk');
+  const desk = titles(deskRoot);
+  assert.ok(desk.includes('New requests') && desk.includes('Active street notices') && desk.some((t) => /bulk pickup/i.test(t)), desk.join(' | '));
   assert.ok(!desk.some((t) => /work orders|Water|Sewer|Stormwater/.test(t)), `the front desk is not shown the crew's cards: ${desk.join(' | ')}`);
+  assert.ok(/On call now/.test(deskRoot.textContent), 'who is on call');
 });
 
 // [view key in the menu, its file, the address, who has it, words that must be on it]

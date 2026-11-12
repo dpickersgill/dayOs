@@ -571,6 +571,7 @@ router.post('/tenants', validate(z.object({
     const on = M.apply({}, b.modules || {}, b.org_type);
     for (const k of M.KEYS) await conn.query('INSERT INTO tenant_modules (tenant_id, module, enabled) VALUES (?, ?, ?)', [t.insertId, k, on.includes(k) ? 1 : 0]);
     await require('../lib/templatepacks').seed(conn, t.insertId); // a municipality's water, sewer and stormwater checklists
+    if (b.org_type === 'municipality') await require('../lib/crewcerts').seedCertifications(conn, t.insertId); // CDL, water operator and the rest (2026.11.20)
     if (b.billing === 'trial') await BL.startTrial(conn, t.insertId, { planId: b.plan_id || null, email: b.owner.email });
     else await conn.query('INSERT INTO tenant_billing (tenant_id, comped, plan_id) VALUES (?, 1, ?)', [t.insertId, b.plan_id || null]);
     await log(conn, req, t.insertId, 'create', { slug: b.slug, org_type: b.org_type, apps: on, billing: b.billing });

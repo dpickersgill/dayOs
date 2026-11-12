@@ -16,6 +16,7 @@ const { z, validate, paramId, dateStr, todayIn, nowIn, addDays } = require('../l
 const { notFound, bad, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { card, todayRoute } = require('../lib/today');
+const { progressWords } = require('../lib/programprogress');
 const MF = require('../lib/mapfeatures');
 const CR = require('../lib/checkrules');
 const AI = require('../lib/assetinspect');
@@ -96,7 +97,8 @@ function programOut(p, today) {
     id: Number(p.id), name: p.name, template_id: Number(p.template_id), template_name: p.template_name, due_on: due, assigned_staff_id: p.assigned_staff_id === null ? null : Number(p.assigned_staff_id),
     assignee: p.assignee && p.assignee.trim() ? p.assignee.trim() : null, crew: p.crew, notes: p.notes, status: p.status, copied_from: p.copied_from === null ? null : Number(p.copied_from),
     created_at: p.created_at, closed_at: p.closed_at,
-    progress: { total, done, skipped, todo: total - done - skipped, failed: Number(p.failed), percent: total ? Math.round(((done + skipped) / total) * 100) : 0 },
+    progress: { total, done, skipped, todo: total - done - skipped, failed: Number(p.failed), percent: total ? Math.round(((done + skipped) / total) * 100) : 0,
+      words: progressWords({ total, done, skipped, failed: Number(p.failed) }) }, // the same words on Today and the program page (2026.11.20)
     overdue: Boolean(p.status === 'open' && due && today && due < today && total - done - skipped > 0),
   };
 }
@@ -117,7 +119,7 @@ router.get('/today', todayRoute(async (req) => {
     .map((p) => programOut(p, today)).filter((p) => p.progress.todo > 0);
   const cards = due.slice(0, 4).map((p) => card({
     title: p.name.slice(0, 80), count: p.progress.todo,
-    text: `${p.progress.done + p.progress.skipped} of ${p.progress.total} done${p.progress.failed ? `, ${p.progress.failed} failed` : ''}. ${p.overdue ? `Was due ${fmtDue(p.due_on)}` : `Due ${fmtDue(p.due_on)}`}.`,
+    text: `${p.progress.words}. ${p.overdue ? `Was due ${fmtDue(p.due_on)}` : `Due ${fmtDue(p.due_on)}`}.`,
     href: `#/assetprograms/${p.id}`,
   }));
   if (due.length > 4) cards.push(card({ title: 'More programs due this week', count: due.length - 4, text: 'Open Programs to see them all', href: '#/assetprograms' }));

@@ -311,7 +311,7 @@ test('programs end to end: pick targets on the map, do them, skip one, a failure
   is(made, 201); assert.equal(made.body.targets, 7, 'six valves in the box and the hydrant; not the far one or the abandoned one');
   const pid = made.body.id;
   let p = (await api('GET', `/assets/programs/${pid}`, { token: crewA.token })).body;
-  assert.deepEqual(p.progress, { total: 7, done: 0, skipped: 0, todo: 7, failed: 0, percent: 0 });
+  assert.deepEqual(p.progress, { total: 7, done: 0, skipped: 0, todo: 7, failed: 0, percent: 0, words: '0 of 7 done, 7 to do' });
   assert.ok(!p.targets.some((g) => g.map_feature_id === outside.id));
   assert.ok(p.targets.every((g) => typeof g.lat === 'number' && typeof g.lng === 'number'));
   assert.equal(p.template.name, 'Valve exercise');
@@ -342,14 +342,14 @@ test('programs end to end: pick targets on the map, do them, skip one, a failure
   is(await api('DELETE', `/assets/programs/${pid}/targets/${tgt(inBox[0].id).id}`, { token: A.token }), 409, 'a done one stays');
 
   p = (await api('GET', `/assets/programs/${pid}`, { token: crewA.token })).body;
-  assert.deepEqual(p.progress, { total: 8, done: 2, skipped: 1, todo: 5, failed: 1, percent: 38 });
+  assert.deepEqual(p.progress, { total: 8, done: 2, skipped: 1, todo: 5, failed: 1, percent: 38, words: '2 of 8 done, 1 skipped, 1 failed, 5 to do' });
   assert.equal(p.failures.length, 1); assert.equal(p.failures[0].work_order.id, stuck.body.work_order_id);
   assert.equal(tgt(inBox[2].id).skip_reason, 'Paved over on Elm Street');
 
   // Today shows it with its progress.
   const today = (await api('GET', '/assets/programs/today', { token: crewA.token })).body.cards;
   const c = today.find((x) => x.href === `#/assetprograms/${pid}`);
-  assert.ok(c, JSON.stringify(today)); assert.equal(c.count, 5); assert.match(c.text, /3 of 8 done, 1 failed/);
+  assert.ok(c, JSON.stringify(today)); assert.equal(c.count, 5); assert.match(c.text, /2 of 8 done, 1 skipped, 1 failed, 5 to do/);
 
   // The spreadsheet has every target and no resident data.
   const csv = await fetch(`${base}/api/v1/assets/programs/${pid}/export.csv`, { headers: { authorization: `Bearer ${A.token}` } });
@@ -444,7 +444,7 @@ test('the work orders Today card and the asset page still work for a ski area wi
 test('the Water, Sewer and Stormwater Today cards: open work orders and high risk on their own map items, only with the add-on on', async () => {
   const water = (await api('GET', '/water/today', { token: crewA.token })).body.cards;
   const wo = water.find((c) => c.title === 'Water work orders');
-  assert.ok(wo && wo.count >= 1 && wo.href === '#/works', JSON.stringify(water));
+  assert.ok(wo && wo.count >= 1 && wo.href === '#/works?system=water', JSON.stringify(water)); // the list filtered to Water (2026.11.20)
   const sewer = (await api('GET', '/sewer/today', { token: A.token })).body.cards;
   assert.ok(sewer.some((c) => c.title === 'Sewer: high risk' || c.title === 'Sewer work orders'), JSON.stringify(sewer));
   // Nothing in the stormwater system needs anyone: an empty list.

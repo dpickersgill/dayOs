@@ -308,6 +308,7 @@ async function alertNew(tenantId, requestId, { exceptUserId = null } = {}) {
   try {
     const r = await requestOf(pool, tenantId, requestId);
     if (!r) return 0;
+    await require('./oncall').alertAfterHours(tenantId, r, placeWords(r, { withNumber: false }), { exceptUserId }); // the person on call, after hours (2026.11.20)
     const { threadId, ids } = await syncAlertThread(pool, tenantId);
     const to = ids.filter((u) => u !== Number(exceptUserId));
     if (!to.length) return 0;

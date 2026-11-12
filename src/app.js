@@ -379,6 +379,7 @@ function createApp() {
   api.use('/lost-found', require('./routes/lostfound').router);
   api.use('/partner-passes', require('./routes/partnerpasses').router);
   api.use('/workforce', require('./routes/workforcetime'));
+  api.use('/workforce', require('./routes/crew').router); // 2026.11.20: the crew board, my day, on call, overtime, operator licenses
   api.use('/workforce', require('./routes/attractions').workforceRouter); // suggested staff for attractions
   api.use('/kiosk-admin', kiosk.adminRouter);
   api.use('/skischool', skischool);
@@ -425,6 +426,7 @@ function createApp() {
   api.use('/park', park);
   api.use('/park', require('./routes/parkrecords')); // photos, opening an area, history, the day record
   api.use('/requests', require('./routes/requests').router); // muni release 1: resident requests and the repair record (streets: routes/streets.js)
+  api.use('/ops', require('./routes/crew').works); // 2026.11.20: assign several work orders, the work orders map (before /work-orders/:id)
   api.use('/ops', opsRoutes);
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type

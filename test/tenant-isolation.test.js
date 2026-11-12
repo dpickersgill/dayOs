@@ -99,6 +99,7 @@ const SIGNED = {
   // 2026.11.20: departments, funds, labor rates, job costs and the monthly report, inside the Assets and fleet router.
   'workmoney.js': { router: '/assets' },
   'utilities.js': { router: '/water' }, // the same Today card router is also mounted at /sewer and /stormwater
+  'crew.js': { router: '/workforce', works: '/ops' }, // 2026.11.20: crew board, on call, overtime; assigning work orders and their map
   'requests.js': { router: '/requests' }, // muni release 1: resident requests (test/muni-requests.test.js sweeps two municipalities)
   // Municipal edition (muni release 1): bulk trash pickup (Trash and recycling).
   'bulkpickup.js': { router: '/solid-waste' },
