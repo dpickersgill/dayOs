@@ -23,7 +23,10 @@ const { pool } = require('../src/db');
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const slug = `ssw-${suffix}`;
 const PW = 'correct-horse-battery';
-const TZ = 'America/New_York';
+// The lesson below is today at 11 PM, not started. The mountain's time zone is one where it is now between 6 AM and 9 PM,
+// so that holds whatever the hour the test runs (late in the evening on the East Coast it is still afternoon in Hawaii).
+const localHour = (tz) => Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+const TZ = ['America/New_York', 'America/Los_Angeles', 'Pacific/Honolulu', 'Asia/Tokyo', 'Europe/London'].find((tz) => localHour(tz) >= 6 && localHour(tz) < 21);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 const skip = () => !JSDOM && { skip: 'jsdom is not installed' };

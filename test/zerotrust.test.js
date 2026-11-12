@@ -267,7 +267,8 @@ test('shared terminals: crew switch in with a PIN; managers and patrol cannot; r
 test('access runs out at the season\'s end, and comes back when a manager moves the date', async () => {
   const H = A;
   const lift = await addLogin(H, 'staff');
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  // Two days back by UTC: in the past on the mountain's own clock too, whatever the hour (in the evening UTC is a day ahead).
+  const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
   const later = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
   is(await api('POST', '/users/season-end', { token: H.token, body: { date: yesterday } }), 400, 'not in the past');
   const set = await api('POST', '/users/season-end', { token: H.token, body: { date: later } });

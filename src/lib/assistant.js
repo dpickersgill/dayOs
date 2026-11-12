@@ -25,12 +25,16 @@ async function help() {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'help-content.js'), 'utf8');
   const mod = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
   const sections = new Map(mod.SECTIONS.map((s) => [s.key, s]));
+  const prep = (a) => {
+    const text = [a.intro, ...(a.steps || []).map((s, i) => `${i + 1}. ${s}`), ...(a.tips || []).map((t) => `Tip: ${t}`)].join('\n');
+    return { ...a, text, words: words(`${a.title} ${a.title} ${a.title} ${a.keywords || ''} ${a.keywords || ''} ${text}`) };
+  };
   helpCache = {
     sections,
-    articles: mod.ARTICLES.map((a) => {
-      const text = [a.intro, ...(a.steps || []).map((s, i) => `${i + 1}. ${s}`), ...(a.tips || []).map((t) => `Tip: ${t}`)].join('\n');
-      return { ...a, text, words: words(`${a.title} ${a.title} ${a.title} ${a.keywords || ''} ${a.keywords || ''} ${text}`) };
-    }),
+    articles: mod.ARTICLES.filter((a) => !a.orgs || a.orgs.includes('mountain')).map(prep),
+    // A municipality reads Help as its Help screen shows it (2026.11.20): only the articles for a municipality, in its own
+    // words (help-content.js MUNI_TEXT and MUNI_WORDS).
+    muniArticles: mod.ARTICLES.filter((a) => { const s = sections.get(a.app); return (!s || mod.muniOk(s, s.key)) && (!a.orgs || a.orgs.includes('municipality')); }).map((a) => prep(mod.forMuni(a))),
   };
   return helpCache;
 }
@@ -42,12 +46,12 @@ function words(s) { return String(s).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').
 const roleOk = (who, role) => who == null || ['owner', 'manager'].includes(role) || (who.length > 0 && who.includes(role));
 
 /** The Help articles this person can read that best match the question (and the screen they are on). */
-async function findArticles(question, { role, modules, page }, k = 6) {
+async function findArticles(question, { role, modules, page, org = 'mountain' }, k = 6) {
   const h = await help();
   const q = words(question);
   const appOn = (key) => !key || ['start', 'dashboard', 'people', 'myshifts', 'settings', 'inbox'].includes(key) || modules.has(key) || (key === 'sell' && modules.has('sell'));
   const scored = [];
-  for (const a of h.articles) {
+  for (const a of (org === 'municipality' ? h.muniArticles : h.articles)) {
     const sec = h.sections.get(a.app);
     if (sec && (!appOn(a.app) || !roleOk(sec.who, role))) continue;
     if (!roleOk(a.who === undefined ? null : a.who, role)) continue;
@@ -203,9 +207,10 @@ async function ask(who, question, { history = [], extra = '' } = {}) {
   const today = todayIn(t.timezone);
   const isStaff = who.audience === 'staff';
   const plus = modules.has('assistant_plus');
-  const articles = isStaff ? await findArticles(`${question} ${history.slice(-2).map((x) => x.q).join(' ')}`, { role: who.role, modules, page: who.page }) : [];
+  const org = await modulesLib.orgTypeOf(who.tenantId);
+  const articles = isStaff ? await findArticles(`${question} ${history.slice(-2).map((x) => x.q).join(' ')}`, { role: who.role, modules, page: who.page, org }) : [];
   const helpIds = new Set(articles.map((a) => a.id));
-  const news = isStaff ? V.releasesFor({ role: who.role, modules: [...modules], org: await modulesLib.orgTypeOf(who.tenantId) }).filter((r) => V.compare(r.version, V.VERSION) <= 0).slice(0, 2) : [];
+  const news = isStaff ? V.releasesFor({ role: who.role, modules: [...modules], org }).filter((r) => V.compare(r.version, V.VERSION) <= 0).slice(0, 2) : [];
   const ctx = { tenantId: who.tenantId, role: who.role, modules, today };
   const toolList = isStaff && plus ? tools.toolsFor(ctx) : [];
   const model = toolList.length ? config.assistant.dataModel : config.assistant.model;
@@ -257,7 +262,7 @@ async function ask(who, question, { history = [], extra = '' } = {}) {
   const h = await help();
   return {
     id: r.insertId, answer, unsure: shaped.unsure, looked_up: used.map((u) => u.tool),
-    links: shaped.links.map((l) => (l.help ? { kind: 'help', id: l.help, label: (h.articles.find((a) => a.id === l.help) || {}).title, href: `#/help/${l.help}` } : { kind: 'go', href: l.go, label: l.label })),
+    links: shaped.links.map((l) => (l.help ? { kind: 'help', id: l.help, label: ((org === 'municipality' ? h.muniArticles : h.articles).find((a) => a.id === l.help) || {}).title, href: `#/help/${l.help}` } : { kind: 'go', href: l.go, label: l.label })),
   };
 }
 

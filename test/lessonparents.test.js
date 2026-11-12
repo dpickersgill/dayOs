@@ -241,7 +241,11 @@ test('the family lesson page works only with its link, and shows safety details 
   const row = (await q('SELECT photo_ok, text_ok, pickup FROM lesson_bookings WHERE id = ?', [D.fam.booking]))[0];
   assert.deepEqual([row.photo_ok, row.text_ok, row.pickup], [1, 0, 'Aunt Sue']);
   // check-in opens on the lesson day, 90 minutes before the start
-  const soon = await lesson(1, {});
+  // An hour from now, or, late in the evening, a lesson that started at 10 PM, so it is always today's (check-in is for
+  // the lesson day only) whatever the hour the test runs.
+  const nyNow = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const nyMin = Number(nyNow.hour) * 60 + Number(nyNow.minute);
+  const soon = await lesson(nyMin >= 22 * 60 ? -(nyMin - 22 * 60) / 60 : 1, {});
   const s2 = await personAndBooking(soon, 'Ola');
   assert.equal((await pub('GET', `/lesson/${s2.token}`)).body.checkin_open, true);
   const F = require('../src/lib/lessonfamily');

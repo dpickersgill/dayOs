@@ -1,7 +1,7 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
 import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label, backTo, hashParam, isMuni, orgWord } from '../ui.js';
 import { get, post, session } from '../api.js';
-import { SECTIONS, ARTICLES, MUNI_TEXT, articleById as baseArticle } from '../help-content.js';
+import { SECTIONS, ARTICLES, MUNI_TEXT, MUNI_SECTIONS, MUNI_WORDS, articleById as baseArticle } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
 // A section's app is its key, or its module when the screen has another name (Work orders: Assets and fleet).
@@ -9,18 +9,6 @@ const appOn = (key, s) => ALWAYS_ON.includes(key) || !ctx.me.modules || ctx.me.m
 const roleOk = (who) => who === null || who === undefined || can(...who);
 // The municipal edition (muni release 1): a section or article for one kind of tenant has orgs. A municipality sees only
 // the sections that apply to it; a ski area never sees a municipal one.
-const MUNI_SECTIONS = ['start', 'dashboard', 'inbox', 'myshifts', 'settings', 'documents', 'messages', 'workforce', 'assets'];
-// The shared articles were written for ski areas. A municipality reads them in its own words: its own kind of equipment,
-// and "municipality" where they say "mountain" (Settings, Municipality details, is the same screen).
-const MUNI_WORDS = [
-  [/\{mountain\}/g, '{organization}'], // the Messages merge field a municipality uses (2026.11.20)
-  [/lift part, snow gun and building system/g, 'pump, valve, truck and building system'],
-  [/fleet, lift parts, snowmaking, buildings and equipment/g, 'fleet, pumps and stations, buildings and equipment'],
-  [/\b(?:Mountain|mountain) time\b/g, 'local time'],
-  [/\bmountain(?=['\u2019]s\b)/g, 'municipality'], [/\bMountain(?=['\u2019]s\b)/g, 'Municipality'],
-  [/\bmountains\b/g, 'municipalities'], [/\bMountains\b/g, 'Municipalities'],
-  [/\bmountain\b/g, 'municipality'], [/\bMountain\b/g, 'Municipality'],
-];
 /** Help words for the signed-in organization: unchanged for a ski area, municipal words for a municipality. */
 export function says(text) {
   if (!isMuni() || typeof text !== 'string') return text;

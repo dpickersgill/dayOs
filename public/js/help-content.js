@@ -1672,6 +1672,21 @@ export const ARTICLES = [
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
 
+// The sections a municipality sees when they have no orgs of their own, and the words swapped in shared articles (moved
+// here from views/help.js in 2026.11.20 so the assistant reads Help the same way; views/help.js says()).
+export const MUNI_SECTIONS = ['start', 'dashboard', 'inbox', 'myshifts', 'settings', 'documents', 'messages', 'workforce', 'assets'];
+// The shared articles were written for ski areas. A municipality reads them in its own words: its own kind of equipment,
+// and "municipality" where they say "mountain" (Settings, Municipality details, is the same screen).
+export const MUNI_WORDS = [
+  [/\{mountain\}/g, '{organization}'], // the Messages merge field a municipality uses (2026.11.20)
+  [/lift part, snow gun and building system/g, 'pump, valve, truck and building system'],
+  [/fleet, lift parts, snowmaking, buildings and equipment/g, 'fleet, pumps and stations, buildings and equipment'],
+  [/\b(?:Mountain|mountain) time\b/g, 'local time'],
+  [/\bmountain(?=['\u2019]s\b)/g, 'municipality'], [/\bMountain(?=['\u2019]s\b)/g, 'Municipality'],
+  [/\bmountains\b/g, 'municipalities'], [/\bMountains\b/g, 'Municipalities'],
+  [/\bmountain\b/g, 'municipality'], [/\bMountain\b/g, 'Municipality'],
+];
+
 // A municipality reads some shared articles in its own words (2026.11.20): where an article was written around lifts,
 // patrol, lessons or guests. views/help.js lays these over the article for a municipality. A list replaces the article's
 // list; an object changes the items by number (from 0) and null leaves one out. Words like "mountain" are swapped for
@@ -1772,3 +1787,17 @@ export const MUNI_TEXT = {
     intro: 'Owners and managers are asked after signing in to add a passkey, until they have two.',
   },
 };
+
+/**
+ * An article as a municipality reads it: MUNI_TEXT laid over it, then the word swaps (views/help.js and the assistant,
+ * src/lib/assistant.js, both use this).
+ */
+export function forMuni(a) {
+  if (!a) return a;
+  const overlay = (list, o) => (!o ? list : Array.isArray(o) ? o : (list || []).map((t, i) => (i in o ? o[i] : t)).filter((t) => t !== null));
+  const words = (t) => (typeof t === 'string' ? MUNI_WORDS.reduce((x, [re, to]) => x.replace(re, to), t) : t);
+  const m = MUNI_TEXT[a.id] || {};
+  return { ...a, title: words(m.title || a.title), intro: words(m.intro || a.intro), steps: overlay(a.steps, m.steps)?.map(words), tips: overlay(a.tips, m.tips)?.map(words) };
+}
+/** Is this section or article for a municipality (its own orgs, else one of the shared sections)? */
+export const muniOk = (x, sectionKey) => (x.orgs ? x.orgs.includes('municipality') : MUNI_SECTIONS.includes(sectionKey));

@@ -5,7 +5,10 @@
 //   intakeChecks       on a new request: what is already open on the block, and a caller's earlier requests
 //   requestChecks      on an open request: the same, for one that came in from the public page
 import { get, post } from '../api.js';
-import { h, clear, button, field, input, select, state, can, fmtDateTime, fmtDate, toast, fail } from '../ui.js';
+import { h, clear, button, field, input, select, state, can, fmtDateTime, fmtDate, fmtDay, fmtTime, todayStr, toast, fail } from '../ui.js';
+
+// A break in another year shows its year (2026.11.20).
+const breakWhen = (s) => (s && String(s).slice(0, 4) !== todayStr().slice(0, 4) ? `${fmtDay(s)}, ${fmtTime(s)}` : fmtDateTime(s));
 
 const debounce = (fn, ms = 250) => { let t = null; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
@@ -56,7 +59,7 @@ export function utilityPanel(f) {
     const b = f.main_breaks;
     return h('section', { class: 'stack tight' }, h('h3', null, 'Breaks'),
       h('p', null, b.total ? `${b.total} recorded, ${b.in_5_years} in the last 5 years.` : 'No breaks recorded.', b.in_5_years > 2 ? h('span', null, ' ', state('Raises its condition', 'warn')) : null),
-      b.list.length ? h('ul', { class: 'plain rows' }, b.list.slice(0, 8).map((x) => h('li', { class: 'spread' }, h('span', null, fmtDateTime(x.broke_at), x.boil_water ? ' (boil water)' : '', x.status === 'open' ? h('span', null, ' ', state('Open', 'warn')) : null),
+      b.list.length ? h('ul', { class: 'plain rows' }, b.list.slice(0, 8).map((x) => h('li', { class: 'spread' }, h('span', null, breakWhen(x.broke_at), x.boil_water ? ' (boil water)' : '', x.status === 'open' ? h('span', null, ' ', state('Open', 'warn')) : null),
         h('a', { class: 'btn small', href: `#/water?break=${x.id}` }, 'Open')))) : null,
       can('staff') ? h('p', null, h('a', { class: 'btn small', href: `#/water?new=1&main=${f.id}` }, 'Record a main break')) : null);
   }

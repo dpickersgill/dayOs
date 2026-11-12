@@ -1060,6 +1060,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .top-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .top-brand strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-brand .brand-mark { width: auto; height: 26px; }
+.top-brand .top-word { flex: none; font-weight: 700; font-size: .75rem; letter-spacing: .02em; color: var(--side-muted); }
 .top-search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; max-width: 360px; margin-left: auto; min-height: 44px; padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--side-line); background: var(--side-field); color: var(--side-muted); font: inherit; font-size: .9375rem; cursor: pointer; }
 .top-search span { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-search kbd { display: none; }

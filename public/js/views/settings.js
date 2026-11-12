@@ -12,7 +12,8 @@ const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
 // A municipality (muni release 1): the same groups, its own names, and only the pages that apply to it. The ski apps'
 // pages (Sell, Lessons, Waivers, Patrol and the rest) never show there.
 const MUNI_GROUPS = { you: 'You', mountain: 'The municipality', apps: 'Apps' };
-const MUNI_PAGES = ['profile', 'brief', 'mountain', 'team', 'billing', 'payments', 'workforce', 'messages', 'streets'];
+// No Morning brief: a municipality gets none (lib/brief.js), so its settings page is not listed (2026.11.20).
+const MUNI_PAGES = ['profile', 'mountain', 'team', 'billing', 'payments', 'workforce', 'messages', 'streets'];
 // Settings, Apps (2026.11.20): what is on and the add-ons with their prices; the owner adds or removes one. Municipalities only.
 MUNI_PAGES.push('apps');
 const MUNI_TITLES = { mountain: ['Municipality details', 'The name, phone and address residents see, and the municipality’s time zone.'], team: ['Team and logins', 'Who can sign in, and who must use two-step sign-in.'], payments: ['Payments', 'The Stripe account residents’ card payments go into.'] };

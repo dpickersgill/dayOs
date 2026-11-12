@@ -7,9 +7,12 @@
 //   #/water?new=1&main=12       a new break on main 12 (from the map's panel)
 //   #/water?break=4             one break
 import { get, post, patch, del, download } from '../api.js';
-import { h, clear, appendAll, button, field, input, select, state, table, toast, fail, formDialog, confirmDialog, dialog, empty, tabs, hashParam, isManager, val, num, fmtDateTime, nowInput } from '../ui.js';
+import { h, clear, appendAll, button, field, input, select, state, table, toast, fail, formDialog, confirmDialog, dialog, empty, tabs, hashParam, isManager, val, num, fmtDateTime as fmtDateTimeShort, fmtDay, fmtTime, todayStr, nowInput } from '../ui.js';
 import { featurePicker } from './utility-bits.js';
 import { riskState } from './asset-bits.js';
+
+// A break in another year shows its year (a main's history goes back years): "Sat, Nov 12, 2022, 4:20 AM ET" (2026.11.20).
+const fmtDateTime = (s) => (s && String(s).slice(0, 4) !== todayStr().slice(0, 4) ? `${fmtDay(s)}, ${fmtTime(s)}` : fmtDateTimeShort(s));
 
 let CAUSES = [];
 const causeWords = (k) => (CAUSES.find((c) => c.value === k) || { label: k }).label;

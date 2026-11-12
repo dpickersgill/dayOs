@@ -263,7 +263,8 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     h('div', { class: 'who-actions' }, switchBtn('btn small who-switch'), outBtn('rail-out'), whoVersion()));
   const rail = h('aside', { class: 'rail' },
     h('div', { class: 'rail-top' },
-      h('div', { class: 'brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
+      // A municipality sees the Verdynt/OS wordmark without the mountain peaks; a ski area keeps the mark (2026.11.20).
+      h('div', { class: 'brand' }, isMuni() ? null : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: '', width: '48', height: '27' }),
         h('div', { class: 'brand-text' }, h('strong', null, 'Verdynt/OS'), h('span', null, ctx.me.tenant_name))),
       search, ask, homeNav, staffHelpButton('nav-help-here')),
     nav, foot);
@@ -336,7 +337,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
   const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Quick links' }, plan.first.map(tab), more);
   const topSearch = h('button', { type: 'button', class: 'top-search', 'aria-label': 'Jump to a page' }, icon('search', 18), h('span', null, 'Jump to a page'), h('kbd', null, isMac() ? '⌘K' : 'Ctrl K'));
   const topInbox = have('inbox') ? keep('inbox', h('a', { href: '#/inbox', class: 'top-inbox', dataset: { key: 'inbox' }, 'aria-label': 'Inbox' }, icon('inbox', 22))) : null;
-  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
+  const topbar = h('header', { class: 'topbar' }, h('div', { class: 'top-brand' }, isMuni() ? h('span', { class: 'top-word' }, 'Verdynt/OS') : h('img', { class: 'brand-mark', src: '/brand/verdynt-mark.png', alt: 'Verdynt/OS', width: '53', height: '30' }), h('strong', null, ctx.me.tenant_name)), topSearch, topAsk, topInbox);
 
   /** A sheet over the page (the phone menu and All apps). build(close) returns its content. The whole sheet scrolls as one. */
   function sheet(title, cls, build) {

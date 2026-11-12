@@ -324,7 +324,9 @@ test('staff take requests by phone, at the counter and from the field; the manag
   assert.equal(seen.body.contact, null); assert.equal(seen.body.has_resident, true);
   assert.equal((await api('GET', `/requests/${id}`, { token: T.desk.token })).body.contact.name, 'Sam Ortiz');
   // When the municipality was told: a manager, for a phone report, with a reason, audited.
-  const earlier = (await api('GET', `/requests/${id}`, { token: T.manager.token })).body.reported_at.slice(0, 10);
+  // The day before at 6:15 AM: always in the past, whatever the hour the test runs.
+  const day = (await api('GET', `/requests/${id}`, { token: T.manager.token })).body.reported_at.slice(0, 10);
+  const earlier = new Date(Date.parse(`${day}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
   const at = `${earlier}T06:15`;
   is(await api('POST', `/requests/${id}/reported-at`, { token: T.desk.token, body: { reported_at: at, reason: 'Voicemail left overnight' } }), 403);
   is(await api('POST', `/requests/${id}/reported-at`, { token: T.manager.token, body: { reported_at: at, reason: '' } }), 400);
