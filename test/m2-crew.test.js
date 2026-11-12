@@ -110,7 +110,9 @@ test('on call: a weekly rotation, a swap, holidays, who is on now; managers chan
   is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: otherDept.id } }), 404, 'another municipality\'s department');
   const sewerDept = cal.body.departments.find((d) => d.name === 'Sewer');
   is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: sewerDept.id } }), 200);
-  assert.equal((await api('GET', '/workforce/oncall', { token: A.token })).body.rotations.find((r) => r.id === made.body.id).department, 'Sewer');
+  const changed = (await api('GET', '/workforce/oncall', { token: A.token })).body.rotations.find((r) => r.id === made.body.id);
+  assert.equal(changed.department, 'Sewer');
+  assert.deepEqual([changed.category_ids, changed.period_days], [[water.id], 7], 'changing the department leaves the rest as it was');
   is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: waterDept.id } }), 200);
   // A swap: Ann takes the second Tuesday and Wednesday.
   const sw = await api('POST', '/workforce/oncall/overrides', { token: A.token, body: { rotation_id: made.body.id, staff_id: staffA.ann, starts_on: rot.days[8].date, ends_on: rot.days[9].date, reason: 'swap', note: 'Dentist' } });

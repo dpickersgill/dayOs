@@ -85,7 +85,9 @@ const rotationFields = {
   active: z.boolean().optional(),
 };
 const rotationSchema = z.object(rotationFields).refine((b) => b.workday_end > b.workday_start, { message: 'The working day must end after it starts', path: ['workday_end'] });
-const rotationPatch = z.object(Object.fromEntries(Object.entries(rotationFields).map(([k, v]) => [k, v.optional()])));
+// A change sends only what changes: no defaults here, or a PATCH of the name alone would reset the categories, the turn
+// length and the hours to their defaults.
+const rotationPatch = z.object(Object.fromEntries(Object.entries(rotationFields).map(([k, v]) => [k, (v instanceof z.ZodDefault ? v.removeDefault() : v).optional()])));
 
 function rotationCols(b) {
   const out = {};
