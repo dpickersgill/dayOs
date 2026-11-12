@@ -123,7 +123,7 @@ test('main breaks: valves to shut along the main first, an urgent work order, th
   assert.equal(cand.valves[0].on_main, true);
   assert.ok(!ids.includes(hydrant.id), 'a hydrant is not a valve');
 
-  const today = todayNY();
+  const today = plus(todayNY(), -1); // yesterday: every time below has passed, whatever the hour the test runs
   const made = ok(await api('POST', '/water/main-breaks', { token: crewA.token, body: { main_id: main.id, broke_at: `${today} 06:10`, lat: LAT, lng: LNG - 0.001, location: 'In front of 214 Market Street', cause: 'corrosion',
     customers_out: 14, boil_water: false, water_off_at: `${today} 06:40`, valves: [{ valve_id: onMain.id, closed_at: `${today} 06:40`, turns: 21 }] } }), 201);
   assert.equal(made.pipe_material, 'Cast iron', 'the pipe defaults from the main');
