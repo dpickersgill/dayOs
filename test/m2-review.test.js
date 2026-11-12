@@ -109,6 +109,16 @@ test('1. money: the crew and the front desk never receive a cost, rate or total 
   const cc = await api('GET', `/assets/work-orders/${wo.id}/costs`, { token: tokens.crew1 });
   assert.equal(cc.status, 200);
   assert.ok(cc.body.labor_hours > 0, 'the crew sees the hours');
+  // Routing ignores case and decodes escapes, so the filter must too: no other spelling of the path gets the amounts.
+  const variants = [`/ASSETS/register/${asset.id}`, `/Assets/register/${asset.id}`, `/%61ssets/register/${asset.id}`, `/Assets/work-orders/${wo.id}/costs`, '/OPS/work-orders', '/Assets/parts', '/Assets/overview'];
+  const slipped = [];
+  for (const who of ['crew1', 'frontdesk']) {
+    for (const v of variants) {
+      const r = await api('GET', v, { token: tokens[who] });
+      if (r.status === 200 && r.body && typeof r.body === 'object') for (const m of moneyIn(r.body)) slipped.push(`${who} ${v} ${m}`);
+    }
+  }
+  assert.deepEqual(slipped.slice(0, 20), [], 'no other spelling of a path gets past the money filter');
 });
 
 test('3. request numbers: 40 public reports at once across two municipalities all succeed, each numbered once and in order', async () => {

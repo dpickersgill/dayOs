@@ -42,8 +42,17 @@ function scrubCsv(text) {
   return lines.map((line) => (line === '' ? line : cells(line).filter((_, i) => !drop.has(i)).map(q).join(','))).join(s.includes('\r\n') ? '\r\n' : '\n');
 }
 
+// Express routes without regard to case (and decodes %xx when matching), so compare the same way: "/ASSETS/..." and
+// "/%61ssets/..." reach the asset routes and must be filtered too (2026.11.20 re-review).
+function normalPath(raw) {
+  let p = String(raw || '');
+  try { p = decodeURIComponent(p); } catch { /* a malformed escape: Express will 400 it; compare the raw form */ }
+  return p.toLowerCase().replace(/\/{2,}/g, '/');
+}
+
 function noMoney(req, res, next) {
-  if (!req.auth || MANAGERS.includes(req.auth.role) || !PREFIXES.some((p) => req.path === p || req.path.startsWith(`${p}/`) || req.path.startsWith(`${p}?`) || req.path.startsWith(`${p}.`))) return next();
+  const path = normalPath(req.path);
+  if (!req.auth || MANAGERS.includes(req.auth.role) || !PREFIXES.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(`${p}?`) || path.startsWith(`${p}.`))) return next();
   const json = res.json.bind(res);
   res.json = (body) => json(scrub(body));
   const send = res.send.bind(res);
@@ -55,4 +64,4 @@ function noMoney(req, res, next) {
   next();
 }
 
-module.exports = { noMoney, scrub, scrubCsv, MONEY_KEY };
+module.exports = { noMoney, scrub, scrubCsv, MONEY_KEY, normalPath };
