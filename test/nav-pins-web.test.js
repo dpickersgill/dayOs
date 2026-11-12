@@ -182,6 +182,19 @@ test('the star pins the page you are on, with its tab and filters, and a second 
   ok(await api('DELETE', '/me/nav', { token: T.counter }));
 });
 
+test('a pins.js that starts after the first page change reads the page from frame.page', { skip }, async () => {
+  document.body.replaceChildren();
+  apiMod.session.token = T.counter;
+  ui.ctx.me = ok(await api('GET', '/auth/me', { token: T.counter }));
+  window.history.replaceState(null, '', `${window.location.pathname}#/dashboard`);
+  const frame = fakeFrame();
+  frame.page = { key: 'sell', href: 'sell', label: 'Sell' };
+  pins.start(frame);
+  const star = frame.slots.star.querySelector('.pin-star');
+  assert.equal(star.getAttribute('aria-pressed'), 'true', 'Sell is pinned, though the address says Today');
+  assert.equal(frame.palette()[0].title, 'Unpin this page');
+});
+
 test('the row menu: Pin or Unpin at the pointer, with the keyboard, and focus goes back', { skip }, async () => {
   const { frame } = await open('staff');
   const row = document.createElement('a'); row.href = '#/documents'; row.textContent = 'Documents'; document.body.append(row);
@@ -257,7 +270,8 @@ test('Edit: reorder with the arrows, rename, unpin, and reset to the role\'s men
   assert.deepEqual(hrefs(frame.last().pins), ['gate', 'conditions', 'lostfound']);
   assert.equal(document.activeElement.getAttribute('aria-label'), 'Move Gate down', 'Gate is first now and cannot go up, so the keyboard is on its other arrow');
   assert.equal(document.querySelector('.pins-edit ~ [role=status], .dialog [role=status]').textContent, 'Gate moved up: now 1 of 3');
-  click(btn('Gate', 'down')); click(btn('Gate', 'down'));
+  await settle(); // the server's answer arrives between presses, as it does for a person
+  click(btn('Gate', 'down')); await settle(); click(btn('Gate', 'down'));
   assert.deepEqual(rowNames(), ['Mountain status', 'Lost and found', 'Gate']);
   await settle();
   assert.deepEqual(hrefs((await serverNav('staff')).pins), ['conditions', 'lostfound', 'gate']);

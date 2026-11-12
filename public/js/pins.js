@@ -73,7 +73,9 @@ export function start(frame) {
   let state = { pins: first.pins, bar: first.bar || null, custom: Boolean(first.custom) };
   let kept = state;
   let standard = null;
-  let page = { key: appOf(hrefOfHash(location.hash)), href: hrefOfHash(location.hash), label: String(document.title || '').split(' · ')[0] };
+  // The page on screen: the frame's last nav:page when this module arrives after it, else the address and title.
+  let page = frame.page && typeof frame.page.href === 'string' ? { key: frame.page.key || appOf(frame.page.href), href: hrefOfHash(frame.page.href), label: frame.page.label || '' }
+    : { key: appOf(hrefOfHash(location.hash)), href: hrefOfHash(location.hash), label: String(document.title || '').split(' · ')[0] };
   let editor = null; // the open Edit dialog: { redraw(focus), close() }
   let menu = null; // the open row menu: { close() }
   // A shared counter computer and the ski area's login keep the role's menu; nothing to change is offered there.
@@ -101,7 +103,8 @@ export function start(frame) {
         if (Array.isArray(out.standard)) standard = out.standard;
         // The server's copy is the one kept (it may have left out a pin whose app is off). Drawn again only when it
         // differs, so a name being typed in Edit is not thrown away by a save that changed nothing.
-        if (state === sent) { const differs = !same(kept, sent); state = kept; if (differs) show(); else if (ctx.me === me) me.nav = { ...kept }; }
+        // When it is the same, the objects already drawn are kept, so the rows in Edit still point at the pins in state.
+        if (state === sent) { if (same(kept, sent)) kept = sent; else { state = kept; show(); } }
       } while (again);
     } catch (err) {
       again = false;
@@ -237,13 +240,13 @@ export function start(frame) {
       renaming = null;
       dlg.setDirty(false);
       if (!name || name === p.label) { redraw(`[data-id="${p.id}"] [data-act=rename]`); return; }
-      change(state.pins.map((x) => (x === p ? { ...x, label: name } : x)), state.bar, `[data-id="${p.id}"] [data-act=rename]`);
+      change(state.pins.map((x) => (x.id === p.id ? { ...x, label: name } : x)), state.bar, `[data-id="${p.id}"] [data-act=rename]`);
       say(`Renamed to ${name}`);
     }
     function move(p, by) {
-      const i = state.pins.indexOf(p);
+      const i = state.pins.findIndex((x) => x.id === p.id);
       const j = i + by;
-      if (j < 0 || j >= state.pins.length) return;
+      if (i < 0 || j < 0 || j >= state.pins.length) return;
       change(moved(state.pins, i, j), state.bar, [`[data-id="${p.id}"] [data-act=${by < 0 ? 'up' : 'down'}]`, `[data-id="${p.id}"] [data-act=${by < 0 ? 'down' : 'up'}]`]);
       say(`${p.label} moved ${by < 0 ? 'up' : 'down'}: now ${j + 1} of ${state.pins.length}`);
     }
