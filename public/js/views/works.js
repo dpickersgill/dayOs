@@ -6,6 +6,8 @@
 // 2026.11.20 (crew): ?system=water|sewer|stormwater (work orders on that system's map items, from Today's cards),
 // ?who=mine|none|<staff id>, ?new=1 opens New work order; a manager picks several open ones and assigns them to a person
 // and day at once (POST /ops/work-orders/assign); the Map tab shows open work orders by priority (GET /ops/work-orders/map).
+// 2026.11.20 (assembly): every filter can come from the link, so Today's cards and the monthly report open the list
+// already filtered: ?priority=, ?source=, ?department_id=, ?fund_id=, ?street_id= (with system, who and overdue above).
 import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
@@ -63,10 +65,22 @@ export async function render(root, params = []) {
 
 // ---------------------------------------------------------------- work orders
 async function drawOrders(box, status, pick) {
-  const priority = select([['', 'Any priority'], ...PRIORITIES], '', { 'aria-label': 'Priority' });
-  const whoWanted = hashParam('who') || '';
-  const who = select([['', 'Anyone'], ...(ctx.me.staff_id ? [['mine', 'Assigned to me']] : []), ['none', 'Not assigned'], ...pick.staff.map((s) => [s.id, staffName(s)])], whoWanted, { 'aria-label': 'Assigned to' });
-  const source = select([['', 'From anywhere'], ...SOURCES], '', { 'aria-label': 'Where it came from' });
+  // A value from the link counts only when it is one of the choices (an old or mistyped link shows the full list).
+  const wanted = (name, options) => { const v = hashParam(name) || ''; return options.some(([k]) => String(k) === v) ? v : ''; };
+  const priority = select([['', 'Any priority'], ...PRIORITIES], wanted('priority', PRIORITIES), { 'aria-label': 'Priority' });
+  const whoOptions = [...(ctx.me.staff_id ? [['mine', 'Assigned to me']] : []), ['none', 'Not assigned'], ...pick.staff.map((s) => [s.id, staffName(s)])];
+  const who = select([['', 'Anyone'], ...whoOptions], wanted('who', whoOptions), { 'aria-label': 'Assigned to' });
+  const source = select([['', 'From anywhere'], ...SOURCES], wanted('source', SOURCES), { 'aria-label': 'Where it came from' });
+  // A municipality's departments, funds and streets (2026.11.20). The department is always offered; a fund or a street
+  // only when the link asks for one, so the row stays short.
+  const books = pick.books && pick.books.is_muni ? pick.books : null;
+  const bookSelect = (name, all, list, text) => {
+    const options = (list || []).filter((x) => x.active !== false || String(x.id) === hashParam(name)).map((x) => [x.id, x.name]);
+    return options.length ? select([['', all], ...options], wanted(name, options), { 'aria-label': text }) : null;
+  };
+  const department = books ? bookSelect('department_id', 'Any department', books.departments, 'Department') : null;
+  const fund = books && hashParam('fund_id') ? bookSelect('fund_id', 'Any fund', books.funds, 'Fund') : null;
+  const street = books && hashParam('street_id') ? bookSelect('street_id', 'Any street', books.streets, 'Street') : null;
   const systems = SYSTEMS.filter(([k]) => moduleOn(k));
   const system = select([['', 'Any system'], ...systems], systems.some(([k]) => k === hashParam('system')) ? hashParam('system') : '', { 'aria-label': 'System' });
   const overdue = h('input', { type: 'checkbox', name: 'overdue' });
@@ -84,6 +98,7 @@ async function drawOrders(box, status, pick) {
     if (who.value === 'mine') q.set('mine', '1'); else if (who.value) q.set('assigned_staff_id', who.value);
     if (source.value) q.set('source', source.value);
     if (system.value) q.set('system', system.value);
+    for (const [k, el] of [['department_id', department], ['fund_id', fund], ['street_id', street]]) if (el && el.value) q.set(k, el.value);
     if (status === 'open' && overdue.checked) q.set('overdue', '1');
     return q;
   };
@@ -111,7 +126,7 @@ async function drawOrders(box, status, pick) {
     button('Download spreadsheet', () => { const q = filters(); if (contacts.checked) q.set('contacts', '1'); return download(`/ops/work-orders/export?${q}`, `work-orders-${todayStr()}.csv`); }, { small: true }),
     isManager() ? h('label', { class: 'check', title: 'Logged with your name' }, contacts, ' Include contact details (logged)') : null,
     h('span', { class: 'muted small' }, 'Work orders are public records. The spreadsheet leaves out residents’ house numbers and their own words.'));
-  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source, systems.length ? system : null,
+  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source, systems.length ? system : null, department, fund, street,
     status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null, range ? range.el : null), body, bar, ...(exportRow ? [exportRow] : []));
   async function load() {
     const q = filters();
@@ -138,7 +153,7 @@ async function drawOrders(box, status, pick) {
       { head: '', actions: true, cell: (w) => button('Open', () => openOrder(w.id, pick, load), { small: true, label: `Open ${w.title}` }) },
     ], data));
   }
-  for (const el of [priority, who, source, system, overdue]) el.addEventListener('change', load);
+  for (const el of [priority, who, source, system, department, fund, street, overdue]) if (el) el.addEventListener('change', load);
   await load();
 }
 

@@ -1,7 +1,7 @@
 // Help: short how-to articles for each app, searchable, shown only for what this person can use.
 import { h, clear, ctx, can, isManager, schoolCan, input, empty, errorBox, state, label, backTo, hashParam, isMuni, orgWord } from '../ui.js';
 import { get, post, session } from '../api.js';
-import { SECTIONS, ARTICLES, articleById } from '../help-content.js';
+import { SECTIONS, ARTICLES, MUNI_TEXT, articleById as baseArticle } from '../help-content.js';
 
 const ALWAYS_ON = ['start', 'dashboard', 'people', 'myshifts', 'settings'];
 // A section's app is its key, or its module when the screen has another name (Work orders: Assets and fleet).
@@ -13,6 +13,7 @@ const MUNI_SECTIONS = ['start', 'dashboard', 'inbox', 'myshifts', 'settings', 'd
 // The shared articles were written for ski areas. A municipality reads them in its own words: its own kind of equipment,
 // and "municipality" where they say "mountain" (Settings, Municipality details, is the same screen).
 const MUNI_WORDS = [
+  [/\{mountain\}/g, '{organization}'], // the Messages merge field a municipality uses (2026.11.20)
   [/lift part, snow gun and building system/g, 'pump, valve, truck and building system'],
   [/fleet, lift parts, snowmaking, buildings and equipment/g, 'fleet, pumps and stations, buildings and equipment'],
   [/\b(?:Mountain|mountain) time\b/g, 'local time'],
@@ -25,13 +26,20 @@ export function says(text) {
   if (!isMuni() || typeof text !== 'string') return text;
   return MUNI_WORDS.reduce((t, [re, to]) => t.replace(re, to), text);
 }
+// A municipality reads some shared articles in its own words (help-content.js MUNI_TEXT, 2026.11.20).
+const overlay = (list, o) => (!o ? list : Array.isArray(o) ? o : (list || []).map((t, i) => (i in o ? o[i] : t)).filter((t) => t !== null));
+const forOrg = (a) => {
+  const m = a && isMuni() ? MUNI_TEXT[a.id] : null;
+  return m ? { ...a, title: m.title || a.title, intro: m.intro || a.intro, steps: overlay(a.steps, m.steps), tips: overlay(a.tips, m.tips) } : a;
+};
+const articleById = (id) => forOrg(baseArticle(id));
 const orgOk = (x) => (x.orgs ? x.orgs.includes(isMuni() ? 'municipality' : 'mountain') : !isMuni() || MUNI_SECTIONS.includes(x.key || x.app));
 
 const sectionOf = (key) => SECTIONS.find((s) => s.key === key);
 const sectionOpen = (s) => orgOk(s) && appOn(s.key, s) && roleOk(s.who);
 // A school director sees the ski school's manager articles too.
 const articleOpen = (a) => { const s = sectionOf(a.app); return Boolean(s) && sectionOpen(s) && (!a.orgs || a.orgs.includes(isMuni() ? 'municipality' : 'mountain')) && (roleOk(a.who) || (a.app === 'school' && schoolCan('director'))); };
-const visible = () => ARTICLES.filter(articleOpen);
+const visible = () => ARTICLES.filter(articleOpen).map(forOrg);
 
 const words = (text) => String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 const haystack = (a) => `${a.title} ${a.keywords || ''} ${a.intro} ${(a.steps || []).join(' ')} ${(a.tips || []).join(' ')} ${(sectionOf(a.app) || {}).label || ''}`.toLowerCase();

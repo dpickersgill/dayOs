@@ -69,6 +69,10 @@ const orgOf = (org) => (org === 'municipality' ? 'municipality' : 'mountain');
 const systemFor = (k, org) => (orgOf(org) === 'municipality' && k.muni_system ? k.muni_system : k.system);
 /** A kind's name for this kind of tenant ("Road" for a municipality, "Road or cat track" for a ski area). */
 const labelFor = (k, org) => (orgOf(org) === 'municipality' && k.muni_label ? k.muni_label : k.label);
+/** The same by the kind's key; an unknown key is its own name. */
+const kindLabel = (key, org) => { const k = kindOf(key); return k ? labelFor(k, org) : key; };
+/** Does any kind have another name for a municipality (so a caller without the tenant's kind needs to look it up)? */
+const hasMuniLabel = (key) => Boolean((kindOf(key) || {}).muni_label);
 
 /**
  * May this tenant put this kind on its map? org: 'mountain' or 'municipality'; on: the apps that are on (a Set or array).
@@ -209,5 +213,5 @@ function geojson(features, mountain) {
   };
 }
 
-module.exports = { KINDS, SYSTEMS, GROUPS, KIND_KEYS, kindOf, systemFor, labelFor, inchesOf, valveTurns, kindRefusal, kindsFor, distance, lengthOf, areaOf, anchorOf, cleanPoints, shape, geojson,
+module.exports = { kindLabel, hasMuniLabel, KINDS, SYSTEMS, GROUPS, KIND_KEYS, kindOf, systemFor, labelFor, inchesOf, valveTurns, kindRefusal, kindsFor, distance, lengthOf, areaOf, anchorOf, cleanPoints, shape, geojson,
   CONDITIONS, CRITICALITIES, OWNERSHIP, RISK_LEVELS, RISK_MIN, riskOf };

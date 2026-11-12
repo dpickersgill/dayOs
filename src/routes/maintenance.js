@@ -288,7 +288,7 @@ router.get('/work-orders/:id', async (req, res) => {
   if (w.map_feature_id) {
     const f = await one(pool, 'SELECT points FROM map_features WHERE tenant_id = ? AND id = ?', [req.auth.tenantId, w.map_feature_id]);
     const MF = require('../lib/mapfeatures');
-    Object.assign(w, { feature_points: f ? JSON.parse(f.points) : null, feature_lat: Number(w.feature_lat), feature_lng: Number(w.feature_lng), feature_kind_label: (MF.kindOf(w.feature_kind) || { label: w.feature_kind }).label });
+    Object.assign(w, { feature_points: f ? JSON.parse(f.points) : null, feature_lat: Number(w.feature_lat), feature_lng: Number(w.feature_lng), feature_kind_label: MF.kindLabel(w.feature_kind, MF.hasMuniLabel(w.feature_kind) ? (await one(pool, 'SELECT org_type FROM tenants WHERE id = ?', [req.auth.tenantId])).org_type : null) });
   }
   const notes = await rows(pool, "SELECT n.id, n.at, n.body, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), u.email, u.username) AS author FROM work_order_notes n LEFT JOIN users u ON u.tenant_id = n.tenant_id AND u.id = n.user_id LEFT JOIN people p ON p.tenant_id = u.tenant_id AND p.id = u.person_id WHERE n.tenant_id = ? AND n.work_order_id = ? ORDER BY n.id", [req.auth.tenantId, id]);
   res.json({ ...w, notes });

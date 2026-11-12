@@ -106,11 +106,14 @@ function defaultView() {
 }
 
 // ---------------------------------------------------------------- sign in
+// The sign-in page's drawing (2026.11.20): soft contour lines, the same for a ski area and a municipality (it used to
+// be a mountain ridgeline). Decoration only.
 function ridge() {
-  const pts = '0,150 40,120 70,132 120,70 150,96 190,40 230,88 262,64 300,112 340,92 380,128 420,100 460,140 500,118 500,170 0,170';
-  const el = svg('svg', { class: 'ridge', viewBox: '0 0 500 170', preserveAspectRatio: 'xMidYMax slice', role: 'img', 'aria-label': 'Mountain ridgeline' });
-  el.append(svg('polygon', { points: pts, fill: '#1d4452' }));
-  el.append(svg('polyline', { points: pts.split(' ').slice(0, -2).join(' '), fill: 'none', stroke: '#ffffff', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  const el = svg('svg', { class: 'ridge', viewBox: '0 0 500 170', preserveAspectRatio: 'xMidYMax slice', 'aria-hidden': 'true', focusable: 'false' });
+  el.append(svg('path', { d: 'M0,120 C90,96 170,140 260,116 C350,92 420,124 500,104 L500,170 L0,170 Z', fill: '#1d4452' }));
+  for (const [d, o] of [['M0,120 C90,96 170,140 260,116 C350,92 420,124 500,104', 0.9], ['M0,92 C100,70 180,112 270,90 C360,68 430,98 500,80', 0.45], ['M0,66 C110,46 190,84 280,64 C370,44 440,72 500,56', 0.25]]) {
+    el.append(svg('path', { d, fill: 'none', stroke: '#ffffff', 'stroke-opacity': o, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+  }
   return el;
 }
 

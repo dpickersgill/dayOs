@@ -82,11 +82,11 @@ export const ARTICLES = [
     intro: 'Share sends a link to a record. The person clicks it in their Inbox and the record opens.',
     steps: ['Open the record: a patrol case, customer, order, asset, work order, waiver or document.', 'Choose Share, tick the people or groups, and add a note if you like.', 'Choose Send.'],
     tips: ['You can also paste a record\'s address from the browser\'s address bar into a message. It turns into a link.', 'Each person sees only what their own access lets them open. Someone without patrol access sees "Patrol case: You cannot open this", never the case itself.', 'A link to a record that was removed shows "No longer there".'], related: ['inbox-start'] },
-  { id: 'today', app: 'dashboard', title: 'Read the Today page', keywords: 'home dashboard alerts tiles overview morning board',
+  { id: 'today', app: 'dashboard', orgs: ['mountain'], title: 'Read the Today page', keywords: 'home dashboard alerts tiles overview morning board',
     intro: 'Today is the home page: a band of alerts across the top, the morning board, and a grid of tiles under it.',
     steps: ['Read the alerts band first. "Blocks opening" is the most urgent: a lift that failed its inspection or is on a wind hold. "Needs a look" covers overdue rentals, open patrol cases and unfilled shifts.', 'The morning board shows the whole mountain on one card: each lift with why it is open, on hold or cannot open; how many patrollers are on duty and how many runs they have checked, with any run on hold and why; tonight\'s grooming; machines and lifts due for service; and three numbers along the bottom: unfilled shifts, open work orders and open patrol cases. Press a heading or a number to open that page.', 'Each tile shows one part of the day. Links inside a tile open the page it came from.', 'Managers can pick another date in the Day box to look at a past or future day. Everyone else sees today.'],
     tips: ['You only get tiles your role may see, for apps your mountain has on.', 'Don\'t see the morning board? You chose your own tiles before it existed: press Customize, then + Morning board.', 'Wall screen shows the morning board large for the lodge or patrol room, refreshed every minute.'], related: ['today-custom', 'today-notes', 'today-wall'] },
-  { id: 'morning-brief', app: 'dashboard', title: 'The morning brief', keywords: 'brief morning summary 6 am email phone alert push daily report operations patrol director ski school director wind hold forecast expected visitors assistant',
+  { id: 'morning-brief', app: 'dashboard', orgs: ['mountain'], title: 'The morning brief', keywords: 'brief morning summary 6 am email phone alert push daily report operations patrol director ski school director wind hold forecast expected visitors assistant',
     who: ['patrol', 'instructor'],
     intro: 'A short read at 6:00 AM mountain time on days the calendar says you are open, and the day before opening day: the weather, what is booked, and what needs attention. Every plan has it.',
     steps: ['Owners, managers and the GM get the operations brief: weather and wind holds, tickets sold ahead and the expected visits, yesterday\'s revenue, lessons, lift problems, the terrain park, shifts, yesterday\'s patrol case counts and anything out of the ordinary.', 'The patrol director gets the patrol brief: weather and wind holds, lift problems, the park, patrol shifts and yesterday\'s case counts by area. The ski school Director gets the school brief: weather, lessons against instructors scheduled, classes over their age ratio and school shifts.', 'It starts with three summary lines, then short sections, then up to three suggested actions. Each action opens the screen that does it.', 'Missed it? Press Morning brief at the top of Today. It shows today\'s brief and the 7 before it.', 'Turn it on or off, and choose email, phone alert or both, in Settings, Morning brief. Owners and managers can turn it on for other patrol leaders and school supervisors there too.'],
@@ -1671,3 +1671,103 @@ export const ARTICLES = [
 ];
 
 export const articleById = (id) => ARTICLES.find((a) => a.id === id) || null;
+
+// A municipality reads some shared articles in its own words (2026.11.20): where an article was written around lifts,
+// patrol, lessons or guests. views/help.js lays these over the article for a municipality. A list replaces the article's
+// list; an object changes the items by number (from 0) and null leaves one out. Words like "mountain" are swapped for
+// "municipality" afterwards, as for every shared article (help.js says()).
+export const MUNI_TEXT = {
+  'getting-around': {
+    intro: 'The menu on the left picks the app. Tabs on the page pick the part of the app. On a phone, the bar at the bottom starts with the screen you open on (Today or My shifts), then your first apps and Menu.',
+    steps: { 1: 'Under it is your menu: the apps for your job. Pick one. The app you are in is highlighted, and the top of the page shows where you are, such as Work orders / Done.', 2: 'Below your menu, All apps holds everything else you may open, in three groups that fold: Residents, Public works and Back office. Press a group to open or close it.', 3: 'Pick a tab on the page, such as Open, Done, Map and Service plans in Work orders. On a phone the tabs slide sideways. Each tab has its own address, so Back returns to the tab you were on.' },
+    tips: { 1: 'Owners and managers have a short menu too, with the apps they use most. Everything else is under All apps.', 2: 'Filters, such as Any priority or Overdue only on Work orders, narrow the list; they do not change the page.', 5: 'Your menu can follow your position too, from the positions in Staff and schedule.', 6: null },
+  },
+  jump: {
+    intro: 'The Jump to box opens any page you can use, by typing a few letters. It finds every app you may open, including the ones under All apps, and the tabs inside them, such as Ledger in Requests or Service plans in Work orders.',
+    steps: { 1: 'Type part of a page name or a word you would look for, such as "hydrant" or "payroll". Old names work too, such as Account or Billing.' },
+    tips: { 1: 'Jump to also opens All apps, switches between light and dark, and signs you out.', 2: 'A tab inside an app shows the app it is in, such as Ledger in Requests. You only see the tabs you may open.', 3: 'Type "on call" for On call, or "overtime" for Overtime, both in Staff and schedule.' },
+  },
+  'missing-app': {
+    steps: { 0: 'Look under All apps, below your menu (on a phone, in Menu). Open each group: Residents, Public works and Back office.' },
+    tips: { 0: 'A municipality cannot turn off Today, Inbox, Calendar, My shifts, Settings or Help.', 2: 'Billing is in Settings. The owner adds or removes add-ons such as Water or Buildings under Settings, Apps and add-ons.', 3: null, 4: null },
+  },
+  ask: {
+    intro: 'Ask, in the menu under Jump to, opens a panel beside any screen. Type a question in your own words and it answers from these Help articles and your municipality’s own setup.',
+    tips: { 1: 'What it sees: your question, the Help articles, your municipality’s setup and, with the AI Operations add-on, what your role can already see on screen. It never sees residents’ phone numbers or emails.', 2: 'With the AI Operations add-on it can also answer questions about today, such as who is working. It only looks up what your role can already see.' },
+  },
+  'what-moved': {
+    intro: 'Setup that used to be a tab inside an app is now in one place: Settings. The apps keep only the daily work.',
+    steps: { 0: 'On the app, press the settings button beside the title, where it has one. It opens that app’s page in Settings.' },
+    tips: { 1: null },
+  },
+  'inbox-start': { steps: { 1: 'Choose New message and tick one person, or several for a group. A group can have a name, such as Water crew.' } },
+  'inbox-share': {
+    title: 'Share a work order, request or other record',
+    steps: { 0: 'Open the record: a work order, request, asset, street notice or document.' },
+    tips: { 1: 'Each person sees only what their own access lets them open. Someone who cannot open it sees "You cannot open this", never the record itself.' },
+  },
+  'reset-rules': {
+    steps: { 1: 'A manager can reset Crew and Front desk logins, but not another manager.', 2: null, 3: null },
+    tips: { 0: 'When a login’s role or staff link was lowered in the last 24 hours, it cannot be reset, except by the owner. Whoever lowered it can never reset it.', 1: null },
+  },
+  'staff-injuries': { steps: { 1: 'Add each work injury or illness with Add a record.' } },
+  'messages-privacy-rules': {
+    tips: { 2: 'Marketing email means the messages a manager sends from Messages to people who signed up. Receipts, booking confirmations, request updates and street notices are not marketing and always go.', 3: 'A resident who unsubscribed gets no marketing email of any kind.' },
+  },
+  'closed-mountain-export': {
+    steps: { 1: 'Choose each download, such as requests, bulk pickup bookings, payments and refunds.' },
+    tips: { 1: 'Some records are kept after deletion because the law requires it: the staff injury log and the audit trail.' },
+  },
+  'assistant-setup': {
+    title: 'Set up the assistant for staff',
+    intro: 'The assistant answers staff questions from Help and your setup. The AI Operations add-on (under Settings, Billing and plan) adds questions about today’s records.',
+    steps: { 2: null, 3: null, 4: 'Press Save changes. See questions asked shows what staff wanted to know, and which ones it could not answer.' },
+    tips: { 0: null, 2: 'Add answers it keeps missing to your municipality’s details: it reads those.' },
+  },
+  'wf-people': {
+    intro: 'Each person has one page with everything about them: employee or volunteer, what they work as, certifications such as a CDL or an operator license, availability, their login, and their shifts.',
+    steps: { 4: null },
+    tips: { 1: null },
+  },
+  billing: { tips: { 1: 'After those 14 days Verdynt/OS becomes read only: everyone can sign in, see and export everything, but nothing new is booked or added, and bulk pickup stops taking payments. The time clock and the Inbox always keep working.' } },
+  terminals: {
+    intro: 'On a computer several people use, such as the front desk, each person switches in with their username and a personal PIN, so nobody shares a login.',
+    tips: { 0: 'Managers still sign in with their passkey or two-step, even on a terminal.' },
+  },
+  'settings-area': { tips: { 1: null } },
+  'role-menus': {
+    steps: { 1: 'Pick a role: Crew, Front desk, Manager or Owner. Or pick a position, such as Equipment operator, under Positions.' },
+    tips: { 5: 'A position menu is for people in that position whose role is Crew or Front desk. It is used instead of their role’s menu, and only shows the apps their role may open.', 6: 'Positions use the role’s menu until you give them one.', 7: null },
+  },
+  'two-step-rules': {
+    intro: 'Owners and managers always use a passkey or an authenticator app. The owner chooses whether everyone must too.',
+    steps: { 1: null },
+  },
+  'payments-readers': {
+    intro: 'Residents’ card payments (bulk pickup bookings online, and card readers at the front desk) go into your municipality’s own Stripe account.',
+    tips: { 0: 'Until Stripe is connected, online bulk pickup booking cannot take cards.' },
+  },
+  'status-page': { tips: { 1: null, 2: 'Notes typed on a phone without signal stay on the phone and are sent once it is back.' } },
+  'too-many-tries': {
+    intro: 'Verdynt/OS limits how often the same internet address can try some things, like wrong passwords, codes and public forms, so nobody can guess their way in. Everyone at your municipality usually shares one internet address, so the limit is for all of you together.',
+    steps: { 0: 'Wait a minute and try again. Most limits last one minute; public forms and emailed codes last up to an hour.' },
+  },
+  'texts-stop': {
+    title: 'When a resident replies STOP to a text',
+    intro: 'A resident who replies STOP to any text from Verdynt/OS gets no more texts from that number, and their record says so.',
+    steps: { 0: 'The resident replies STOP (or UNSUBSCRIBE, CANCEL, END or QUIT). They get one reply saying they will get no more texts.', 1: 'Their record changes to Opted out, from a text reply. Street notices and messages by text skip them from then on.' },
+    tips: { 0: 'A municipality with its own texting number keeps its own STOP list. On the shared number, a STOP stops texts from everyone on it to that phone.', 1: 'Staff cannot turn texts back on for a resident who replied STOP. Only the resident can, by replying START.' },
+  },
+  idle: {
+    intro: 'A tab nobody uses for 10 minutes locks itself, so a screen left open does not show residents’ details. Owners and managers with a passkey or an authenticator app see Paused instead: one touch of the passkey, or a code from the app, carries on.',
+    tips: { 0: 'Owners and managers pause after 30 minutes without use (others after 60, a shared computer after 15).' },
+  },
+  'remember-me': { tips: { 1: 'Remember me is never used on a shared terminal or on a device not marked as your own. Owners and managers can use it on their own device. If it is not allowed, you are told, and that tab signs in on its own.' } },
+  password: {
+    tips: { 0: 'Owners and managers always need a passkey or an authenticator app. Until it is set up, nothing else opens.', 5: 'A sign-in ends after 60 minutes unused (30 for owners and managers, who can carry on with a passkey or code), 15 minutes on a shared computer, 8 hours at most, and 30 minutes after you close the last tab.' },
+  },
+  'passkey-leaders': {
+    title: 'Passkeys for owners and managers',
+    intro: 'Owners and managers are asked after signing in to add a passkey, until they have two.',
+  },
+};

@@ -27,7 +27,7 @@ async function targetOf(conn, tenantId, { assetId, featureId }, lock = false) {
     LEFT JOIN ops_assets a ON a.tenant_id = f.tenant_id AND a.id = f.asset_id WHERE f.tenant_id = ? AND f.id = ?${tail}`, [tenantId, featureId]);
   if (!f) throw notFound('Map item');
   const MF = require('./mapfeatures');
-  const label = (MF.kindOf(f.kind) || { label: f.kind }).label;
+  const label = MF.kindLabel(f.kind, MF.hasMuniLabel(f.kind) ? ((await one(conn, 'SELECT org_type FROM tenants WHERE id = ?', [tenantId])) || {}).org_type : null);
   return { type: 'feature', id: Number(f.id), name: f.name || (f.tag ? `${label} ${f.tag}` : `${label} ${f.id}`), tag: f.tag, kind: f.kind, status: f.status, critical: Boolean(f.critical), criticality: f.criticality === null ? null : Number(f.criticality) };
 }
 

@@ -70,13 +70,20 @@ export async function drawOnCall(box) {
     // The order is the rotation's: picked people keep the order they were in, new ones go to the end.
     const order = r ? [...r.members] : [];
     const cats = h('div', { class: 'stack tight' });
+    // A municipality picks the department from its list (Assets and fleet, Settings, Departments; 2026.11.20). A name typed
+    // before the list existed shows until one is picked. A ski area types the department or crew.
+    const deptSlot = h('div');
+    const dept = isMuni() ? select([['', 'None']], '', { name: 'department_id', 'aria-label': 'Department' }) : null;
+    if (dept) deptSlot.append(field('Department', dept, r && !r.department_id && r.department ? `Was typed as "${r.department}". Pick its department.` : 'Its after-hours calls go to whoever is on call here.'));
+    else deptSlot.append(field('Department or crew', input({ name: 'department', maxlength: 60, value: r && r.department ? r.department : '', placeholder: 'Maintenance' })));
     get('/workforce/oncall').then((d) => {
+      if (dept) for (const x of (d.departments || []).filter((y) => y.active || (r && y.id === r.department_id))) dept.append(h('option', { value: String(x.id), selected: Boolean(r && r.department_id === x.id) }, x.name));
       const want = r ? r.category_ids : d.categories.filter((c) => c.after_hours).map((c) => c.id);
       cats.append(...(d.categories.length ? d.categories.map((c) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'cat', value: String(c.id), checked: want.includes(c.id) }), ` ${c.name}`)) : [h('p', { class: 'muted small' }, 'No request categories yet.')]));
     }).catch(() => {});
     formDialog(r ? `Edit ${r.name}` : 'Add a rotation', h('div', { class: 'form' },
       field('Name', input({ name: 'name', required: true, maxlength: 80, value: r ? r.name : '', placeholder: isMuni() ? 'Water and sewer' : 'Maintenance' })),
-      field('Department or crew', input({ name: 'department', maxlength: 60, value: r && r.department ? r.department : '', placeholder: 'Water' })),
+      deptSlot,
       h('div', { class: 'wide' }, h('p', { class: 'field-label' }, 'Who takes turns'), h('p', { class: 'muted small' }, 'In the order ticked. The first person has the first turn.'),
         staff.length ? h('div', { class: 'stack tight' }, memberBoxes.map((b) => { b.el.addEventListener('change', () => { const id = Number(b.s.id); const i = order.indexOf(id); if (b.el.checked && i < 0) order.push(id); if (!b.el.checked && i >= 0) order.splice(i, 1); }); return h('label', { class: 'check' }, b.el, ` ${fullName(b.s)}`); })) : h('p', { class: 'muted' }, 'Add staff first.')),
       field('First turn starts', input({ name: 'starts_on', type: 'date', required: true, value: r ? r.starts_on : weekStart(todayStr()) })),
@@ -86,7 +93,7 @@ export async function drawOnCall(box) {
       field('Office hours end', input({ name: 'workday_end', type: 'time', value: r ? r.workday_end : '15:30' }), 'After this, and on weekends and holidays, is after hours'),
       h('div', { class: 'wide' }, h('p', { class: 'field-label' }, 'After-hours requests that alert the person on call'), cats)), async (fd) => {
       const b = {
-        name: String(fd.get('name') || '').trim(), department: String(fd.get('department') || '').trim() || null, members: order.filter((id) => memberBoxes.some((x) => Number(x.s.id) === id && x.el.checked)),
+        name: String(fd.get('name') || '').trim(), ...(dept ? { department_id: Number(fd.get('department_id')) || null } : { department: String(fd.get('department') || '').trim() || null }), members: order.filter((id) => memberBoxes.some((x) => Number(x.s.id) === id && x.el.checked)),
         starts_on: fd.get('starts_on'), period_days: Number(fd.get('period_days')) || 7, handover: fd.get('handover') || '07:00', workday_start: fd.get('workday_start') || '07:00', workday_end: fd.get('workday_end') || '15:30',
         category_ids: [...cats.querySelectorAll('input[name=cat]:checked')].map((x) => Number(x.value)),
       };

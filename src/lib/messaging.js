@@ -91,7 +91,8 @@ async function audienceOf(tenant, channel, audience, limit = MAX_RECIPIENTS + 1)
 }
 
 // ---------------------------------------------------------------- what the message looks like
-const fill = (text, vars) => String(text || '').replace(/\{(first_name|mountain)\}/g, (_, k) => vars[k] || '');
+// {organization} is the tenant's name for everyone (a municipality's word, 2026.11.20); {mountain} stays the same thing.
+const fill = (text, vars) => String(text || '').replace(/\{(first_name|mountain|organization)\}/g, (_, k) => vars[k === 'organization' ? 'mountain' : k] || '');
 const footerLines = (tenant) => [tenant.name, tenant.address].filter(Boolean).join(', ');
 
 function renderEmail(tenant, campaign, person, base, unsubUrl) {

@@ -55,7 +55,7 @@ async function build(conn, t, month, on) {
   [t, fromUtc, toUtc, `${from} 00:00:00`, `${to} 23:59:59`, ...(lines.length ? [[...new Set(lines.map((l) => l.work_order_id))]] : [])]);
   const MF = require('./mapfeatures');
   for (const w of orders) {
-    w.feature_kind_label = w.feature_kind ? (MF.kindOf(w.feature_kind) || { label: w.feature_kind }).label : null;
+    w.feature_kind_label = w.feature_kind ? MF.kindLabel(w.feature_kind, 'municipality') : null;
     w.category = W.categoryOf(w);
     // Times are strings ('YYYY-MM-DD HH:MM:SS'): opened_at is UTC, completed_at the municipality's own clock.
     w.opened = Boolean(w.opened_at) && String(w.opened_at) >= fromUtc && String(w.opened_at) <= toUtc;

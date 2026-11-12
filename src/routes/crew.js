@@ -63,14 +63,18 @@ router.get('/oncall', everyone, async (req, res) => {
   const today = nowIn(await tzOf(t)).slice(0, 10);
   const from = dateStr.safeParse(String(req.query.from || '')).success ? String(req.query.from) : SH.weekOf(today);
   const days = Math.min(Math.max(Number(req.query.days) || 28, 7), 56);
+  await OC.linkDepartments(pool, t); // a municipality picks the rotation's department from its list (2026.11.20)
   const cal = await OC.calendar(pool, t, from, days);
   const categories = await rows(pool, 'SELECT id, name, after_hours FROM request_categories WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [t]).catch(() => []);
-  res.json({ ...cal, today, can_manage: isManager(req), categories: categories.map((c) => ({ id: Number(c.id), name: c.name, after_hours: Boolean(c.after_hours) })) });
+  const departments = await rows(pool, 'SELECT id, name, active FROM departments WHERE tenant_id = ? ORDER BY sort, name', [t]);
+  res.json({ ...cal, today, can_manage: isManager(req), categories: categories.map((c) => ({ id: Number(c.id), name: c.name, after_hours: Boolean(c.after_hours) })),
+    departments: departments.map((d) => ({ id: Number(d.id), name: d.name, active: Boolean(d.active) })) });
 });
 
 const rotationFields = {
   name: z.string().trim().min(1, 'Give the rotation a name').max(80),
   department: z.string().trim().max(60).nullable().optional(),
+  department_id: z.number().int().positive().nullable().optional(), // a municipality's department (2026.11.20)
   members: z.array(z.number().int().positive()).max(40),
   starts_on: dateStr,
   period_days: z.number().int().min(1).max(31).default(7),
@@ -86,10 +90,16 @@ const rotationPatch = z.object(Object.fromEntries(Object.entries(rotationFields)
 function rotationCols(b) {
   const out = {};
   for (const k of ['name', 'department', 'starts_on', 'period_days', 'handover', 'workday_start', 'workday_end']) if (b[k] !== undefined) out[k] = b[k] === '' ? null : b[k];
+  if (b.department_id !== undefined) { out.department_id = b.department_id; if (b.department === undefined) out.department = null; } // the picked department replaces a typed name
   if (b.members !== undefined) out.members = b.members.join(','); // the order is the rotation's order; a person may appear once
   if (b.category_ids !== undefined) out.category_ids = csvIds(b.category_ids) || null;
   if (b.active !== undefined) out.active = b.active ? 1 : 0;
   return out;
+}
+/** A municipality's rotation is for one of its own departments; a ski area has none to pick. */
+async function departmentMust(conn, t, id) {
+  if (id === undefined || id === null) return;
+  if (!(await one(conn, 'SELECT id FROM departments WHERE tenant_id = ? AND id = ?', [t, id]))) throw notFound('Department');
 }
 const dupMembers = (m) => { if (m && new Set(m).size !== m.length) throw bad('Each person can be in a rotation once'); };
 
@@ -99,6 +109,7 @@ router.post('/oncall/rotations', mgr, validate(rotationSchema), async (req, res)
   const id = await tx(async (conn) => {
     await staffMust(conn, t, b.members);
     await categoriesMust(conn, t, b.category_ids);
+    await departmentMust(conn, t, b.department_id);
     const c = rotationCols(b);
     try {
       const [r] = await conn.query(`INSERT INTO oncall_rotations (tenant_id, ${Object.keys(c).join(', ')}, created_by) VALUES (?, ${Object.keys(c).map(() => '?').join(', ')}, ?)`, [t, ...Object.values(c), req.auth.userId]);
@@ -117,6 +128,7 @@ router.patch('/oncall/rotations/:id', mgr, validate(rotationPatch), async (req, 
     if (!cur) throw notFound('Rotation');
     if (b.members) await staffMust(conn, t, b.members);
     if (b.category_ids) await categoriesMust(conn, t, b.category_ids);
+    await departmentMust(conn, t, b.department_id);
     const start = String(b.workday_start || cur.workday_start).slice(0, 5); const end = String(b.workday_end || cur.workday_end).slice(0, 5);
     if (end <= start) throw bad('The working day must end after it starts');
     const c = rotationCols(b);

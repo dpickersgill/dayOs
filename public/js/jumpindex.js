@@ -96,6 +96,8 @@ export const SUB_PAGES = [
   ['money', 'Forecast data', '#/money?tab=forecast', 'forecast snapshots presales wind weather history'],
   ['workforce', 'Hours', '#/workforce?tab=hours', 'hours timecards approve'],
   ['workforce', 'Export for payroll', '#/workforce?tab=hours', 'payroll export pay hours timecards spreadsheet csv', mgr],
+  ['workforce', 'On call', '#/workforce?tab=oncall', 'on call oncall on-call after hours rotation swap holiday callout call-out who is on call'], // 2026.11.20
+  ['workforce', 'Overtime', '#/workforce?tab=overtime', 'overtime over 40 hours week callouts call-outs ot', mgr],
   // The municipal edition's apps (2026.11.20)
   ['requests', 'Ledger (repair record)', '#/requests?tab=ledger', 'ledger repair record right to know claim response standard met target'],
   ['requests', 'Requests map', '#/requests?tab=map', 'map where'],

@@ -234,7 +234,8 @@ router.get('/search', async (req, res) => {
     LEFT JOIN streets st ON st.tenant_id = f.tenant_id AND st.id = f.street_id WHERE ${where.join(' AND ')} AND f.status <> 'abandoned'
     ORDER BY (f.tag = ?) DESC, (f.tag LIKE ?) DESC, f.kind, f.tag, f.name, f.id LIMIT ?`, [...params, q, `${q}%`, limit]);
   res.json({ data: list.map((f) => {
-    const k = MF.kindOf(f.kind) || { label: f.kind };
+    const k0 = MF.kindOf(f.kind);
+    const k = k0 ? { ...k0, label: MF.labelFor(k0, org) } : { label: f.kind };
     return { id: Number(f.id), kind: f.kind, kind_label: k.label, system: MF.systemFor(k, org), geometry: f.geometry, name: f.name, tag: f.tag, street_id: f.street_id === null ? null : Number(f.street_id), street: f.street_name || null,
       lat: Number(f.lat), lng: Number(f.lng), status: f.status, label: [k.label, f.tag, f.name && f.name !== f.tag ? f.name : null, f.street_name && !(f.name || '').includes(f.street_name) ? `on ${f.street_name}` : null].filter(Boolean).join(' ') };
   }) });
@@ -264,7 +265,7 @@ router.post('/features/:id/work-orders', validate(z.object({
     const target = await AI.targetOf(conn, t, { featureId: id }, true);
     const urgent = target.critical || (target.criticality !== null && target.criticality >= 4);
     const w = await require('./maintenance').createOrder(conn, req, { title: b.title, description: b.description, priority: b.priority || (b.out_of_service || urgent ? 'high' : 'normal'),
-      assigned_staff_id: b.assigned_staff_id, due_date: b.due_date, map_feature_id: id, location: target.tag ? `${MF.kindOf(target.kind) ? MF.kindOf(target.kind).label : 'Map item'} ${target.tag}` : null });
+      assigned_staff_id: b.assigned_staff_id, due_date: b.due_date, map_feature_id: id, location: target.tag ? `${MF.kindOf(target.kind) ? MF.kindLabel(target.kind, (await appsOf(t)).org) : 'Map item'} ${target.tag}` : null });
     if (b.out_of_service) {
       await conn.query("UPDATE map_features SET status = 'out_of_service' WHERE tenant_id = ? AND id = ? AND status = 'in_service'", [t, id]);
       await audit(conn, req, 'out_of_service', 'map_features', id, { work_order_id: w });

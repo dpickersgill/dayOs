@@ -766,7 +766,7 @@ router.get('/risk', async (req, res) => {
   const kindLabel = (k) => (O.ASSET_KINDS.find((x) => x.value === k) || { label: k }).label;
   const data = [
     ...assets.map((a) => ({ ...a, type: 'asset', tag: a.asset_tag, kind_label: kindLabel(a.kind), href: `#/assets/a/${a.id}` })),
-    ...features.map((f) => { const k = MF.kindOf(f.kind) || { label: f.kind }; return { ...f, type: 'feature', name: f.name || (f.tag ? `${k.label} ${f.tag}` : k.label), kind_label: k.label, system: MF.systemFor(k, org), lat: Number(f.lat), lng: Number(f.lng), href: `#/assets/map/f${f.id}` }; }),
+    ...features.map((f) => { const k0 = MF.kindOf(f.kind); const k = k0 ? { ...k0, label: MF.labelFor(k0, org) } : { label: f.kind }; return { ...f, type: 'feature', name: f.name || (f.tag ? `${k.label} ${f.tag}` : k.label), kind_label: k.label, system: MF.systemFor(k, org), lat: Number(f.lat), lng: Number(f.lng), href: `#/assets/map/f${f.id}` }; }),
   ].map((x) => ({ ...x, condition_score: Number(x.condition_score), criticality: Number(x.criticality), open_orders: Number(x.open_orders || 0), risk: MF.riskOf(x.condition_score, x.criticality) }))
     .sort((x, y) => y.risk.score - x.risk.score || y.criticality - x.criticality || String(x.name).localeCompare(String(y.name)))
     .slice(0, limit);

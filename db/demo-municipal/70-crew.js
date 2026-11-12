@@ -94,13 +94,18 @@ module.exports = async function crew(conn, T, { today, addDays, staffIds, ids, t
     ['Water and sewer', 'Water', ['Luis Ortega', 'Tom Kowalski', 'Kevin Brandt'], cat(/water|sewer/i)],
     ['Streets', 'Streets', ['Kevin Brandt', 'Rachel Moore', 'Luis Ortega'], cat(/tree|sign|storm/i)],
   ];
+  // Each rotation is for one of the borough's departments (made here if this runs first; 2026.11.20).
+  await require('../../src/lib/workcosts').ensureBooks(conn, T);
+  await require('../../src/lib/oncall').linkDepartments(conn, T); // a demo made before departments: its typed names become them
+  const [depts] = await conn.query('SELECT id, name FROM departments WHERE tenant_id = ?', [T]);
+  const deptId = (name) => { const d = depts.find((x) => x.name === name); return d ? Number(d.id) : null; };
   let rots = 0;
   for (const [name, dept, people, categories] of rotations) {
     const [[have]] = await conn.query('SELECT id FROM oncall_rotations WHERE tenant_id = ? AND name = ?', [T, name]);
     if (have) continue;
     const members = people.map((p) => staff.get(p)).filter(Boolean);
-    const [r] = await conn.query('INSERT INTO oncall_rotations (tenant_id, name, department, members, starts_on, period_days, category_ids) VALUES (?, ?, ?, ?, ?, 7, ?)',
-      [T, name, dept, members.join(','), addDays(monday, -28), categories.join(',') || null]);
+    const [r] = await conn.query('INSERT INTO oncall_rotations (tenant_id, name, department, department_id, members, starts_on, period_days, category_ids) VALUES (?, ?, ?, ?, ?, ?, 7, ?)',
+      [T, name, deptId(dept) ? null : dept, deptId(dept), members.join(','), addDays(monday, -28), categories.join(',') || null]);
     rots += 1;
     if (name === 'Water and sewer' && staff.get('Kevin Brandt')) {
       await conn.query("INSERT INTO oncall_overrides (tenant_id, rotation_id, starts_on, ends_on, staff_id, reason, note) VALUES (?, ?, ?, ?, ?, 'swap', ?)",

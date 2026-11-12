@@ -444,7 +444,7 @@ test('the work orders Today card and the asset page still work for a ski area wi
 test('the Water, Sewer and Stormwater Today cards: open work orders and high risk on their own map items, only with the add-on on', async () => {
   const water = (await api('GET', '/water/today', { token: crewA.token })).body.cards;
   const wo = water.find((c) => c.title === 'Water work orders');
-  assert.ok(wo && wo.count >= 1 && wo.href === '#/works?system=water', JSON.stringify(water)); // the list filtered to Water (2026.11.20)
+  assert.ok(wo && wo.count >= 1 && /^#\/works\?department_id=\d+$/.test(wo.href), JSON.stringify(water)); // the Water department's list (2026.11.20)
   const sewer = (await api('GET', '/sewer/today', { token: A.token })).body.cards;
   assert.ok(sewer.some((c) => c.title === 'Sewer: high risk' || c.title === 'Sewer work orders'), JSON.stringify(sewer));
   // Nothing in the stormwater system needs anyone: an empty list.

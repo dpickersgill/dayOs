@@ -19,7 +19,9 @@ const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay(); // 0 Sunday
 /** A rotation row as the API shows it. */
 function shape(r) {
   return {
-    id: Number(r.id), name: r.name, department: r.department || null, members: ids(r.members), starts_on: ymd(r.starts_on), period_days: Number(r.period_days),
+    // department: the department's name (a municipality's departments, 2026.11.20), else the name typed before that, or a
+    // ski area's crew name.
+    id: Number(r.id), name: r.name, department: r.department_name || r.department || null, department_id: r.department_id ? Number(r.department_id) : null, members: ids(r.members), starts_on: ymd(r.starts_on), period_days: Number(r.period_days),
     handover: hm(r.handover), workday_start: hm(r.workday_start), workday_end: hm(r.workday_end), category_ids: ids(r.category_ids), active: Boolean(r.active),
   };
 }
@@ -59,7 +61,8 @@ async function tzOf(db, tenantId) { return (await one(db, 'SELECT timezone FROM 
 /** Everything needed to answer "who is on call" over a range of days. */
 async function loadAll(db, tenantId, from, to, { activeOnly = true } = {}) {
   const [rots, overrides, holidays] = await Promise.all([
-    rows(db, `SELECT * FROM oncall_rotations WHERE tenant_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY name`, [tenantId]),
+    rows(db, `SELECT r.*, d.name AS department_name FROM oncall_rotations r LEFT JOIN departments d ON d.tenant_id = r.tenant_id AND d.id = r.department_id
+      WHERE r.tenant_id = ?${activeOnly ? ' AND r.active = 1' : ''} ORDER BY r.name`, [tenantId]),
     rows(db, 'SELECT * FROM oncall_overrides WHERE tenant_id = ? AND ends_on >= ? AND starts_on <= ? ORDER BY id', [tenantId, addDays(from, -1), to]),
     rows(db, 'SELECT day, name FROM oncall_holidays WHERE tenant_id = ? AND day >= ? AND day <= ? ORDER BY day', [tenantId, addDays(from, -1), addDays(to, 1)]),
   ]);
@@ -151,4 +154,17 @@ async function alertAfterHours(tenantId, r, where, { exceptUserId = null } = {})
   }
 }
 
-module.exports = { shape, ids, turnDay, rotationPick, onCallFor, isAfterHours, onCallNow, calendar, myOnCall, alertAfterHours, namesOf, weekday };
+/**
+ * A municipality's rotations named a department by typing it before departments existed (2026.11.20): a typed name that
+ * is one of its departments' names (any case) becomes that department. The migration does this for departments already
+ * made; this does it once the departments are made (the first time anyone opens On call). Returns how many changed.
+ */
+async function linkDepartments(db, tenantId) {
+  const W = require('./workcosts');
+  if (!(await W.ensureBooks(db, tenantId))) return 0;
+  const [r] = await db.query(`UPDATE oncall_rotations r JOIN departments d ON d.tenant_id = r.tenant_id AND LOWER(d.name) = LOWER(TRIM(r.department))
+    SET r.department_id = d.id, r.department = NULL WHERE r.tenant_id = ? AND r.department_id IS NULL AND r.department IS NOT NULL`, [tenantId]);
+  return r.affectedRows;
+}
+
+module.exports = { linkDepartments, shape, ids, turnDay, rotationPick, onCallFor, isAfterHours, onCallNow, calendar, myOnCall, alertAfterHours, namesOf, weekday };

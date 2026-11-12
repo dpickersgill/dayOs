@@ -239,7 +239,7 @@ function check(draft, f) {
   const seen = new Set();
   const once = (p) => { if (!seen.has(p)) { seen.add(p); problems.push(p); } };
   for (const k of fields) {
-    const raw = String(draft[k]).replace(/\{(first_name|mountain)\}/g, ' ');
+    const raw = String(draft[k]).replace(/\{(first_name|mountain|organization)\}/g, ' ');
     if (NC.hasLink(raw)) once('links and web addresses are not allowed in the draft');
     // names that are in the facts may hold numbers of their own (Chair 2, Lift 6), and so may today's date
     const text = maskDate(NC.maskNames(raw, names), f.date);

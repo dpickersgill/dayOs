@@ -102,6 +102,16 @@ test('on call: a weekly rotation, a swap, holidays, who is on now; managers chan
   assert.equal(rot.days[6].staff_id, staffA.luis);
   assert.equal(rot.days[7].staff_id, staffA.tom, 'the next week, the next person');
   assert.deepEqual(rot.member_names.map((m) => m.name), ['Luis Ortega', 'Tom Kowalski']);
+  // The department typed as "Water" is the Water department from the list (2026.11.20 assembly: money's departments).
+  const waterDept = cal.body.departments.find((d) => d.name === 'Water');
+  assert.ok(waterDept, 'the municipality\'s departments come with the calendar');
+  assert.equal(rot.department_id, waterDept.id); assert.equal(rot.department, 'Water');
+  const otherDept = (await api('GET', '/workforce/oncall', { token: B.token })).body.departments.find((d) => d.name === 'Sewer');
+  is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: otherDept.id } }), 404, 'another municipality\'s department');
+  const sewerDept = cal.body.departments.find((d) => d.name === 'Sewer');
+  is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: sewerDept.id } }), 200);
+  assert.equal((await api('GET', '/workforce/oncall', { token: A.token })).body.rotations.find((r) => r.id === made.body.id).department, 'Sewer');
+  is(await api('PATCH', `/workforce/oncall/rotations/${made.body.id}`, { token: A.token, body: { department_id: waterDept.id } }), 200);
   // A swap: Ann takes the second Tuesday and Wednesday.
   const sw = await api('POST', '/workforce/oncall/overrides', { token: A.token, body: { rotation_id: made.body.id, staff_id: staffA.ann, starts_on: rot.days[8].date, ends_on: rot.days[9].date, reason: 'swap', note: 'Dentist' } });
   is(sw, 201);
@@ -274,8 +284,12 @@ test('work orders: the water, sewer and stormwater filter matches Today\'s cards
   assert.ok(sewer.includes(onMh) && !sewer.includes(onValve));
   assert.ok((await list('system=nonsense')).includes(onMh), 'an unknown system is no filter');
   const card = (await api('GET', '/water/today', { token: A.token })).body.cards.find((c) => /work orders/.test(c.title));
-  assert.equal(card.href, '#/works?system=water');
-  assert.equal(card.count, water.length, 'the card counts what the list shows');
+  // The card opens the Water department's work orders (2026.11.20 assembly: money's departments), and counts that list.
+  const deptId = (card.href.match(/^#\/works\?department_id=(\d+)$/) || [])[1];
+  assert.ok(deptId, card.href);
+  const inDept = await list(`department_id=${deptId}`);
+  assert.ok(inDept.includes(onValve) && !inDept.includes(onMh), 'a valve job is charged to Water, a manhole job is not');
+  assert.equal(card.count, inDept.length, 'the card counts what the list shows');
   const risk = (await api('GET', '/water/today', { token: A.token })).body.cards.find((c) => /high risk/.test(c.title));
   if (risk) assert.equal(risk.href, '#/assets/map?risk=high&system=water');
   const m = await api('GET', '/ops/work-orders/map', { token: crew.token });
