@@ -139,6 +139,10 @@ function moduleFor(path) {
 // module_disabled); its own Today is built from each municipal app's /today (lib/today.js).
 const MOUNTAIN_ONLY = ['/lost-found', '/waivers', '/attractions', '/reports', '/board'];
 const mountainOnly = (path) => MOUNTAIN_ONLY.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(`${p}.`));
+// And the other way (2026.11.20 review): the municipal crew board, my day, on call, overtime and operator licenses, and
+// the Work orders screen's map and bulk assign. No ski screen uses them, so a ski area is refused them the same way.
+const MUNI_ONLY = ['/workforce/crew-board', '/workforce/my-day', '/workforce/oncall', '/workforce/overtime', '/workforce/licenses', '/ops/work-orders/map', '/ops/work-orders/assign'];
+const muniOnly = (path) => MUNI_ONLY.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(`${p}.`));
 
 /** Signed-in requests: refuse the ones that belong to an app this mountain has turned off. */
 function moduleGate(req, _res, next) {
@@ -146,6 +150,11 @@ function moduleGate(req, _res, next) {
     const path = require('./pathcheck').normal(req.path); // capitals or a trailing slash reach the same routes
     if (mountainOnly(path) && (await stateOf(req.auth.tenantId)).org === 'municipality') {
       const e = new AppError(403, 'This is part of the ski area edition and is not turned on for your municipality');
+      e.details = { code: 'module_disabled', module: null };
+      throw e;
+    }
+    if (muniOnly(path) && (await stateOf(req.auth.tenantId)).org !== 'municipality') {
+      const e = new AppError(403, 'This is part of the municipal edition and is not turned on for your mountain');
       e.details = { code: 'module_disabled', module: null };
       throw e;
     }
@@ -194,4 +203,4 @@ async function requireModule(tenantId, module) {
   if (!s.on.has(module)) throw off(module, s.org);
 }
 
-module.exports = { MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC, MOUNTAIN_ONLY };
+module.exports = { MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC, MOUNTAIN_ONLY, MUNI_ONLY };

@@ -230,3 +230,28 @@ test('5. Apps and add-ons: adding or removing one add-on keeps every other one o
     for (const p of plansBefore) await pool.query('UPDATE billing_plans SET stripe_product = ?, stripe_month = ?, stripe_month_cents = ?, stripe_year = ?, stripe_year_cents = ?, stripe_season = ?, stripe_season_cents = ? WHERE id = ?', [p.stripe_product, p.stripe_month, p.stripe_month_cents, p.stripe_year, p.stripe_year_cents, p.stripe_season, p.stripe_season_cents, p.id]);
   }
 });
+
+/** A ski area (comped, every default app) with its owner signed in. */
+async function skiArea(tag) {
+  const slug = `rev-ski-${tag}-${suffix}`.slice(0, 40);
+  const made = await api('POST', '/platform/tenants', { headers: { 'x-platform-key': process.env.BOOTSTRAP_KEY }, body: { slug, name: `Pine ${tag} ${suffix}`, billing: 'comped', owner: { email: `gm@${slug}.test`, password: 'correct-horse-battery', first_name: 'Gale', last_name: 'Ridge' } } });
+  is(made, 201);
+  const token = (await api('POST', '/auth/login', { body: { tenant: slug, login: `gm@${slug}.test`, password: 'correct-horse-battery' } })).body.token;
+  return { id: Number(made.body.id), slug, token };
+}
+
+test('6. a ski area is refused the municipal crew endpoints (403, module_disabled); a municipality is not', async () => {
+  const S = await skiArea('six');
+  const gets = ['/workforce/crew-board', '/workforce/my-day', '/workforce/oncall', '/workforce/oncall/now', '/workforce/oncall/holidays', '/workforce/overtime', '/workforce/overtime/export', '/workforce/licenses?kind=water', '/ops/work-orders/map'];
+  for (const p of gets) {
+    const r = await api('GET', p, { token: S.token });
+    assert.equal(r.status, 403, `${p}: ${r.status}`);
+    assert.equal(r.body.details && r.body.details.code, 'module_disabled', p);
+  }
+  for (const [p, body] of [['/ops/work-orders/assign', { ids: [1], assigned_staff_id: null }], ['/workforce/oncall/rotations', { name: 'Lifts', members: [], starts_on: '2026-11-16' }], ['/workforce/oncall/callout', {}]]) {
+    assert.equal((await api('POST', p, { token: S.token, body })).status, 403, p);
+  }
+  // The ski area's own staff and schedule still work.
+  assert.equal((await api('GET', '/workforce/staff', { token: S.token })).status, 200);
+  for (const p of ['/workforce/crew-board', '/workforce/oncall', '/ops/work-orders/map']) assert.equal((await api('GET', p, { token: tokens.manager })).status, 200, `municipality: ${p}`);
+});
