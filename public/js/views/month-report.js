@@ -108,6 +108,13 @@ function draw(r) {
       { head: 'Skipped', num: true, cell: (p) => p.skipped }, { head: 'Failed', num: true, cell: (p) => p.failed }, { head: 'Due', cell: (p) => (p.due_on ? fmtDate(p.due_on) : '') },
     ], r.programs)));
   }
+  if (r.trash) {
+    // 2026.11.22: Trash and recycling (weigh tickets, missed pickups, carts)
+    const tt = r.trash; const kinds = [['trash', 'Trash'], ['recycling', 'Recycling'], ['yard', 'Yard waste'], ['food', 'Food waste'], ['other', 'Other']].filter(([k]) => tt.tons[k]);
+    out.push(section('Trash and recycling', h('div', { class: 'pair' },
+      h('div', null, h('h3', null, 'Tons'), kinds.length ? h('p', null, `${kinds.map(([k, w]) => `${w} ${Number(tt.tons[k]).toFixed(2)}`).join(', ')}. ${Number(tt.all_tons).toFixed(2)} tons in all from ${tt.tickets} weigh ticket${tt.tickets === 1 ? '' : 's'}${tt.fees_cents ? `, ${money(tt.fees_cents)} in tipping fees` : ''}.`) : h('p', { class: 'muted' }, 'No weigh tickets this month.')),
+      h('div', null, h('h3', null, 'Recycling'), h('p', null, `Recycling rate ${tt.recycling_rate === null ? 'not known yet' : `${tt.recycling_rate}%`}.${tt.pounds_per_household ? ` ${tt.pounds_per_household} pounds per household.` : ''} ${tt.missed_pickups} missed pickup${tt.missed_pickups === 1 ? '' : 's'} reported. ${tt.carts_delivered} cart${tt.carts_delivered === 1 ? '' : 's'} delivered.`)))));
+  }
   const small = [];
   if (r.bulk) small.push(h('div', null, h('h3', null, 'Bulk pickup'), h('p', null, `${r.bulk.bookings} bookings, ${r.bulk.items} items. ${r.bulk.picked_up} picked up, ${r.bulk.not_out} not out. ${money(r.bulk.revenue_cents)} collected.`)));
   small.push(h('div', null, h('h3', null, 'Street notices'), r.notices.sent ? h('ul', { class: 'plain' }, r.notices.list.map((x) => h('li', null, `${fmtDate(String(x.sent_at).slice(0, 10))}: ${x.title}`, h('span', { class: 'muted small' }, ` (${x.delivered} texts and emails)`)))) : h('p', { class: 'muted' }, 'None sent.')));

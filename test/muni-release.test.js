@@ -49,7 +49,7 @@ test.after(async () => { await new Promise((r) => server.close(r)); await pool.e
 test('the demo borough: every demo file in order, twice, with nothing added the second time', async () => {
   const out = run();
   const files = [...out.matchAll(/^(\d\d-[a-z]+\.js):$/gm)].map((m) => m[1]);
-  assert.deepEqual(files, ['00-base.js', '20-assets.js', '30-requests.js', '40-trash.js', '50-notices.js', '60-buildings.js', '70-crew.js', '70-polish.js', '70-utilities.js', '90-money.js'], 'every workstream\'s demo file, in name order');
+  assert.deepEqual(files, ['00-base.js', '20-assets.js', '30-requests.js', '40-trash.js', '45-collection.js', '47-tonnage.js', '50-notices.js', '60-buildings.js', '70-crew.js', '70-polish.js', '70-utilities.js', '90-money.js'], 'every workstream\'s demo file, in name order');
   const [[t]] = await pool.query('SELECT id, org_type FROM tenants WHERE slug = ?', [demo]);
   T = Number(t.id);
   const first = await rowCounts(T);
@@ -136,6 +136,7 @@ test('public pages: one pattern, /<page>/<municipality>, each served and each wi
     ['/open-requests/', 'open-requests.js', '/open-requests'],
     ['/alerts/', 'resident-alerts.js', '/alerts'],
     ['/bulk-pickup/', 'bulkpage.js', '/bulk-pickup'],
+    ['/cart-request/', 'cartpage.js', '/cart-request'], // 2026.11.22
   ];
   for (const [page, script, word] of pages) {
     const html = await call('GET', `${page}${demo}`);
@@ -153,4 +154,6 @@ test('public pages: one pattern, /<page>/<municipality>, each served and each wi
   assert.equal(new URL(bulk.body.page).pathname, `/bulk-pickup/${demo}`);
   const notices = await api('GET', '/street-notices/setup', { token: tokens.manager });
   assert.equal(new URL(notices.body.signup_link).pathname, `/alerts/${demo}`);
+  const carts = await api('GET', '/solid-waste/carts/setup', { token: tokens.manager });
+  assert.equal(new URL(carts.body.page).pathname, `/cart-request/${demo}`);
 });

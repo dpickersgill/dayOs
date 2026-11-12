@@ -64,6 +64,8 @@ async function countsFor(req) {
     // Trash and recycling: missed pickups nobody has decided on, for the desk and managers (Today: Missed pickups).
     // The key 'bulk' is shared: other Trash and recycling counts (the routes' go-backs) add to it with add('bulk', ...).
     if (on.has('solidwaste') && on.has('requests') && has(a, 'counter')) add('bulk', await W.missedPickups(pool, t), 'missed pickups waiting');
+    // Cart requests waiting for a delivery day (lib/carts.js waitingCount, the Today card "Cart requests waiting").
+    if (on.has('solidwaste') && has(a, 'counter')) add('bulk', await require('./carts').waitingCount(pool, t), 'cart requests waiting');
     // Work orders: overdue. A manager's is every overdue one; a crew member's is only what is assigned to them.
     if (on.has('assets') && isMgr(a)) put('works', (await W.workOrders(pool, t, todayIn(tz))).overdue, 'overdue', true);
     else if (on.has('assets') && a.role === 'staff' && a.staffId) {
@@ -120,6 +122,8 @@ async function creatable(req) {
     add('street_notice', on.has('requests') && has(a, 'staff') && await require('../routes/streetnotices').canSend(req)); // managers, and a crew lead a manager allowed
     add('bulk_booking', on.has('solidwaste') && has(a, 'counter')); // routes/bulkpickup.js office
     add('missed_pickup', on.has('solidwaste') && on.has('requests') && has(a, 'counter')); // routes/requests.js, the Missed pickup category
+    add('cart_request', on.has('solidwaste') && has(a, 'counter')); // routes/carts.js office (2026.11.22)
+    add('weigh_ticket', on.has('solidwaste') && has(a, 'counter')); // routes/tonnage.js office (2026.11.22)
     add('main_break', on.has('water') && has(a, 'staff')); // routes/mainbreaks.js
     add('message', on.has('messages') && isMgr(a));
     return out;

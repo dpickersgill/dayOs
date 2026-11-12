@@ -206,6 +206,8 @@ function createApp() {
   app.get('/hauler/:slug/:token', page('hauler.html')); // 2026.11.22: a missed pickup the contracted hauler marks Collected (no login)
   // The collection calendar (2026.11.22, Trash and recycling): address lookup, the year to print, reminders, the feed.
   app.get('/collection/:slug', page('collection.html'));
+  app.get('/cart-request/:slug', page('cart-request.html')); // 2026.11.22: ask for a trash or recycling cart (routes/carts.js)
+  app.get('/hauler-report/:slug/:token', page('hauler-report.html')); // 2026.11.22: a hauler's or business's yearly recycling form (routes/recyclingreport.js)
   // Street alerts (muni release 1): sign up, a notice's page, the email link and the manage link in every alert.
   app.get(['/alerts/:slug', '/alerts/:slug/:code', '/alerts/:slug/:kind/:token'], page('resident-alerts.html'));
 
@@ -287,6 +289,8 @@ function createApp() {
   api.use('/public/:slug/hauler', rateLimit({ name: 'hauler-link', windowMs: 600_000, max: Number(process.env.HAULER_RATE_LIMIT) || 60, message: 'Too many tries from this address. Please call the municipal office.' }));
   // The collection calendar's address lookup and "is it your day?": 60 per 10 minutes per address and municipality.
   api.get(['/public/:slug/collection/lookup', '/public/:slug/collection/check'], rateLimit({ name: 'collection-lookup', windowMs: 600_000, max: Number(process.env.COLLECTION_LOOKUP_LIMIT) || 60, keyOf: (req) => `${req.ip}|${String(req.params.slug || '').toLowerCase().slice(0, 80)}`, message: 'Too many lookups from this address. Please wait a few minutes, or call the municipal office.' }));
+  api.post('/public/:slug/cart-request', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the office.' })); // 2026.11.22
+  api.post('/public/:slug/hauler-report/:token', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 30, message: 'Too many tries from this address. Please call the office.' })); // 2026.11.22
   api.post('/public/:slug/bulk-pickup/bookings', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many bookings from this address. Please call the office.' }));
   api.post('/public/:slug/shop/orders', rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many orders from this address. Please call the mountain.' }));
   api.post(['/public/:slug/programs/register', '/public/:slug/programs/waitlist', '/public/:slug/family/link', '/public/:slug/family/session'], rateLimit({ windowMs: 3_600_000, max: Number(process.env.SHOP_RATE_LIMIT) || 12, message: 'Too many registrations from this address. Please call the mountain.' }));
@@ -343,6 +347,7 @@ function createApp() {
   // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
   api.use('/public', require('./routes/streets').publicRouter);
   api.use('/public', require('./routes/collectionroutes').publicRouter); // 2026.11.22: the hauler's no-login link (publicGate: Trash and recycling on)
+  api.use('/public', require('./routes/carts').publicRouter, require('./routes/recyclingreport').publicRouter); // 2026.11.22: cart requests, the yearly recycling form (publicGate: Trash and recycling on)
   api.use(authRoutes); // login, tenants, users, me (each route applies authenticate itself where needed)
   api.use(require('./routes/security')); // passkeys, the second check, sessions, devices, PINs, terminals (each route authenticates)
   // A person's private calendar link for their phone's calendar app (2026.11.10): no sign-in, the link is the key.
@@ -452,6 +457,9 @@ function createApp() {
   api.use('/solid-waste', require('./routes/bulkroute')); // 2026.11.20: the driving order of the stop list
   api.use('/solid-waste', require('./routes/bulkpickup').router); // muni release 1: bulk trash pickup (Trash and recycling)
   api.use('/solid-waste', require('./routes/collectionroutes').router); // 2026.11.22: collection routes and hauler oversight (two add-ons)
+  api.use('/solid-waste', require('./routes/carts').router); // 2026.11.22: carts and cart requests
+  api.use('/solid-waste', require('./routes/tonnage')); // 2026.11.22: weigh tickets and tonnage
+  api.use('/solid-waste', require('./routes/recyclingreport').router); // 2026.11.22: the annual recycling report (Act 101)
   api.use('/access', accessRoutes.adminRouter);
   api.use('/documents', documents);
   api.use('/buildings', require('./routes/buildings')); // muni release 1: buildings, the life-safety calendar and binder

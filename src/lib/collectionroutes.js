@@ -285,10 +285,11 @@ async function cartStopsOn(t, r, date) {
   const out = [];
   for (const c of list) {
     const streetId = Number(c.street_id || 0); const no = c.house_number || null;
-    const z = streetId ? await C.zoneFor(pool, t, { streetId, houseNo: no }) : null;
+    const houseNo = no != null && /^\d+/.test(String(no)) ? parseInt(String(no), 10) : null; // "120A" is house 120 for zones
+    const z = streetId ? await C.zoneFor(pool, t, { streetId, houseNo }) : null;
     const mine = z && z.zoneId ? z.zoneId === Number(r.zone_id) : first && Number(first.id) === Number(r.id);
     if (!mine) continue;
-    out.push({ id: c.id ? Number(c.id) : null, words: c.address || c.words || `${no ? `${no} ` : ''}${c.street || ''}`.trim(), what: c.what || c.label || [c.kind, c.stream, c.size ? `${c.size} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered_at || c.done || c.status === 'delivered') });
+    out.push({ id: c.id ? Number(c.id) : null, words: c.address || c.words || `${no ? `${no} ` : ''}${c.street || ''}`.trim(), what: [c.kind_label || c.kind, c.stream, c.size_gal ? `${c.size_gal} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered) }); // the shape tonnage's cartStopsFor returns
   }
   return out;
 }

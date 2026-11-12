@@ -133,6 +133,8 @@ async function build(conn, t, month, on) {
         COALESCE(SUM((SELECT SUM(i.quantity) FROM bulk_booking_items i WHERE i.tenant_id = b.tenant_id AND i.booking_id = b.id)), 0) AS items
       FROM bulk_bookings b WHERE b.tenant_id = ? AND b.status = 'booked' AND b.collection_date BETWEEN ? AND ?`, [t, from, to]);
     out.bulk = { bookings: n(b.bookings), items: n(b.items), picked_up: n(b.picked_up), not_out: n(b.not_out), revenue_cents: n(b.revenue_cents) };
+    // 2026.11.22: Trash and recycling: tons by stream, the recycling rate, missed pickups and carts delivered (lib/tonnage.js)
+    out.trash = await require('./tonnage').monthSection(conn, t, from, to);
   }
 
   // ---- street notices sent in the month
@@ -242,13 +244,21 @@ function csvRows(r) {
   }
   for (const p of r.programs) add('Programs', p.name, { count: p.done, of: p.total, skipped: p.skipped, failed: p.failed, this_month: p.this_month, due: p.due_on || '' });
   if (r.bulk) add('Bulk pickup', 'Bookings', { count: r.bulk.bookings, items: r.bulk.items, picked_up: r.bulk.picked_up, not_out: r.bulk.not_out, cost: d(r.bulk.revenue_cents) });
+  if (r.trash) {
+    for (const [k, w] of [['trash', 'Trash'], ['recycling', 'Recycling'], ['yard', 'Yard waste'], ['food', 'Food waste'], ['other', 'Other']]) if (r.trash.tons[k]) add('Trash and recycling', `${w} tons`, { tons: r.trash.tons[k] });
+    add('Trash and recycling', 'All tons', { tons: r.trash.all_tons, count: r.trash.tickets, cost: d(r.trash.fees_cents) });
+    add('Trash and recycling', 'Recycling rate', { percent: r.trash.recycling_rate ?? '' });
+    add('Trash and recycling', 'Pounds per household', { count: r.trash.pounds_per_household ?? '' });
+    add('Trash and recycling', 'Missed pickups reported', { count: r.trash.missed_pickups });
+    add('Trash and recycling', 'Carts delivered', { count: r.trash.carts_delivered });
+  }
   for (const x of r.notices.list) add('Street notices', x.title, { date: String(x.sent_at).slice(0, 10), count: x.delivered });
   if (r.buildings) add('Building checks', 'Done this month', { count: r.buildings.done, overdue: r.buildings.overdue, never: r.buildings.never });
   for (const a of r.fleet) add('Fleet', `${a.name}${a.tag ? ` (${a.tag})` : ''}`, { cost: d(a.cost_cents), upkeep: d(a.upkeep_cents), fuel: d(a.fuel_cents), hours: a.job_hours, repairs: a.repairs, out_of_service_days: a.out_of_service_days });
   for (const h of r.highlights) add('Largest jobs', h.title, { department: h.department, date: h.completed_on, hours: h.labor_hours, cost: d(h.total_cents) });
   if (r.liquid_fuels) for (const s of r.liquid_fuels.streets) add('Liquid Fuels by street, year to date', s.street, { count: s.jobs, labor: d(s.labor_cents), equipment: d(s.equipment_cents), materials: d(s.materials_cents), outside: d(s.outside_cents), cost: d(s.total_cents), this_month: d(s.month_cents) });
   const cols = ['section', 'item', 'department', 'date', 'count', 'of', 'percent', 'opened', 'completed', 'hours', 'equipment_hours', 'labor', 'equipment', 'materials', 'outside', 'upkeep', 'fuel', 'cost', 'this_month',
-    'made_safe_met', 'made_safe_of', 'made_safe_percent', 'fixed_met', 'fixed_of', 'fixed_percent', 'skipped', 'failed', 'due', 'items', 'picked_up', 'not_out', 'overdue', 'never', 'repairs', 'out_of_service_days'];
+    'made_safe_met', 'made_safe_of', 'made_safe_percent', 'fixed_met', 'fixed_of', 'fixed_percent', 'skipped', 'failed', 'due', 'items', 'picked_up', 'not_out', 'overdue', 'never', 'repairs', 'out_of_service_days', 'tons'];
   return { cols, data: out };
 }
 
