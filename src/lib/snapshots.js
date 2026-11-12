@@ -14,6 +14,10 @@
 // checks every kind). The morning brief reads them with latest(); scripts/snapshot-backfill.js rebuilds what the
 // tables allow for the past season, marked backfilled. SNAPSHOTS=off skips the daily run (other tests run the daily job
 // against hundreds of mountains).
+//
+// Ski areas only (2026.11.21): a municipality sells no tickets, lessons or rentals, so it has nothing to forecast. The
+// morning run, a single take() and the backfill all pass a municipality by, and db/steps/nav-counts.js removed the rows
+// written for municipalities before this.
 const { pool, rows, one } = require('../db');
 const { addDays, dayRange, weekdayOf } = require('./util');
 const { logFailure } = require('./jobs');
@@ -255,7 +259,10 @@ async function save(db, tenantId, onDate, kind, data, { backfilled = false, take
   }
 }
 
-const tenantRow = (db, tenantId) => one(db, 'SELECT id, timezone, map_lat, map_lng, wx_summit_lat, wx_summit_lng FROM tenants WHERE id = ?', [tenantId]);
+const tenantRow = (db, tenantId) => one(db, 'SELECT id, timezone, map_lat, map_lng, wx_summit_lat, wx_summit_lng, org_type FROM tenants WHERE id = ?', [tenantId]);
+/** A municipality has no forecast data (it is a ski area's: presales, lift-ticket prices, mountain weather). */
+const isMunicipality = (t) => Boolean(t) && t.org_type === 'municipality';
+const NOT_A_MOUNTAIN = 'a municipality has no forecast data';
 
 /**
  * Takes one kind of snapshot for one mountain now (opts.now: another instant, for tests), on the mountain's date.
@@ -266,6 +273,7 @@ async function take(db, tenantId, kind, { now = new Date(), tenant = null, run =
   const t = tenant || await tenantRow(db, tenantId);
   if (!t) throw new Error('no such mountain');
   const onDate = dateIn(t.timezone, now);
+  if (isMunicipality(t)) return { kind, on_date: onDate, status: 'skipped', reason: NOT_A_MOUNTAIN };
   try {
     const data = await BUILD[kind](db, t, { onDate, asOf: dbTime(now), now, run });
     await save(db, t.id, onDate, kind, data, { takenAt: dbTime(now) });
@@ -300,8 +308,9 @@ async function takeAll(db, t, { now = new Date(), kinds = KINDS, run = null } = 
 async function runAll({ only = null, now = new Date(), budgetMs = BUDGET_MS(), concurrency = CONCURRENCY, run = WX.newRun() } = {}) {
   if (String(process.env.SNAPSHOTS || 'on').toLowerCase() === 'off') return { skipped: true };
   const started = Date.now();
-  const tenants = await rows(pool, `SELECT id, timezone, map_lat, map_lng, wx_summit_lat, wx_summit_lng FROM tenants
-    WHERE status = 'active' AND sandbox_expires_at IS NULL${only ? ' AND id = ?' : ''} ORDER BY id`, only ? [Number(only)] : []);
+  // Ski areas only: a municipality is never in the run (and so never in its counts or its time budget).
+  const tenants = await rows(pool, `SELECT id, timezone, map_lat, map_lng, wx_summit_lat, wx_summit_lng, org_type FROM tenants
+    WHERE status = 'active' AND sandbox_expires_at IS NULL AND org_type = 'mountain'${only ? ' AND id = ?' : ''} ORDER BY id`, only ? [Number(only)] : []);
   const out = { mountains: tenants.length, taken: 0, skipped: 0, failed: 0, not_reached: 0, seconds: 0 };
   let next = 0;
   // run: shared by this run's mountains (and the daily job's other weather stages): a service that is down is not waited on 500 times
@@ -323,6 +332,9 @@ async function runAll({ only = null, now = new Date(), budgetMs = BUDGET_MS(), c
 /** Deletes snapshots older than 3 years (the daily job's retention run). */
 async function purge(db = pool, { today = dbTime(new Date()).slice(0, 10) } = {}) {
   const [r] = await db.query('DELETE FROM daily_snapshots WHERE on_date < ? - INTERVAL ? YEAR LIMIT 50000', [today, KEEP_YEARS]);
+  // A municipality has no forecast data. Rows a release before 2026.11.21 wrote for one after its migration ran (the
+  // old daily job, between the migration and the new release going live) are cleared here; normally there are none.
+  await db.query("DELETE s FROM daily_snapshots s JOIN tenants t ON t.id = s.tenant_id WHERE t.org_type = 'municipality'");
   return r.affectedRows;
 }
 
@@ -335,10 +347,12 @@ async function purge(db = pool, { today = dbTime(new Date()).slice(0, 10) } = {}
  *   forecast  the day record's weather for the day and the 2 after it: daily values seen, not an hourly forecast
  *   staffing  shifts as they stand now (a shift deleted since is gone) and the hours clocked the day before
  *   prices    not rebuilt: a price changed since is not kept, so the past prices cannot be known
+ * A municipality is passed by: nothing is written, and the answer says so (skipped).
  */
 async function backfill(db, tenantId, { from = null, to = null } = {}) {
   const t = await tenantRow(db, tenantId);
   if (!t) throw new Error('no such mountain');
+  if (isMunicipality(t)) return { tenant: t.id, from: null, to: null, days: 0, presales: 0, forecast: 0, staffing: 0, skipped: NOT_A_MOUNTAIN };
   const today = dateIn(t.timezone);
   const { seasonRange } = require('./guestvisits');
   const { seasonFor } = require('./util');

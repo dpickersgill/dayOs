@@ -210,7 +210,7 @@ What changed in the app with this release:
 - Offline patrol notes on phones are sealed with a key made from `LINK_SECRET` and the person's login. Before rotating
   `LINK_SECRET`, make sure patrol phones have sent everything waiting, or those notes cannot be opened afterwards.
 - Close mountain (console, Manage): paused now, deleted by the daily job after the window. The console's history of it is kept.
-- The daily job also deletes website requests older than two years, sign-in records over a month old, and forecast data snapshots older than three years. Morning briefs, and the record of who was sent them, go after 30 days (`bash scripts/brief-job.sh` sends them; DEPLOY.md, Morning brief).
+- The daily job also deletes website requests older than two years, sign-in records over a month old, and forecast data snapshots older than three years. Forecast data is kept for ski areas only: a municipality has none (release 2026.11.21 removes what was written for municipalities before, in the migration, and `node scripts/snapshot-backfill.js` no longer lists them). Morning briefs, and the record of who was sent them, go after 30 days (`bash scripts/brief-job.sh` sends them; DEPLOY.md, Morning brief).
 - Every push to GitHub runs `.github/workflows/ci.yml`: the tests, `npm audit` and CodeQL.
 
 ## Keeping an eye on it (set up once)
@@ -598,6 +598,13 @@ Each person's pins (the top of their menu, and their phone bar) are in `user_nav
 - **At the counter the menu is not theirs.** On a shared computer (signed in by PIN) everyone gets their role's starting pins and nothing can be saved. That is on purpose.
 - **Saving is refused with "read only".** A tenant whose subscription has lapsed is read only, and that includes pins. They work again once it is paid.
 - A row holds at most 12 pins and 4 bar entries, a few hundred bytes. Rows go with the login (`ON DELETE CASCADE`) and with the tenant's data when a closed tenant is emptied.
+## Menu counts and + New (release 2026.11.21)
+
+- A number beside an app in the menu is worked out by `GET /api/v1/nav/counts` from the same functions Today's cards use (`src/lib/waiting.js`). If someone reports that the menu and Today disagree, compare that request's answer with the card for the same person: they read one function, so a difference means one of them was changed to count on its own. Put the counting back in `src/lib/waiting.js`.
+- A count is missing: check that the app is on for the tenant (console, Apps), that the person's role may open the app, and, for crew, that their login is linked to a staff record (Settings, Team and logins). A crew member counts only work orders assigned to that staff record.
+- Each open page asks once a minute while it is in view (one cheap request, a handful of indexed counts). These are polls and do not keep a session open. There is no switch to turn them off; an app turned off stops being counted at once.
+- + New offers only what `GET /api/v1/nav/new` lists. An item is missing: the app is off, or the role may not create it (Street notice needs a manager, or a Crew lead named in Street notices, Settings; Patrol case needs a patrol access level that writes cases).
+- Nothing to migrate for either. The release's one data step (`db/steps/nav-counts.js`) is the forecast fix: it removes forecast snapshots written for municipalities.
 
 ## Utilities (release 2026.11.20)
 

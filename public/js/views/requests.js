@@ -11,6 +11,7 @@ import { h, clear, ctx, isManager, can, table, state, tabs, input, select, field
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { qr } from '../barcode.js';
 import { intakeChecks, requestChecks } from './utility-bits.js';
+import { whenNew } from '../newmenu.js';
 
 const TONE = { new: 'warn', assigned: 'neutral', made_safe: 'neutral', fixed: 'good', closed_no_action: 'neutral', duplicate: 'neutral', referred: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -54,6 +55,7 @@ export async function render(root, params = []) {
   if (isManager()) items.push(['settings', 'Settings', (box) => { reload = () => drawSettings(box); return reload(); }]);
   root.append(head, tabs(items, META.categories.length && desk() ? 'new' : 'open'));
   if (params[0] === 'r' && /^\d+$/.test(params[1] || '')) openRequest(Number(params[1]), () => reload());
+  whenNew(root, () => newRequest(() => reload())); // #/requests?new=1 (+ New): the New request form
 }
 
 // ---------------------------------------------------------------- lists

@@ -14,6 +14,7 @@ const { dailyReport } = require('../lib/daily');
 const patrolaccess = require('../lib/patrolaccess');
 const { pmStatus, openBlocks } = require('../lib/ops');
 const { typeLabel } = require('../lib/attractions');
+const waiting = require('../lib/waiting');
 
 const router = express.Router();
 const ROLES = ['owner', 'manager', 'staff', 'patrol', 'instructor', 'counter'];
@@ -202,16 +203,16 @@ const TILE_DATA = {
   },
   async rentals(c) {
     const out = await one(pool, "SELECT COUNT(*) AS n, COALESCE(SUM(due_at < ?), 0) AS overdue, COALESCE(SUM(due_at >= ? AND due_at < DATE_ADD(?, INTERVAL 2 HOUR)), 0) AS soon FROM rental_contracts WHERE tenant_id = ? AND status = 'out'", [c.now, c.now, c.now, c.tenantId]);
-    const held = await one(pool, "SELECT COUNT(*) AS n FROM rental_reservations WHERE tenant_id = ? AND status = 'held' AND pickup_on = ?", [c.tenantId, c.today]);
-    return { out: Number(out.n), overdue: Number(out.overdue), due_soon: Number(out.soon), reservations_today: Number(held.n) };
+    const held = await waiting.rentalPickups(pool, c.tenantId, c.today); // the menu's count reads the same number (lib/navcounts.js)
+    return { out: Number(out.n), overdue: Number(out.overdue), due_soon: Number(out.soon), reservations_today: held };
   },
   async lessons(c) {
     const sessions = await rows(pool, `SELECT s.id, s.starts_at, s.ends_at, s.capacity, s.discipline, s.ability_level, pr.name,
       (SELECT COUNT(*) FROM lesson_bookings b WHERE b.tenant_id = s.tenant_id AND b.session_id = s.id AND b.status IN ('booked','attended')) AS booked
       FROM lesson_sessions s JOIN products pr ON pr.tenant_id = s.tenant_id AND pr.id = s.product_id
       WHERE s.tenant_id = ? AND s.status <> 'cancelled' AND DATE(s.starts_at) = ? ORDER BY s.starts_at LIMIT 12`, [c.tenantId, c.date]);
-    const pending = await one(pool, "SELECT COUNT(*) AS n FROM lesson_requests WHERE tenant_id = ? AND status = 'pending'", [c.tenantId]);
-    return { sessions: sessions.map((s) => ({ ...s, id: Number(s.id), booked: Number(s.booked) })), pending_requests: Number(pending.n) };
+    const pending = await waiting.lessonRequests(pool, c.tenantId); // the menu's count reads the same number (lib/navcounts.js)
+    return { sessions: sessions.map((s) => ({ ...s, id: Number(s.id), booked: Number(s.booked) })), pending_requests: pending };
   },
   async staffing(c) {
     const total = await one(pool, "SELECT COUNT(*) AS n FROM shifts WHERE tenant_id = ? AND status <> 'cancelled' AND DATE(starts_at) = ?", [c.tenantId, c.date]);

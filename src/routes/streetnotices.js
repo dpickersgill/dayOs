@@ -797,4 +797,4 @@ publicRouter.get('/:slug/alerts/:code', async (req, res) => {
   res.set('Cache-Control', 'no-store').json(await publicNotice(t, n));
 });
 
-module.exports = { router, publicRouter };
+module.exports = { router, publicRouter, canSend }; // canSend: the + New menu asks the same question (lib/navcounts.js)

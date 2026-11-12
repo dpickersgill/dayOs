@@ -453,6 +453,7 @@ function createApp() {
   api.use('/calendar', require('./routes/mountaincal').router); // 2026.11.10: the Mountain calendar
   api.use('/street-notices', require('./routes/serviceaddresses')); // 2026.11.20: the water customer list and door hangers
   api.use('/street-notices', require('./routes/streetnotices').router); // muni release 1: street notices and resident alerts
+  api.use('/nav', require('./routes/nav')); // 2026.11.21: the counts beside the menu's apps, and what + New may offer
   api.use('/jump', require('./routes/jump')); // 2026.11.20: Jump to finds records (map items, assets, work orders, requests, people)
   api.use('/me/nav', require('./routes/menav').router); // 2026.11.21: a person's own pins and phone bar (every kind of tenant; never part of an app)
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports

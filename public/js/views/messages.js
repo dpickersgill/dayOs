@@ -2,6 +2,7 @@
 // Only people who agreed (their consent history) are ever reached, and every message carries a way to stop.
 import { get, post, put, del } from '../api.js';
 import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, fmtDateTime, empty, errorBox, ctx, isMuni, orgWord } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Messages')),
@@ -16,6 +17,7 @@ async function list(box) {
   const body = h('div');
   const add = button('New message', () => editor(null, status, load), { kind: 'primary' });
   box.append(h('div', { class: 'row' }, add), setupNote(status), body);
+  whenNew(box, () => editor(null, status, load)); // #/messages?new=1 (+ New): a new message
   async function load() {
     clear(body).append(h('p', { class: 'loading' }, 'Loading…'));
     try {

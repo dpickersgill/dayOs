@@ -1607,6 +1607,13 @@ async function main() {
     applied += 1;
     console.log('Applied:', name);
   }
+  // 2026.11.21 (counts): forecast data is a ski area's; the rows written for municipalities go. On its own lines, after
+  // the list above, so a step another workstream appends to that list does not collide with this one.
+  for (const [name, done, ddl] of require('./steps/nav-counts')({ tableExists, columnExists })) {
+    if (!(await runStep(name, done, ddl))) continue;
+    applied += 1;
+    console.log('Applied:', name);
+  }
   const named = await backfillUsernames(conn);
   if (named) console.log(`Gave ${named} existing login${named === 1 ? '' : 's'} a username (their email still signs in too)`);
   if (!(await usernameIndex[1](conn))) { await conn.query(usernameIndex[2]); applied += 1; console.log('Applied:', usernameIndex[0]); }

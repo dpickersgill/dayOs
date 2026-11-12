@@ -37,6 +37,7 @@ import { drawOpsSettings } from './patrol-settings.js';
 import { drawRequirements } from './patrol-requirements.js';
 import { drawChecklistSetup } from './patrol-checklist-setup.js';
 import { send as queue, keepCase, latestKept, cachedList, keptList } from '../outbox.js';
+import { whenNew } from '../newmenu.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -138,6 +139,7 @@ export async function render(root, params = []) {
       if (n && note.isConnected) note.append(' ', h('b', { class: 'psec-waiting' }, `${n} waiting for your approval.`));
     }).catch(() => {});
   }
+  if (has('create_case')) whenNew(root, () => newCase()); // #/patrol/now?new=1 (+ New): the New case form
   if (want === 'new') { // Today's New case button: the Now page with the New case form open
     if (isAt(params)) history.replaceState(null, '', '#/patrol/now');
     if (has('create_case')) newCase();

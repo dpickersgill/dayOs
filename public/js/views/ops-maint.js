@@ -2,6 +2,7 @@ import { get, post, patch, del } from '../api.js';
 import { shareButton } from '../share.js';
 import { drawChecks } from './lift-checks.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PM_TONE = { overdue: 'bad', soon: 'warn', ok: 'good', never: 'neutral' };
@@ -86,6 +87,7 @@ async function drawOrders(box, openId = null) {
   }
   await load();
   // #/conditions/wo/12 (a shared link): open that work order
+  whenNew(box, () => add()); // #/conditions?tab=maint&new=1 (+ New): the New work order form
   if (openId === 'new') add();
   else if (openId) detail(openId).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
 }

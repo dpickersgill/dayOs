@@ -5,6 +5,7 @@
 import { get, post, patch, del } from '../api.js';
 import { h, clear, ctx, can, isManager, schoolCan, button, field, input, select, dialog, formDialog, confirmDialog, toast, errorBox, empty, loading, todayStr, addDays, fmtDate, fmtDateLong, fmtDay, hashParam, withHashParam, val } from '../ui.js';
 import { icon } from '../icons.js';
+import { whenNew } from '../newmenu.js';
 
 const VIEWS = [['list', 'Next 14 days'], ['week', 'Week'], ['month', 'Month']];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -118,7 +119,10 @@ export async function render(root) {
 
   function drawActions() {
     clear(actions);
-    if (meta.me.add_for === 'all' || meta.me.add_for.length) actions.append(button('Add an event', () => eventForm(null), { kind: 'primary', small: true }));
+    if (meta.me.add_for === 'all' || meta.me.add_for.length) {
+      actions.append(button('Add an event', () => eventForm(null), { kind: 'primary', small: true }));
+      whenNew(root, () => eventForm(null)); // #/calendar?new=1 (+ New): Add an event, for those who may add one
+    }
     actions.append(h('button', { type: 'button', class: 'btn small', onclick: () => phoneDialog() }, icon('share', 16), h('span', null, 'On my phone')));
   }
 

@@ -94,6 +94,7 @@ const SIGNED = {
   'streets.js': { router: '/requests/streets' },
   // 2026.11.20: Jump to finds records (test/m2-polish.test.js checks one municipality never finds another's).
   'jump.js': { router: '/jump' },
+  'nav.js': { router: '/nav' }, // 2026.11.21: the menu's counts and + New, the caller's own tenant only
   // Municipal edition (muni release 1): asset programs and asset photos, inside the Assets and fleet router.
   'assetprograms.js': { router: '/assets/programs' }, 'assetphotos.js': { router: '/assets/photos' },
   // 2026.11.20: departments, funds, labor rates, job costs and the monthly report, inside the Assets and fleet router.

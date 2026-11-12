@@ -9,6 +9,7 @@
 import { get, post, put, del, download, sendBytes, fetchBlob } from '../api.js';
 import { routeTab } from './bulk-route.js';
 import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtDateTime, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const office = () => can('counter');
@@ -127,6 +128,7 @@ async function bookingsTab(panel) {
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { q = search.value.trim(); load(); }, 300); });
   pick.addEventListener('change', () => { show = pick.value; load(); });
   panel.append(h('div', { class: 'week-bar' }, h('div', { class: 'row' }, search, pick), h('div', { class: 'week-actions' }, office() ? button('Add booking', () => bookingDialog(load), { kind: 'primary' }) : null)), body);
+  if (office()) whenNew(panel, () => bookingDialog(load)); // #/bulk?tab=bookings&new=1 (+ New): the Add booking form
   async function load() {
     clear(body).append(loading('Loading bookings'));
     let r;
