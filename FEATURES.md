@@ -1295,11 +1295,13 @@ Two add-ons on top of Trash and recycling (`solidwaste`), $1,200/yr each: `colle
 - **Finish**: odometer, truck hours and crew hours (from the route's start and end unless given), landfill and recycling tickets (to tonnage through `lib/tonnage.js addTicket`).
 - **Costs** (2026.11.20 rules): each truck's day is a work order per job: collection on the Sanitation department and fund (crew labor at their rate, truck hours at its hourly rate, tipping fees as a materials line), plowing on Streets and the Liquid Fuels fund. The monthly report's Sanitation line and the Liquid Fuels report pick them up unchanged. `GET /solid-waste/routes/costs` (managers): by day and truck, cost a ton.
 - **Plow changeover**: a short work order on the truck; the truck's setup (collection / plow) changes with it.
-- **Snow day** (managers): `collection_changes` rows (reason snow) by the holiday rule (shift: to the next day, and on a whole-borough snow day the rest of the Monday-Saturday week moves a day; skip: canceled; none: that day only moves); that day's routes show "Delayed for snow"; a street notice (type trash_change) to the zones' streets is DRAFTED for the manager to send. Undo removes the changes and an unsent draft.
+- **Snow day** (managers): `collection_changes` rows (reason snow) by the holiday rule (shift: to the next day, and on a whole-borough snow day the rest of the Monday-Saturday week moves a day; skip: canceled; none: that day only moves); that day's routes show "Delayed for snow"; a street notice to the zones' streets is DRAFTED (the schedule's own draft for a moved day, routes/collection.js draftNotice) for the manager to send. Undo removes the changes and an unsent draft.
 - **Go-backs**: from a missed pickup (or a street and number), on a later day's route; done closes the missed pickup request. Count beside Trash and recycling: go-backs waiting (managers all; crew those on their routes); the same function as Today's "Missed pickups to go back for".
 - **Missed-pickup check**: `routeCheck(conn, tenantId, { streetId, houseNo, streamId, date })` gives not_yet (with delayed / moved_to), done (time), skipped (reason, photo) or null. The office twin: `GET /solid-waste/routes/check`.
-- **Today**: managers and front desk "Collection routes today" (finished, on the road, not started, delayed, % of streets); the crew their route on My work today.
-- **Office board**: progress, truck, crew, and a map of the marks and each truck's last position (the asset map's tiles).
+- **Today** (through lib/collection.js addTodayCards, on Trash and recycling's Today answer): managers and front desk "Collection routes today" (finished, on the road, not started, delayed, % of streets); the crew their route on My work today.
+- **Office board**: progress, truck, crew, and (managers) a map of the marks and each truck's last position (the asset map's tiles).
+- **Cart deliveries** of the day (Carts, lib/carts.js cartStopsFor) show on the route of their zone.
+- **Demo**: db/demo-municipal/46-routes.js.
 
 ### Hauler oversight
 - Contract (managers): dates, service level in hours, households, price a household, penalty a late missed pickup and how many are free.

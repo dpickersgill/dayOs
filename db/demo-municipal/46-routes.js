@@ -94,7 +94,7 @@ module.exports = async function routes(conn, tenantId, helpers) {
     await crewOn(first.id, ['crew1', 'crew2']);
     await q("UPDATE collection_routes SET asset_id = ?, status = 'started', started_at = ?, started_by = ?, odometer_start = ?, pretrip_skipped = 0, last_lat = 40.1352, last_lng = -75.5121, last_seen_at = ? WHERE tenant_id = ? AND id = ?",
       [assets.get('Packer 8'), `${today} 06:05:00`, users.get('crew1'), 58240, `${today} 09:40:00`, t, first.id]);
-    await markAll(first.id, today, { upTo: 0.66, skipEvery: 7 });
+    await markAll(first.id, today, { upTo: 0.66, skipEvery: 4 });
     if (second) await crewOn(second.id, ['crew3']);
     say(`today: ${todays.length} routes, the first on the road`);
   }

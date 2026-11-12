@@ -25,7 +25,7 @@ function draw(v) {
       h('p', { style: 'font-size:1.375rem;margin:0' }, h('b', null, v.address)),
       v.stream ? h('p', null, h('b', null, 'Stream: '), v.stream) : null,
       h('p', null, h('b', null, 'Reported: '), when(v.reported_at)),
-      h('p', null, h('b', null, 'Collect by: '), when(v.due_at), v.late && !v.collected_at ? h('span', { class: 'state bad' }, ' Past due') : null)),
+      h('p', null, h('b', null, 'Collect by: '), when(v.due_at), v.late && !v.collected_at ? ' ', h('span', { class: 'state', 'data-state': 'bad' }, 'Past due') : null)),
     v.collected_at
       ? h('p', { class: 'callout', role: 'status' }, `Marked collected ${when(v.collected_at)}. Thank you.`)
       : form());

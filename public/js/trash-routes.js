@@ -39,10 +39,21 @@ registerTab({
   show: (c) => (c && c.on ? c.on.includes('collectionroutes') : on('collectionroutes')) && (!c || !c.model || c.model === 'inhouse') && can('counter', 'staff'),
   render: async (el) => {
     watchGps();
-    const id = Number(hashParam('route')) || null;
-    if (id) return routePage(el, id);
-    if (crewOnly()) return crewHome(el);
-    return officeHome(el);
+    // Opening a route (#/bulk?tab=routes&route=<id>) or going back changes only the address's query: draw again then.
+    let shown = null;
+    const draw = async () => {
+      const id = Number(hashParam('route')) || null;
+      const key = `${id}|${hashParam('view') || ''}`;
+      if (key === shown && el.childElementCount) return;
+      shown = key;
+      clear(el);
+      if (id) return routePage(el, id);
+      if (crewOnly()) return crewHome(el);
+      return officeHome(el);
+    };
+    const onHash = () => { if (!el.isConnected) { window.removeEventListener('hashchange', onHash); return; } if (hashParam('tab') === 'routes') draw(); };
+    window.addEventListener('hashchange', onHash);
+    await draw();
   },
 });
 
@@ -83,7 +94,7 @@ function waitingStrip() {
     clear(box);
     if (!list.length) { box.hidden = true; return; }
     box.hidden = false;
-    box.append(h('b', null, `${list.length - refused.length} saved on this phone, waiting to send.`), ' They go by themselves when the signal is back.',
+    appendAll(box, h('b', null, `${list.length - refused.length} saved on this phone, waiting to send.`), ' They go by themselves when the signal is back.',
       refused.length ? h('p', { class: 'rt-refused' }, `${refused.length} could not be saved: ${refused[0].error}`) : null);
   };
   draw();
@@ -96,7 +107,7 @@ async function routePage(el, id) {
   const key = `routes.r${id}`;
   let r;
   const body = h('div', { class: 'rt-route' });
-  el.append(h('p', { class: 'no-print' }, h('a', { href: '#/bulk?tab=routes', onclick: () => setParam('route', null) }, crewOnly() ? '← My routes' : '← All routes')), body);
+  el.append(h('p', { class: 'no-print' }, h('a', { href: '#/bulk?tab=routes' }, crewOnly() ? '← My routes' : '← All routes')), body);
   async function load({ quiet = false } = {}) {
     if (!quiet) clear(body).append(loading('Loading the route'));
     try { r = await get(`/solid-waste/routes/${id}`); keepList(key, [r]); } catch (err) {
@@ -277,7 +288,7 @@ function managerTools(r, reload) {
           await put(`/solid-waste/routes/${r.id}/crew`, { user_ids: boxes.filter((b) => b.el.checked).map((b) => b.u.id) }); toast('Crew saved'); await reload();
         });
       }),
-      r.status === 'started' ? button('Finish for them', () => finishDialog(r, reload)) : null,
+      r.status === 'started' && !r.can_work ? button('Finish for them', () => finishDialog(r, reload)) : null,
       r.work_order_id ? h('a', { class: 'btn', href: `#/works/${r.work_order_id}` }, 'The day\'s work order') : null));
 }
 
@@ -299,7 +310,7 @@ async function boardView(el) {
   const pick = input({ type: 'date', value: date, 'aria-label': 'Day' });
   const body = h('div');
   pick.addEventListener('change', () => { if (pick.value) { date = pick.value; setParam('date', date); load(); } });
-  el.append(h('div', { class: 'row' }, pick, button('Refresh', () => load(), { small: true })), body);
+  el.append(h('div', { class: 'row rt-daybar' }, field('Day', pick), button('Refresh', () => load(), { small: true })), body);
   let map = null; let layer = null;
   async function load() {
     clear(body).append(loading('Loading the routes'));
@@ -316,8 +327,8 @@ async function boardView(el) {
         h('div', { class: 'figure' }, h('strong', null, String(all.skipped)), h('span', null, 'skipped'))) : null,
       d.routes.length ? h('ul', { class: 'plain rt-routes rt-board' }, d.routes.map((r) => (r.id ? routeCard(r) : h('li', null, h('div', { class: 'rt-card' }, h('b', null, r.name), h('span', { class: 'muted' }, `${r.progress.total} streets`)))))) : empty('No collection routes this day.'),
       d.gobacks_unplaced ? h('p', { class: 'set-note' }, `${d.gobacks_unplaced} go-back${d.gobacks_unplaced === 1 ? '' : 's'} with no route that day. `, h('a', { href: '#/bulk?tab=routes&view=gobacks' }, 'See go-backs')) : null,
-      d.kept && d.routes.length ? mapBox : null);
-    if (!d.kept || !d.routes.length) return;
+      d.kept && d.routes.length && can('staff') ? mapBox : null);
+    if (!d.kept || !d.routes.length || !can('staff')) return; // the map's tiles come with Assets and fleet, which the front desk does not open
     try {
       const { loadLeaflet, makeMap, fitMap, removeWhenGone } = await import('./views/incident-map.js');
       const [L, cfg] = await Promise.all([loadLeaflet(), get('/assets/map')]);
@@ -331,7 +342,7 @@ async function boardView(el) {
         L.circleMarker([p.lat, p.lng], { radius: 7, color, fillColor: color, fillOpacity: 0.85, weight: 2 }).bindPopup(`${p.words}: ${p.status === 'done' ? 'done' : 'skipped'} ${t12(p.at)}`).addTo(layer);
         pts.push([p.lat, p.lng]);
       }
-      for (const r of d.routes) if (r.last) { L.marker([r.last.lat, r.last.lng], { title: r.name }).bindPopup(`${r.name}${r.truck ? `, ${r.truck}` : ''}: last seen ${t12(r.last.at)}`).addTo(layer); pts.push([r.last.lat, r.last.lng]); }
+      for (const r of d.routes) if (r.last) { L.circleMarker([r.last.lat, r.last.lng], { radius: 11, color: '#0e2632', weight: 3, fillColor: '#f2b33d', fillOpacity: 1 }).bindPopup(`${r.name}${r.truck ? `, ${r.truck}` : ''}: last seen ${t12(r.last.at)}`).addTo(layer); pts.push([r.last.lat, r.last.lng]); }
       if (pts.length) fitMap(map, pts, { padding: [24, 24], maxZoom: 17 });
       else mapBox.after(h('p', { class: 'muted small' }, 'Marks show on the map as the crew taps them (when their phone shares its location).'));
     } catch (_) { mapBox.replaceWith(h('p', { class: 'muted small' }, 'The map is not available here.')); }
@@ -387,7 +398,7 @@ async function trucksView(el) {
     h('section', { class: 'panel stack' }, h('h3', null, 'Collection trucks'),
       h('p', { class: 'muted small' }, 'The trucks the crew picks from. With none ticked, every truck in Assets and fleet is offered.'),
       boxes.length ? table([{ head: 'Truck', cell: (b) => b.a.name }, { head: 'Collects', cell: (b) => b.use }, { head: 'Also plows', cell: (b) => b.plows }], boxes) : empty('No trucks in Assets and fleet yet.'),
-      button('Save', async () => { try { await put('/solid-waste/routes/trucks', { trucks: boxes.filter((b) => b.use.checked).map((b) => ({ truck_id: b.a.id, plows: b.plows.checked })) }); toast('Saved'); } catch (err) { fail(err); } }, { kind: 'primary' })),
+      h('div', { class: 'row' }, button('Save', async () => { try { await put('/solid-waste/routes/trucks', { trucks: boxes.filter((b) => b.use.checked).map((b) => ({ truck_id: b.a.id, plows: b.plows.checked })) }); toast('Saved'); } catch (err) { fail(err); } }, { kind: 'primary' }))),
     h('section', { class: 'panel stack' }, h('h3', null, 'Plowing and changeovers'),
       h('p', { class: 'muted small' }, 'Plowing hours go on the Streets department and the Liquid Fuels fund; collection hours on Sanitation. A changeover is a short work order on the truck.'),
       list.length ? table([
@@ -415,12 +426,12 @@ async function snowView(el) {
     h('section', { class: 'panel stack' }, h('h3', null, 'Declare a snow day'),
       h('p', null, RULE[d.rule] || RULE.shift, ' ', h('span', { class: 'muted small' }, '(the holiday rule in Schedule)')),
       h('p', { class: 'muted small' }, 'The day\'s routes show Delayed for snow, and a street notice to the streets affected is drafted for you to read and send.'),
-      button('Declare a snow day', () => snowDialog(el), { kind: 'primary' })),
+      h('div', { class: 'row' }, button('Declare a snow day', () => snowDialog(el), { kind: 'primary' }))),
     h('section', { class: 'panel stack' }, h('h3', null, 'Snow days'),
       d.data.length ? table([
         { head: 'Day', cell: (s) => fmtDay(s.on_date) },
         { head: 'Zones', cell: (s) => (s.zone_ids.length ? `${s.zone_ids.length} zone${s.zone_ids.length === 1 ? '' : 's'}` : 'Every zone') },
-        { head: 'Street notice', cell: (s) => (s.notice_id ? [h('a', { href: `#/notices/${s.notice_id}` }, s.notice_status === 'draft' ? 'Draft: read and send' : 'Sent'), ' ', s.notice_status === 'draft' ? state('Not sent yet', 'warn') : null] : '') },
+        { head: 'Street notice', cell: (s) => (s.notice_id ? [h('a', { href: s.notice_status === 'draft' ? '#/notices?tab=drafts' : '#/notices' }, s.notice_status === 'draft' ? 'Draft: read and send' : 'Sent'), ' ', s.notice_status === 'draft' ? state('Not sent yet', 'warn') : null] : '') },
         { head: '', cell: (s) => button('Undo', () => confirmDialog('Undo this snow day?', s.notice_status === 'draft' ? 'The days go back, and the draft notice is deleted.' : 'The days go back. The notice was sent already: send residents a follow-up from Street notices.', 'Undo', async () => { await post(`/solid-waste/routes/snow-days/${s.id}/undo`); toast('Undone'); clear(el); snowView(el); }), { small: true }) },
       ], d.data) : empty('No snow days.')));
 }
@@ -437,7 +448,7 @@ async function snowDialog(el) {
       h('ul', null, r.changes.map((c) => h('li', null, `${fmtDay(c.from)}: ${c.to ? `moves to ${fmtDay(c.to)}` : 'canceled'}`))),
       h('p', null, `A street notice to ${r.notice.streets} street${r.notice.streets === 1 ? '' : 's'} is drafted. It is not sent until you send it.`),
       h('blockquote', { class: 'rt-quote' }, r.notice.sms_text),
-      h('p', null, h('a', { class: 'btn primary', href: `#/notices/${r.notice_id}` }, 'Read and send the notice'))));
+      h('p', null, h('a', { class: 'btn primary', href: `#/notices?tab=drafts` }, 'Read and send the notice'))));
     clear(el); snowView(el);
   }, { submitText: 'Declare' });
 }
@@ -446,7 +457,7 @@ async function costsView(el) {
   const first = `${todayStr().slice(0, 7)}-01`;
   const from = input({ type: 'date', value: first, 'aria-label': 'From' }); const to = input({ type: 'date', value: todayStr(), 'aria-label': 'To' });
   const body = h('div');
-  el.append(h('div', { class: 'row' }, field('From', from), field('To', to), button('Show', () => load(), { small: true })), body);
+  el.append(h('div', { class: 'row rt-daybar' }, field('From', from), field('To', to), button('Show', () => load(), { small: true })), body);
   async function load() {
     clear(body).append(loading());
     let c;
@@ -481,6 +492,9 @@ registerTab({
     const show = () => { clear(body); return ({ missed: missedView, scorecard: scorecardView, contract: contractView })[view](body); };
     drawSeg();
     el.append(h('div', { class: 'week-bar' }, seg), body);
+    // Another view by address (#/bulk?tab=hauler&view=scorecard) while the tab is open.
+    const onHash = () => { if (!el.isConnected) { window.removeEventListener('hashchange', onHash); return; } const v = hashParam('view'); if (hashParam('tab') === 'hauler' && v && v !== view && views.some((x) => x[0] === v)) { view = v; drawSeg(); show(); } };
+    window.addEventListener('hashchange', onHash);
     await show();
   },
 });
@@ -518,7 +532,7 @@ async function scorecardView(el) {
   const month = input({ type: 'month', value: todayStr().slice(0, 7), 'aria-label': 'Month' });
   const body = h('div');
   month.addEventListener('change', () => load());
-  el.append(h('div', { class: 'row no-print' }, month, button('Print', () => window.print(), { small: true })), body);
+  el.append(h('div', { class: 'row no-print rt-daybar' }, field('Month', month), button('Print', () => window.print(), { small: true })), body);
   async function load() {
     clear(body).append(loading());
     let s;
@@ -552,7 +566,7 @@ async function contractView(el) {
     free: input({ type: 'number', min: 0, value: c.penalty_after ?? 0 }), terms: h('textarea', { rows: 6, maxlength: 8000 }, c.terms || ''),
   };
   if (!d.can_edit) Object.values(f).forEach((x) => { x.disabled = true; });
-  el.append(
+  appendAll(el,
     d.model !== 'contract' ? h('p', { class: 'callout' }, 'Who collects is set to the borough\'s own crew in Schedule. Missed pickups go to a hauler only when it is set to a contracted hauler.') : null,
     h('p', null, h('b', null, 'Hauler: '), [d.hauler.name, d.hauler.phone, d.hauler.email].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'set in Schedule, Who collects')),
     h('section', { class: 'panel form' },
