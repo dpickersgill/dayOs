@@ -156,7 +156,7 @@ export const PIN_LABEL_MAX = 40;
 // eslint-disable-next-line no-control-regex
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 export function cleanLabel(text) {
-  const plain = String(text == null ? '' : text).replace(UNSAFE_TEXT, '').replace(/\s+/g, ' ').trim();
+  const plain = String(text == null ? '' : text).replace(/\s+/g, ' ').replace(UNSAFE_TEXT, '').replace(/ {2,}/g, ' ').trim();
   return [...plain].slice(0, PIN_LABEL_MAX).join('').trim();
 }
 /** Tells the other modules something happened in the frame (nav:page, nav:edit-pins, nav:row-menu), on window. */

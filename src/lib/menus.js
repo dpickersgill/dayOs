@@ -327,7 +327,7 @@ function startingPins(menu, may) {
  */
 // eslint-disable-next-line no-control-regex
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
-const cleanText = (v) => (typeof v === 'string' ? v.replace(UNSAFE_TEXT, '').replace(/\s+/g, ' ').trim() : '');
+const cleanText = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').replace(UNSAFE_TEXT, '').replace(/ {2,}/g, ' ').trim() : '');
 /** How long a name is as a person counts it: in characters (code points), so an emoji or an accented letter is one. */
 const textLength = (v) => [...v].length;
 
