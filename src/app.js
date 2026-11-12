@@ -203,6 +203,8 @@ function createApp() {
   // A municipality's bulk trash pickup page (muni release 1, Trash and recycling): /bulk-pickup/<municipality>, and a
   // resident's own booking at ?booking=<token>. Every municipal public page is /<page>/<municipality> (RUNBOOK.md).
   app.get('/bulk-pickup/:slug', page('bulk-pickup.html'));
+  // The collection calendar (2026.11.22, Trash and recycling): address lookup, the year to print, reminders, the feed.
+  app.get('/collection/:slug', page('collection.html'));
   app.get('/cart-request/:slug', page('cart-request.html')); // 2026.11.22: ask for a trash or recycling cart (routes/carts.js)
   app.get('/hauler-report/:slug/:token', page('hauler-report.html')); // 2026.11.22: a hauler's or business's yearly recycling form (routes/recyclingreport.js)
   // Street alerts (muni release 1): sign up, a notice's page, the email link and the manage link in every alert.
@@ -283,6 +285,8 @@ function createApp() {
   // "Next times with room" for a full lesson: a guest looks a few times; a script inflating sold-out demand does not get far.
   api.get('/public/:slug/booking/next/:id', rateLimit({ windowMs: 600_000, max: Number(process.env.NEXT_TIMES_RATE_LIMIT) || 30, message: 'Too many looks from this address. Please try again in a few minutes.' }));
   api.post('/public/:slug/requests', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BOOKING_RATE_LIMIT) || 8, message: 'Too many requests from this address. Please call the ski school.' }));
+  // The collection calendar's address lookup and "is it your day?": 60 per 10 minutes per address and municipality.
+  api.get(['/public/:slug/collection/lookup', '/public/:slug/collection/check'], rateLimit({ name: 'collection-lookup', windowMs: 600_000, max: Number(process.env.COLLECTION_LOOKUP_LIMIT) || 60, keyOf: (req) => `${req.ip}|${String(req.params.slug || '').toLowerCase().slice(0, 80)}`, message: 'Too many lookups from this address. Please wait a few minutes, or call the municipal office.' }));
   api.post('/public/:slug/cart-request', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many requests from this address. Please call the office.' })); // 2026.11.22
   api.post('/public/:slug/hauler-report/:token', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 30, message: 'Too many tries from this address. Please call the office.' })); // 2026.11.22
   api.post('/public/:slug/bulk-pickup/bookings', rateLimit({ windowMs: 3_600_000, max: Number(process.env.BULK_RATE_LIMIT) || 12, message: 'Too many bookings from this address. Please call the office.' }));
@@ -335,6 +339,7 @@ function createApp() {
   api.use('/public', rateLimit({ name: 'public-all', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT_ALL) || 2400 }),
     rateLimit({ name: 'public-mountain', windowMs: 60_000, max: Number(process.env.PUBLIC_RATE_LIMIT) || 600, keyOf: (req) => `${req.ip}|${String(req.path.split('/')[1] || '').toLowerCase().slice(0, 80)}` }), modules.publicGate, followPublic.publicRouter, messagesRoutes.publicRouter, shopRoutes.publicRouter, require('./routes/programreg').publicRouter, require('./routes/family').publicRouter, require('./routes/assistant').publicRouter, publicRouter, dispatch.publicRouter, require('./routes/guesthelp').publicRouter, require('./routes/lostfound').publicRouter, require('./routes/partnerpasses').publicRouter, require('./routes/patrolclaims').publicRouter, require('./routes/patrolscene').publicRouter, lessonbook, availability.publicRouter, waiverRoutes.publicRouter, require('./routes/rentalforms').publicRouter, require('./routes/schoollineup').publicRouter, require('./routes/schoolparents').publicRouter, require('./routes/schoolsafety').publicRouter, require('./routes/schoolpay').publicRouter, require('./routes/schooldirector').publicRouter, require('./routes/guestswindow').publicRouter, require('./routes/guestsaccount').publicRouter, require('./routes/guestsloyalty').publicRouter, require('./routes/guestsfair').publicRouter, require('./routes/requests').publicRouter, require('./routes/bulkpickup').publicRouter);
   api.use('/public', require('./routes/streetnotices').publicRouter); // street alerts (muni release 1; the gate above checks Resident requests is on)
+  api.use('/public', require('./routes/collection').publicRouter); // the collection calendar (2026.11.22; the gate above checks Trash and recycling is on)
   // feat/school-pay: the recap's 0-10 question, and a group's booking link and waivers (each checks the Ski school app is on)
   api.use('/public', require('./routes/schoolmoney').publicRouter, require('./routes/schoolgroups').publicRouter);
   // The municipal edition's public pages (muni release 1): the street names (publicGate: a municipality with Resident requests on).
@@ -445,6 +450,7 @@ function createApp() {
   api.use('/ops', maintenance);
   api.use('/ops', require('./routes/liftchecks').router); // 2026.11.10: lift inspections by lift type
   api.use('/assets', assetRoutes);
+  api.use('/solid-waste', require('./routes/collection').router); // 2026.11.22: the collection schedule, calendar and missed pickups
   api.use('/solid-waste', require('./routes/bulkroute')); // 2026.11.20: the driving order of the stop list
   api.use('/solid-waste', require('./routes/bulkpickup').router); // muni release 1: bulk trash pickup (Trash and recycling)
   api.use('/solid-waste', require('./routes/carts').router); // 2026.11.22: carts and cart requests

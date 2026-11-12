@@ -99,6 +99,21 @@ export const SUB_PAGES = [
   ['workforce', 'On call', '#/workforce?tab=oncall', 'on call oncall on-call after hours rotation swap holiday callout call-out who is on call', (w) => w.muni && w.manager], // 2026.11.20
   ['workforce', 'Overtime', '#/workforce?tab=overtime', 'overtime over 40 hours week callouts call-outs ot', (w) => w.muni && w.manager],
   // The municipal edition's apps (2026.11.20)
+  // Trash and recycling (2026.11.22): the app's tabs; the add-ons' tabs (routes, carts, tonnage, the report) add theirs.
+  ['bulk', 'Collection calendar', '#/bulk?tab=calendar', 'trash recycling collection calendar schedule day zone what day is my pickup address lookup'],
+  ['bulk', 'Missed pickups', '#/bulk?tab=missed', 'missed pickup trash recycling not picked up complaint'],
+  ['bulk', 'Collection schedule setup', '#/bulk?tab=schedule', 'schedule setup zones streams streets holidays trash recycling yard waste', mgr],
+  ['bulk', 'Holidays and moved days', '#/bulk?tab=schedule&part=days', 'holiday snow day weather moved canceled leaf collection christmas trees hazardous', mgr],
+  ['bulk', 'Act 101 education log', '#/bulk?tab=schedule&part=residents', 'act 101 education reminder mailer print recycling report reminders sign-ups', mgr],
+  ['bulk', 'Bulk pickup bookings', '#/bulk?tab=bookings', 'bulk pickup bookings furniture'],
+  ['bulk', 'Cart requests', '#/bulk?tab=carts', 'cart can bin toter new extra replacement stolen request delivery'],
+  ['bulk', 'Cart deliveries', '#/bulk?tab=carts&part=stops', 'cart delivery deliver crew load'],
+  ['bulk', 'Carts in the yard', '#/bulk?tab=carts&part=stock', 'cart stock yard inventory receive scrap count'],
+  ['bulk', 'Cart sizes and fees', '#/bulk?tab=carts&part=setup', 'cart sizes gallons fee extra replacement', mgr],
+  ['bulk', 'Tonnage', '#/bulk?tab=tonnage', 'tonnage tons landfill recycling rate pounds per household cost per ton', counter],
+  ['bulk', 'Weigh tickets', '#/bulk?tab=tonnage&part=tickets', 'weigh ticket scale landfill transfer station gross tare net', counter],
+  ['bulk', 'Bring in a tonnage report', '#/bulk?tab=tonnage&part=import', 'import spreadsheet csv hauler facility monthly statement tonnage', counter],
+  ['bulk', 'Recycling report (Act 101)', '#/bulk?tab=recycling', 'act 101 recycling report county dep hauler business fm-11 fm-12 fm-13 section 904 grant', mgr],
   ['requests', 'Ledger (repair record)', '#/requests?tab=ledger', 'ledger repair record right to know claim response standard met target'],
   ['requests', 'Requests map', '#/requests?tab=map', 'map where'],
   ['requests', 'Done requests', '#/requests?tab=done', 'fixed closed finished'],

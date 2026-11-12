@@ -256,6 +256,44 @@ function edit(r, done) {
 }
 
 // ---------------------------------------------------------------- a new request from staff
+// A missed pickup (2026.11.22): which stream, and the schedule's check before saving ("not their day", "the truck is
+// still out"). Staff see the same words a resident sees; saving one the check says is too early needs a tick.
+const SEND_OK = ['done', 'skipped', 'ok_to_report'];
+function missedParts(form) {
+  const m = META.missed;
+  if (!m) return { el: null, ok: () => true, body: () => ({}) };
+  const stream = select([['', 'Pick what was missed'], ...m.streams.map((x) => [x.id, x.name])], '', { name: 'stream_id' });
+  const words = h('p', { class: 'callout', role: 'status', hidden: true });
+  const anyway = h('input', { type: 'checkbox' });
+  const anywayRow = h('label', { class: 'check', hidden: true }, anyway, ' Save it anyway (the caller says it was missed)');
+  const el = h('div', { class: 'wide stack tight', hidden: true }, field('What was missed', stream), words, anywayRow);
+  let last = null;
+  const isMissed = () => Number(form.category.value) === m.category_id;
+  const run = async () => {
+    el.hidden = !isMissed();
+    last = null; words.hidden = true; anywayRow.hidden = true;
+    if (!isMissed() || !stream.value || !form.street.value) return;
+    try {
+      last = await get(`/solid-waste/collection/check?street=${form.street.value}&no=${encodeURIComponent(form.house.value.trim())}&stream=${stream.value}`);
+      words.textContent = last.message; words.hidden = false;
+      anywayRow.hidden = SEND_OK.includes(last.outcome);
+    } catch (_) { last = null; }
+  };
+  for (const x of [form.category, form.street, stream]) x.addEventListener('change', run);
+  form.house.addEventListener('change', run);
+  run();
+  return {
+    el,
+    ok: () => {
+      if (!isMissed()) return true;
+      if (!stream.value) throw new Error('Pick what was missed');
+      if (last && !SEND_OK.includes(last.outcome) && !anyway.checked) throw new Error(`${last.message} Tick "Save it anyway" if the caller says it was missed.`);
+      return true;
+    },
+    body: () => (isMissed() && stream.value ? { stream_id: Number(stream.value) } : {}),
+  };
+}
+
 function newRequest(done) {
   let at = null;
   const where = h('p', { class: 'muted small', role: 'status' });
@@ -270,11 +308,18 @@ function newRequest(done) {
     h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'emails_ok' }), ' They want emails about it')) : null;
   const crew = ctx.me && ctx.me.role === 'staff';
   const checks = intakeChecks(); // 2026.11.20: already open on the block, and the caller's earlier requests (utility-bits.js)
+  const form = {
+    category: select(META.categories.filter((c) => c.active).map((c) => [c.id, c.name]), hashParam('category') === 'missed' && META.missed ? META.missed.category_id : '', { name: 'category_id', required: true }),
+    street: select([['', 'Pick the street'], ...META.streets.filter((s) => s.active).map((s) => [s.id, s.name])], '', { name: 'street_id' }),
+    house: input({ name: 'house_number', maxlength: 20 }),
+  };
+  const missed = missedParts(form);
   formDialog('New request', h('div', { class: 'form' },
-    field('What', select(META.categories.filter((c) => c.active).map((c) => [c.id, c.name]), '', { name: 'category_id', required: true })),
+    field('What', form.category),
     field('How it came in', select(SOURCES, crew ? 'crew' : 'phone', { name: 'source' })),
-    field('Street', select([['', 'Pick the street'], ...META.streets.filter((s) => s.active).map((s) => [s.id, s.name])], '', { name: 'street_id' })),
-    field('House number', input({ name: 'house_number', maxlength: 20 })), field('Or the nearest cross street', input({ name: 'cross_street', maxlength: 120 })),
+    field('Street', form.street),
+    field('House number', form.house), field('Or the nearest cross street', input({ name: 'cross_street', maxlength: 120 })),
+    missed.el,
     h('div', { class: 'row' }, gps, where),
     checks,
     field('Description', h('textarea', { name: 'description', rows: 3, maxlength: 1000 })),
@@ -284,7 +329,9 @@ function newRequest(done) {
     contact ? checks.callerEl : null,
     isManager() ? h('details', null, h('summary', null, 'They told us earlier (a voicemail, a note)'),
       field('Told at', input({ name: 'reported_at', type: 'datetime-local' })), field('Why it is different', input({ name: 'reported_reason', maxlength: 255 }))) : null), async (fd) => {
+    missed.ok();
     const body = {
+      ...missed.body(),
       category_id: num(fd, 'category_id'), source: val(fd, 'source'), street_id: num(fd, 'street_id'), house_number: val(fd, 'house_number'), cross_street: val(fd, 'cross_street'),
       description: val(fd, 'description'), priority: val(fd, 'priority'), client_ref: ref(), ...(at ? { lat: Number(at.lat.toFixed(6)), lng: Number(at.lng.toFixed(6)), accuracy: Math.round(at.acc) } : {}),
       ...(val(fd, 'reported_at') ? { reported_at: val(fd, 'reported_at'), reported_reason: val(fd, 'reported_reason') } : {}),

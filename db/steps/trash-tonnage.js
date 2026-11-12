@@ -2,9 +2,7 @@
 // Trash and recycling, the full app (release 2026.11.22, workstream "tonnage"): carts, weigh tickets and tonnage, and the
 // annual recycling report. Loaded by db/migrate.js. Additive and safe to run twice, on MySQL 8.4 and MariaDB.
 //
-// Shared tables (defined in the release spec; workstream "schedule" owns them in db/steps/trash-schedule.js). Until that
-// is merged this file makes the SAME definitions, guarded by tableExists, so whichever step runs first makes them:
-//   collection_streams, collection_zones, collection_zone_streets
+// The collection streams and zones it points at are made by db/steps/trash-schedule.js, which runs first.
 //
 // This workstream's own tables:
 //   cart_settings           one row per municipality: online cart requests on or off, extra carts allowed per stream
@@ -27,49 +25,6 @@
 //                           the residue, and the processor or market
 
 module.exports = ({ tableExists }) => [
-  // ---------------------------------------------------------------- shared (same definitions as trash-schedule.js)
-  ['collection_streams', (c) => tableExists(c, 'collection_streams'), `CREATE TABLE collection_streams (
-    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id     BIGINT UNSIGNED NOT NULL,
-    name          VARCHAR(60) NOT NULL,
-    kind          ENUM('trash','recycling','yard','food','other') NOT NULL DEFAULT 'trash',
-    frequency     ENUM('weekly','biweekly','monthly') NOT NULL DEFAULT 'weekly',
-    anchor_date   DATE NULL,
-    season_start  CHAR(5) NULL,
-    season_end    CHAR(5) NULL,
-    color         VARCHAR(7) NULL,
-    materials     TEXT NULL,
-    not_accepted  TEXT NULL,
-    sort          INT NOT NULL DEFAULT 0,
-    active        TINYINT(1) NOT NULL DEFAULT 1,
-    UNIQUE KEY uq_collection_streams_tenant_id (tenant_id, id),
-    CONSTRAINT fk_collection_streams_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_zones', (c) => tableExists(c, 'collection_zones'), `CREATE TABLE collection_zones (
-    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id  BIGINT UNSIGNED NOT NULL,
-    name       VARCHAR(60) NOT NULL,
-    sort       INT NOT NULL DEFAULT 0,
-    active     TINYINT(1) NOT NULL DEFAULT 1,
-    UNIQUE KEY uq_collection_zones_tenant_id (tenant_id, id),
-    CONSTRAINT fk_collection_zones_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-  ) ENGINE=InnoDB`],
-  ['collection_zone_streets', (c) => tableExists(c, 'collection_zone_streets'), `CREATE TABLE collection_zone_streets (
-    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id      BIGINT UNSIGNED NOT NULL,
-    zone_id        BIGINT UNSIGNED NULL,
-    street_id      BIGINT UNSIGNED NOT NULL,
-    from_no        INT NULL,
-    to_no          INT NULL,
-    side           ENUM('both','odd','even') NOT NULL DEFAULT 'both',
-    not_collected  TINYINT(1) NOT NULL DEFAULT 0,
-    UNIQUE KEY uq_collection_zone_streets_tenant_id (tenant_id, id),
-    KEY ix_collection_zone_streets_street (tenant_id, street_id),
-    CONSTRAINT fk_collection_zone_streets_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    CONSTRAINT fk_collection_zone_streets_zone FOREIGN KEY (tenant_id, zone_id) REFERENCES collection_zones(tenant_id, id),
-    CONSTRAINT fk_collection_zone_streets_street FOREIGN KEY (tenant_id, street_id) REFERENCES streets(tenant_id, id)
-  ) ENGINE=InnoDB`],
-
   // ---------------------------------------------------------------- carts
   ['cart_settings', (c) => tableExists(c, 'cart_settings'), `CREATE TABLE cart_settings (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

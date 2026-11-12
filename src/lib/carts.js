@@ -26,10 +26,8 @@ const { money } = require('./format');
 const { logFailure } = require('./jobs');
 const { bad, conflict, notFound } = require('./errors');
 
-/** lib/collection.js (workstream "schedule"), or the phase 1 stub until it is merged. */
-function collection() {
-  try { return require('./collection'); } catch (err) { if (err.code !== 'MODULE_NOT_FOUND') throw err; return require('./collectionstub'); }
-}
+/** lib/collection.js: zones, and the Today cards of Trash and recycling. */
+const collection = () => require('./collection');
 
 const SIZES = [35, 65, 95];
 const KINDS = { new: 'New cart', extra: 'Extra cart', replacement: 'Replacement cart', stolen: 'Stolen cart' };

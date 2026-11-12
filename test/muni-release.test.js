@@ -101,7 +101,6 @@ const TODAY = [
   ['/requests/today', ['owner', 'manager', 'crew1', 'frontdesk']],
   ['/street-notices/today', ['owner', 'manager', 'crew1', 'frontdesk']],
   ['/solid-waste/today', ['owner', 'manager', 'crew1', 'frontdesk']],
-  ['/solid-waste/carts/today', ['owner', 'manager', 'frontdesk']], // 2026.11.22: cart requests waiting, cart deliveries today
   ['/water/today', ['owner', 'manager', 'crew1']],
   ['/sewer/today', ['owner', 'manager', 'crew1']],
   ['/stormwater/today', ['owner', 'manager', 'crew1']],
@@ -123,7 +122,7 @@ test('Today for the demo borough: every municipal app gives cards, each with a t
   }
   // The Today screen asks each role only for what it may read: its list matches the routes above.
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'js', 'views', 'dashboard.js'), 'utf8');
-  const listed = [...src.slice(src.indexOf('export const MUNI_TODAY')).split('];')[0].matchAll(/\['[a-z]+', '([^']+)', \(\) => (true|can\('staff'\)|can\('counter'\))\]/g)].map((m) => [m[1], m[2] !== "can('staff')"]); // can('counter'): the front desk and managers (2026.11.22)
+  const listed = [...src.slice(src.indexOf('export const MUNI_TODAY')).split('];')[0].matchAll(/\['[a-z]+', '([^']+)', \(\) => (true|can\('staff'\))\]/g)].map((m) => [m[1], m[2] === 'true']);
   assert.deepEqual(listed.map((x) => x[0]), TODAY.map((x) => x[0]));
   for (const [p, everyone] of listed) {
     const r = await api('GET', p, { token: tokens.frontdesk });

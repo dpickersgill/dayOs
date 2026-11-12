@@ -49,8 +49,7 @@ const defaultMaterial = (kind) => ({ trash: 'msw', recycling: 'commingled', yard
 const tons = (lb) => Math.round((Number(lb || 0) / 2000) * 100) / 100;
 const MAX_NET_LB = 2_000_000; // 1,000 tons: a hauler's monthly total on one line, never a typing slip of an extra digit or three
 
-/** lib/collection.js (workstream "schedule"), or the phase 1 stub until it is merged. */
-const collection = () => require('./carts').collection();
+const collection = () => require('./collection');
 
 const facilitiesOf = (db, tenantId, { all = false } = {}) => rows(db, `SELECT id, name, kind, address, fee_per_ton_cents, residue_pct, active FROM tonnage_facilities
   WHERE tenant_id = ?${all ? '' : ' AND active = 1'} ORDER BY active DESC, name`, [tenantId])

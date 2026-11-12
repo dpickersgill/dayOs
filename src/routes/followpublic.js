@@ -163,6 +163,8 @@ jobs.post('/guests', jobAuth, async (req, res) => {
     out.staff_injury_notices = await require('../lib/staffinjury').retryDue(baseUrl(req)).catch((e) => ({ error: e.message }));
     // A municipality's bulk pickup reminders, the afternoon before collection day (muni release 1).
     out.bulk_reminders = await require('../lib/bulkpickup').remindDue(baseUrl(req)).catch((e) => ({ error: e.message }));
+    // The collection calendar's night-before reminders, from 6 PM local (2026.11.22, lib/collectionremind.js).
+    out.collection_reminders = await require('../lib/collectionremind').remindDue(baseUrl(req)).catch((e) => ({ error: e.message }));
     res.json(out);
   } finally {
     await conn.query("SELECT RELEASE_LOCK('summitops_guests_job')").catch(() => {});

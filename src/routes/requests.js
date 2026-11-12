@@ -46,6 +46,7 @@ const { baseUrl } = require('../lib/baseurl');
 const config = require('../config');
 const Q = require('../lib/requests');
 const RES = require('../lib/residents');
+const MP = require('../lib/missedpickup'); // 2026.11.22: a missed pickup is checked against the collection schedule
 
 const router = express.Router();
 const publicRouter = express.Router();
@@ -115,7 +116,7 @@ router.get('/meta', async (req, res) => {
     categories, streets: streets.map((s) => ({ id: Number(s.id), name: s.name, street_class: s.street_class || 'local', active: Boolean(s.active) })), staff,
     statuses: Q.STATUSES.map((k) => ({ key: k, label: Q.STATUS_WORDS[k] })), sources: Q.SOURCES.map((k) => ({ key: k, label: Q.SOURCE_WORDS[k] })),
     classes: Q.CLASSES.map((k) => ({ key: k, label: Q.CLASS_WORDS[k] })), after_hours_phone: settings.after_hours_phone, public_map: settings.public_map,
-    work_orders: modules.includes('assets'), sees_contact: seesContact(req),
+    work_orders: modules.includes('assets'), sees_contact: seesContact(req), missed: await MP.missedInfo(pool, t),
   });
 });
 
@@ -318,6 +319,7 @@ const createFields = z.object({
   category_id: z.number().int().positive(), ...whereFields, description: nullable(z.string().trim().max(1000)),
   source: z.enum(['phone', 'walk_in', 'crew', 'email', 'text']).default('phone'), priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
   reported_at: nullable(dateTimeStr), reported_reason: nullable(z.string().trim().max(255)), contact: contactFields, client_ref: nullable(z.string().regex(/^[A-Za-z0-9_-]{6,32}$/)),
+  stream_id: nullable(z.number().int().positive()),
 });
 const hasPlace = (b) => Boolean(b.street_id || (b.lat !== null && b.lat !== undefined && b.lng !== null && b.lng !== undefined) || (b.cross_street && b.cross_street.trim()));
 
@@ -336,6 +338,7 @@ router.post('/', validate(createFields), async (req, res) => {
   const t = req.auth.tenantId; const b = req.body;
   if (!hasPlace(b)) throw bad('Say where: pick the street, type the nearest cross street, or use the phone\'s location');
   const zone = await tz(t); const now = nowIn(zone);
+  const missed = await MP.gate(pool, t, b, { staff: true }); // staff see the schedule's words and may still save it
   const out = await tx(async (conn) => {
     if (b.client_ref) {
       const seen = await one(conn, 'SELECT id, reference FROM requests WHERE tenant_id = ? AND request_key = ?', [t, crypto.createHash('md5').update(`staff:${b.client_ref}`).digest('hex')]);
@@ -354,12 +357,14 @@ router.post('/', validate(createFields), async (req, res) => {
       b.description || null, b.source, residentId, c.name || null, c.phone || null, c.email || null, c.texts_ok && c.phone ? 1 : 0, c.emails_ok && c.email ? 1 : 0, reportedAt, b.priority,
       b.client_ref ? crypto.createHash('md5').update(`staff:${b.client_ref}`).digest('hex') : null, req.auth.userId]);
     await Q.event(conn, t, r.insertId, now, `Taken by staff (${Q.SOURCE_WORDS[b.source].toLowerCase()}).${b.reported_at ? ` Told at ${reportedAt}: ${b.reported_reason}.` : ''}`, req.auth.userId);
+    await MP.save(conn, t, r.insertId, missed);
     await audit(conn, req, 'create', 'requests', r.insertId, { source: b.source, reference: ref, ...(b.reported_at ? { reported_at: reportedAt, reason: b.reported_reason } : {}) });
     return { id: r.insertId, reference: ref };
   });
   if (!out.repeat) {
     Q.alertNew(t, out.id, { exceptUserId: req.auth.userId }).catch(() => {});
     Q.tellResident(t, out.id, 'received', { base: baseUrl(req) }).catch(() => {});
+    if (missed) await MP.afterSaved(t, out.id); // a second miss at the address in 60 days: the managers hear of it
   }
   // The one STOP rule (lib/residents.js): ticking "text me" for a phone that texted STOP changes nothing, and the screen says so.
   const c = req.body.contact || {};
@@ -388,6 +393,7 @@ router.get('/:id', async (req, res) => {
     ...view, house_number: r.house_number, cross_street: r.cross_street, accuracy_m: r.accuracy_m, description: r.description, public_note: r.public_note,
     source_words: Q.SOURCE_WORDS[r.source], referred_to: r.referred_to, referred_at: r.referred_at, closed_reason: r.closed_reason, made_safe_note: r.made_safe_note, assigned_at: r.assigned_at,
     street_class: r.street_class || null, standard: { ...std, words: Q.standardWords(std) },
+    stream_id: r.stream_id ? Number(r.stream_id) : null, pickup_check: r.pickup_check || null, // a missed pickup (2026.11.22)
     has_resident: Boolean(r.resident_id || r.contact_phone || r.contact_email || r.contact_name), updates_by_text: Boolean(r.updates_by_text), updates_by_email: Boolean(r.updates_by_email),
     // The contact the request was made with (what the person typed), not whatever the resident record says now.
     contact: resident ? { name: resident.name, phone: resident.phone, email: resident.email, texts_ok: Boolean(r.updates_by_text), emails_ok: Boolean(r.updates_by_email) } : null,
@@ -657,7 +663,7 @@ publicRouter.get('/:slug/report', async (req, res) => {
   res.json({
     municipality: t.name, intro: s.intro, office_phone: s.office_phone, after_hours_phone: s.after_hours_phone, open_map: s.public_map,
     categories: categories.map((c) => ({ id: c.id, name: c.name, needs_contact: c.needs_contact, after_hours: c.after_hours })),
-    streets: streets.map((x) => ({ id: Number(x.id), name: x.name })),
+    streets: streets.map((x) => ({ id: Number(x.id), name: x.name })), missed: await MP.missedInfo(pool, t.id),
   });
 });
 
@@ -665,6 +671,7 @@ const reportFields = z.object({
   category_id: z.number().int().positive(), ...whereFields, description: nullable(z.string().trim().max(1000)),
   name: nullable(z.string().trim().max(120)), phone: nullable(z.union([phoneText, z.literal('')])), email: nullable(z.union([z.string().trim().email('Type a full email address').max(190), z.literal('')])),
   texts_ok: z.boolean().optional(), emails_ok: z.boolean().optional(), website: z.any().optional(), rid: nullable(z.string().regex(/^[0-9a-f]{32}$/)),
+  stream_id: nullable(z.number().int().positive()),
 });
 
 publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
@@ -676,6 +683,8 @@ publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
   if (b.texts_ok && !b.phone) throw bad('Type your phone number to get texts');
   if (b.texts_ok && !require('../lib/sms').e164(b.phone)) throw bad('Texts go only to a US or Canadian mobile number');
   if (b.emails_ok && !b.email) throw bad('Type your email address to get emails');
+  // A missed pickup is checked against the schedule first: not the day, or the truck not there yet, is refused with why.
+  const missed = b.rid && await one(pool, 'SELECT id FROM requests WHERE tenant_id = ? AND request_key = ?', [t.id, b.rid]) ? null : await MP.gate(pool, t.id, b);
   const now = nowIn(t.timezone);
   const out = await tx(async (conn) => {
     if (b.rid) {
@@ -697,6 +706,7 @@ publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
     [t.id, ref, token, cat.id, street ? street.id : null, b.house_number || null, b.cross_street || null, b.lat ?? null, b.lng ?? null, b.accuracy == null ? null : Math.round(b.accuracy),
       b.description || null, residentId, b.name || null, b.phone || null, b.email || null, b.texts_ok && b.phone ? 1 : 0, b.emails_ok && b.email ? 1 : 0, now, b.rid || null, sender]);
     await Q.event(conn, t.id, r.insertId, now, `Reported on the report page${b.lat != null ? `, with the phone's location (within about ${b.accuracy == null ? '?' : Math.round(b.accuracy)} m)` : ''}.`);
+    await MP.save(conn, t.id, r.insertId, missed);
     // The record of when the municipality was told: written to the audit log too, with no one signed in.
     await audit(conn, { auth: { tenantId: t.id, userId: null }, ip: req.ip }, 'create', 'requests', r.insertId, { source: 'web', reference: ref, reported_at: now });
     return { id: r.insertId, reference: ref, token };
@@ -704,6 +714,7 @@ publicRouter.post('/:slug/report', validate(reportFields), async (req, res) => {
   if (!out.repeat) {
     Q.alertNew(t.id, out.id).catch(() => {});
     Q.tellResident(t.id, out.id, 'received', { base: baseUrl(req) }).catch(() => {});
+    if (missed) await MP.afterSaved(t.id, out.id);
   }
   // The one STOP rule (lib/residents.js): ticking "text me" for a phone that texted STOP changes nothing, and the page says so.
   const textsOff = b.texts_ok && b.phone ? await RES.textsOffNotice(pool, t.id, b.phone) : null;

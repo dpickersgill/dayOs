@@ -2,7 +2,7 @@
 
 // Carts (release 2026.11.22, Trash and recycling). See lib/carts.js for the rules.
 // Staff side, mounted at /solid-waste (signed in, the solidwaste app on):
-//   GET  /carts/today                      the Today card: cart requests waiting for a delivery day (front desk, managers)
+//   GET  /carts/today                      the cart Today cards alone (they are also on GET /solid-waste/today, by addTodayCards)
 //   GET  /carts/setup, PUT /carts/setup     online requests, extras allowed, sizes and fees per stream (managers)
 //   GET  /carts/options                    what the request form needs: streams, sizes, streets
 //   GET  /carts/address?street_id=&house_number=&unit=   the carts and requests at one address
@@ -61,16 +61,20 @@ const LIST = `SELECT r.*, st.name AS street, cs.name AS stream FROM cart_request
   JOIN collection_streams cs ON cs.tenant_id = r.tenant_id AND cs.id = r.stream_id`;
 
 // ---------------------------------------------------------------- Today
-router.get('/carts/today', office, todayRoute(async (req) => {
+/** The cart cards, for the front desk and managers: added to Trash and recycling's Today (lib/collection.js addTodayCards). */
+async function cartCards(req) {
+  if (!isOffice(req)) return [];
   const n = await C.waitingCount(pool, req.auth.tenantId);
   const t = await townOf(req.auth.tenantId);
   const today = todayIn(t.timezone);
   const stops = await C.cartStopsFor(pool, t.id, today);
   return [
     n ? card({ title: 'Cart requests waiting', count: n, text: `${n === 1 ? 'Needs' : 'Need'} a delivery day`, href: '#/bulk?tab=carts&show=waiting' }) : null,
-    stops.length ? card({ title: 'Cart deliveries today', count: stops.length, text: `${stops.filter((s) => s.delivered).length} delivered, ${stops.filter((s) => !s.delivered).length} to go`, href: `#/bulk?tab=carts&show=stops&date=${today}` }) : null,
-  ];
-}));
+    stops.length ? card({ title: 'Cart deliveries today', count: stops.length, text: `${stops.filter((s) => s.delivered).length} delivered, ${stops.filter((s) => !s.delivered).length} to go`, href: `#/bulk?tab=carts&part=stops&date=${today}` }) : null,
+  ].filter(Boolean);
+}
+require('../lib/collection').addTodayCards(cartCards);
+router.get('/carts/today', office, todayRoute(cartCards));
 
 // ---------------------------------------------------------------- setup
 const optionSchema = z.object({

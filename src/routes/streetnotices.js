@@ -100,6 +100,8 @@ router.get('/setup', anyone, async (req, res) => {
     topics: SN.TOPICS.map(([key, label]) => ({ key, label })), streets, operators, operator_rule: SN.OPERATOR_RULE,
     can_send: await canSend(req), is_manager: isManager(req), sms_ready: sms.enabled(), email_ready: mailer.enabled(), assets_on: on.includes('assets'),
     quiet_hours: { from: '8 AM', until: '9 PM' }, signup_link: `${baseUrl(req)}/alerts/${encodeURIComponent(tenant.slug)}`,
+    // 2026.11.22: Trash and recycling's collection zones, to aim a schedule change or leaf notice at.
+    collection_zones: on.includes('solidwaste') ? (await rows(pool, 'SELECT id, name FROM collection_zones WHERE tenant_id = ? AND active = 1 ORDER BY sort, name', [t])).map((x) => ({ id: Number(x.id), name: x.name })) : [],
   });
 });
 
@@ -124,7 +126,9 @@ const noticeBody = z.object({
   title: z.string().trim().min(1).max(120),
   sms_text: z.string().trim().min(1).max(320),
   body: z.string().trim().max(4000).nullable().optional(),
-  areas: areasSchema,
+  areas: areasSchema.optional(),
+  // 2026.11.22: aimed at collection zones (Trash and recycling): the notice's streets are those zones' streets.
+  collection_zone_ids: z.array(z.coerce.number().int().positive()).max(50).optional(),
   starts_at: planDateTimeStr.nullable().optional(),
   ends_expected_at: planDateTimeStr.nullable().optional(),
   issued_by_user_id: z.coerce.number().int().positive().nullable().optional(),
@@ -132,6 +136,16 @@ const noticeBody = z.object({
 
 /** Checks the streets are this municipality's and the operator is an active login here. Returns the operator's name. */
 async function checkNotice(db, tenantId, b) {
+  // Aimed at collection zones (2026.11.22): the zones' streets, whole or by range, become the notice's streets.
+  if (b.collection_zone_ids && b.collection_zone_ids.length) {
+    const ids = [...new Set(b.collection_zone_ids)];
+    const [[zc]] = await db.query('SELECT COUNT(*) AS n FROM collection_zones WHERE tenant_id = ? AND id IN (?)', [tenantId, ids]);
+    if (Number(zc.n) !== ids.length) throw bad('One of the collection zones is not yours. Reload the page and pick again.');
+    b.collection_zone_ids = ids;
+    b.areas = await require('../lib/collection').zoneAreas(db, tenantId, ids);
+    if (!b.areas.length) throw bad('Those collection zones have no streets yet. Add streets to them in Trash and recycling, Schedule.');
+  } else b.collection_zone_ids = null;
+  if (!b.areas || !b.areas.length) throw bad('Pick at least one street');
   const ids = [...new Set(b.areas.map((a) => Number(a.street_id)))];
   const [[c]] = await db.query('SELECT COUNT(*) AS n FROM streets WHERE tenant_id = ? AND id IN (?)', [tenantId, ids]);
   if (Number(c.n) !== ids.length) throw bad('One of the streets is not on your street list. Reload the page and pick again.');
@@ -181,8 +195,9 @@ router.get('/', anyone, async (req, res) => {
     send_at: (scheduled.find((s) => s.notice_id === n.id) || {}).send_at || null, summary: sums[`n${n.id}`] || EMPTY })) });
 });
 
-router.post('/preview', anyone, validate(z.object({ type: z.enum(SN.TYPE_KEYS), areas: areasSchema })), async (req, res) => {
-  const aud = await SN.audienceOf(req.auth.tenantId, req.body.type, req.body.areas);
+router.post('/preview', anyone, validate(z.object({ type: z.enum(SN.TYPE_KEYS), areas: areasSchema.optional(), collection_zone_ids: z.array(z.coerce.number().int().positive()).max(50).optional() })), async (req, res) => {
+  const areas = req.body.collection_zone_ids && req.body.collection_zone_ids.length ? await require('../lib/collection').zoneAreas(pool, req.auth.tenantId, req.body.collection_zone_ids) : req.body.areas || [];
+  const aud = await SN.audienceOf(req.auth.tenantId, req.body.type, areas);
   const when = await SN.sendAfterFor(req.auth.tenantId, req.body.type);
   res.json({ ...SN.countsOf(aud), held_until: when.held ? when.at : null });
 });
@@ -195,9 +210,9 @@ router.post('/', anyone, validate(noticeBody), async (req, res) => {
     let r;
     for (let i = 0; ; i += 1) {
       try {
-        [r] = await conn.query(`INSERT INTO street_notices (tenant_id, code, type, title, sms_text, body, starts_at, ends_expected_at, issued_by_user_id, issued_by_name, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [t, newCode(), b.type, b.title, b.sms_text, b.body || null, b.starts_at ? normDateTime(b.starts_at) : null,
-          b.ends_expected_at ? normDateTime(b.ends_expected_at) : null, op ? op.id : null, op ? String(op.name).slice(0, 120) : null, req.auth.userId]);
+        [r] = await conn.query(`INSERT INTO street_notices (tenant_id, code, type, title, sms_text, body, starts_at, ends_expected_at, issued_by_user_id, issued_by_name, created_by, collection_zone_ids)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [t, newCode(), b.type, b.title, b.sms_text, b.body || null, b.starts_at ? normDateTime(b.starts_at) : null,
+          b.ends_expected_at ? normDateTime(b.ends_expected_at) : null, op ? op.id : null, op ? String(op.name).slice(0, 120) : null, req.auth.userId, b.collection_zone_ids ? JSON.stringify(b.collection_zone_ids) : null]);
         break;
       } catch (err) { if (err.code !== 'ER_DUP_ENTRY' || i > 4) throw err; }
     }
@@ -399,8 +414,8 @@ router.put('/:id', anyone, validate(noticeBody), async (req, res) => {
     if (!n) throw notFound('Notice');
     if (n.status !== 'draft') throw conflict(n.status === 'scheduled' ? 'Unschedule the notice first, then change it.' : 'A notice that has gone out cannot be changed. Send an update instead.');
     const op = await checkNotice(conn, t, b);
-    await conn.query('UPDATE street_notices SET type = ?, title = ?, sms_text = ?, body = ?, starts_at = ?, ends_expected_at = ?, issued_by_user_id = ?, issued_by_name = ? WHERE tenant_id = ? AND id = ?',
-      [b.type, b.title, b.sms_text, b.body || null, b.starts_at ? normDateTime(b.starts_at) : null, b.ends_expected_at ? normDateTime(b.ends_expected_at) : null, op ? op.id : null, op ? String(op.name).slice(0, 120) : null, t, n.id]);
+    await conn.query('UPDATE street_notices SET type = ?, title = ?, sms_text = ?, body = ?, starts_at = ?, ends_expected_at = ?, issued_by_user_id = ?, issued_by_name = ?, collection_zone_ids = ? WHERE tenant_id = ? AND id = ?',
+      [b.type, b.title, b.sms_text, b.body || null, b.starts_at ? normDateTime(b.starts_at) : null, b.ends_expected_at ? normDateTime(b.ends_expected_at) : null, op ? op.id : null, op ? String(op.name).slice(0, 120) : null, b.collection_zone_ids ? JSON.stringify(b.collection_zone_ids) : null, t, n.id]);
     await writeAreas(conn, t, n.id, b.areas);
     await audit(conn, req, 'update', 'street_notices', n.id, { type: b.type, streets: b.areas.length, issued_by_user_id: op ? op.id : null });
   });
@@ -566,6 +581,7 @@ const signupBody = z.object({
   phone: z.string().trim().max(40).nullable().optional(),
   email: z.string().trim().max(255).nullable().optional(),
   topics: z.array(z.enum(SN.TOPIC_KEYS)).max(10).default([]),
+  streams: z.array(z.coerce.number().int().positive()).max(20).optional(), // 2026.11.22: a reminder the night before these collection streams
   website: z.string().max(200).optional(),
 });
 
@@ -615,7 +631,10 @@ publicRouter.post('/:slug/alerts', validate(signupBody), async (req, res) => {
       throw conflict(`${RES.textsOffWords(await textingNumber(t.id))} Then sign up again.`, { code: 'texts_off' });
     }
   }
-  const topics = [...new Set(['water', ...b.topics])].join(',');
+  // Night-before collection reminders (2026.11.22): the streams must be this municipality's, and they bring the trash topic.
+  const streams = b.streams && b.streams.length ? (await rows(pool, 'SELECT id FROM collection_streams WHERE tenant_id = ? AND active = 1 AND id IN (?)', [t.id, b.streams])).map((x) => Number(x.id)) : [];
+  if (b.streams && b.streams.length && streams.length !== new Set(b.streams).size) throw bad('Pick what you want a reminder for from the list.');
+  const topics = [...new Set(['water', ...b.topics, ...(streams.length ? ['trash'] : [])])].join(',');
   // Nobody is joined to a resident here: the phone joins only once its code is entered, and the email only once its link
   // is pressed (residentForConfirmed). A phone and an email given together are two sign-ups, one for each, so neither can
   // see or change what came in through the other.
@@ -624,9 +643,9 @@ publicRouter.post('/:slug/alerts', validate(signupBody), async (req, res) => {
     const out = {};
     for (const [channel, v] of [['sms', phone], ['email', email]]) {
       if (!v) continue;
-      const [r] = await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, status, source)
-        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'web')`, [t.id, b.name || null, street.id, b.house_number, SN.houseNo(b.house_number), b.unit || null,
-        channel === 'sms' ? v : null, channel === 'email' ? v : null, topics]);
+      const [r] = await conn.query(`INSERT INTO alert_signups (tenant_id, resident_id, name, street_id, house_number, house_no, unit, phone, email, topics, collection_streams, status, source)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'web')`, [t.id, b.name || null, street.id, b.house_number, SN.houseNo(b.house_number), b.unit || null,
+        channel === 'sms' ? v : null, channel === 'email' ? v : null, topics, streams.length ? streams.join(',') : null]);
       out[channel] = { id: r.insertId, phone: channel === 'sms' ? v : null, email: channel === 'email' ? v : null };
     }
     return out;

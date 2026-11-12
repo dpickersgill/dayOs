@@ -38,7 +38,12 @@ const MODULES = [
   { key: 'water', label: 'Water (add-on)', blurb: 'Water mains, valves, hydrants and meters on the asset register, with their inspections and programs.', addon: true, orgs: ['municipality'], paths: ['/water'] },
   { key: 'sewer', label: 'Sewer (add-on)', blurb: 'Sewer mains, manholes and pump stations on the asset register, with their inspections and programs.', addon: true, orgs: ['municipality'], paths: ['/sewer'] },
   { key: 'stormwater', label: 'Stormwater (add-on)', blurb: 'Inlets, outfalls and basins on the asset register, with their inspections and programs.', addon: true, orgs: ['municipality'], paths: ['/stormwater'] },
-  { key: 'solidwaste', label: 'Trash and recycling (add-on)', blurb: 'Residents book and pay for bulk trash pickup online, and the crew sees each day\'s route.', addon: true, orgs: ['municipality'], paths: ['/solid-waste'] },
+  // Trash and recycling (2026.11.22): every route of the app, and of its two add-ons below, lives under /solid-waste, so
+  // this gate covers them all. Collection routes and Hauler oversight need it on (requires): with it off they are off, and
+  // their routes check them with lib/collection.js requireAddon.
+  { key: 'solidwaste', label: 'Trash and recycling (add-on)', blurb: 'The collection schedule and calendar for residents, reminders, missed pickups, carts, bulk pickup booked and paid online, and the annual recycling report.', addon: true, orgs: ['municipality'], paths: ['/solid-waste'] },
+  { key: 'collectionroutes', label: 'Collection routes (add-on)', blurb: 'For a borough with its own crew: the driver\'s route on a phone, done and skipped streets, weigh tickets, tonnage and what each collection day costs. Needs Trash and recycling.', addon: true, orgs: ['municipality'], requires: ['solidwaste'], paths: [] },
+  { key: 'hauler', label: 'Hauler oversight (add-on)', blurb: 'For a borough with a contracted hauler: the contract, missed pickups sent to the hauler, the hauler\'s monthly reports and a scorecard. Needs Trash and recycling.', addon: true, orgs: ['municipality'], requires: ['solidwaste'], paths: [] },
   { key: 'buildings', label: 'Buildings (add-on)', blurb: 'Life-safety inspections for the municipality\'s own buildings: the calendar of checks, vendor visits and certificates, staff rounds, and the binder for the insurer or fire marshal.', addon: true, orgs: ['municipality'], paths: ['/buildings'] },
 ];
 const ORG_TYPES = ['mountain', 'municipality'];
@@ -76,7 +81,9 @@ const SHARED_READS = [
 // Public pages, by the word after the mountain's web name.
 const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'lesson-basket': 'school', waitlist: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', partner: 'shop', programs: 'programs', family: 'programs', assistant: 'assistant_plus', 'rental-form': 'rentals',
   // The municipal edition's public pages.
-  report: 'requests', 'open-requests': 'requests', alerts: 'requests', streets: 'requests', 'bulk-pickup': 'solidwaste' };
+  report: 'requests', 'open-requests': 'requests', alerts: 'requests', streets: 'requests', 'bulk-pickup': 'solidwaste',
+  // Trash and recycling (2026.11.22): the collection calendar, a hauler's or business's recycling report form, cart requests.
+  collection: 'solidwaste', 'hauler-report': 'solidwaste', 'cart-request': 'solidwaste' };
 
 /**
  * Turning one app on turns on what it needs; turning one off turns off what needs it. org: the tenant's kind; an app that
@@ -89,6 +96,8 @@ function settle(want, org = 'mountain') {
     on.delete(k);
     for (const m of MODULES) if ((m.needs || []).includes(k)) on.delete(m.key);
   }
+  // An add-on of an add-on (requires) is on only while what it requires is on; it never turns that on by itself.
+  for (const m of MODULES) if (m.requires && on.has(m.key) && !m.requires.every((r) => on.has(r))) on.delete(m.key);
   return keysFor(org).filter((k) => on.has(k));
 }
 
@@ -168,9 +177,6 @@ function moduleGate(req, _res, next) {
   })().then(() => next(), next);
 }
 
-// PHASE 1 STUB (workstream "tonnage"): workstream "schedule" adds these words to PUBLIC above; this line goes in phase 2.
-Object.assign(PUBLIC, { 'cart-request': PUBLIC['cart-request'] || 'solidwaste', 'hauler-report': PUBLIC['hauler-report'] || 'solidwaste' });
-
 // Public words with no app of their own that a municipality keeps (none yet: its pages are all in PUBLIC above).
 const MUNI_OPEN = [];
 
@@ -206,4 +212,4 @@ async function requireModule(tenantId, module) {
   if (!s.on.has(module)) throw off(module, s.org);
 }
 
-module.exports = { MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC, MOUNTAIN_ONLY, MUNI_ONLY };
+module.exports = { off, MODULES, KEYS, ORG_TYPES, settle, apply, invalidate, stateOf, enabledKeys, orgTypeOf, orgWord, offered, isAddon, keysFor, modulesFor, defaultsFor, DEFAULTS, moduleGate, publicGate, requireModule, moduleFor, PUBLIC, MOUNTAIN_ONLY, MUNI_ONLY };

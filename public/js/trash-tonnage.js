@@ -1,5 +1,5 @@
 // Trash and recycling (release 2026.11.22, workstream "tonnage"): the Carts, Tonnage and Recycling report tabs of the
-// Trash and recycling app (views/bulk-pickup.js). Each registers itself through ../trashtabs.js; the app shows the ones
+// Trash and recycling app (views/bulk-pickup.js). Each registers itself through ./trashtabs.js; the app shows the ones
 // whose show() is true, after its own tabs. Addresses: #/bulk?tab=carts|tonnage|recycling, with &part= for a section.
 //   Carts             requests (new, extra, replacement, stolen) from the public page or taken by phone; delivery days and
 //                     the day's deliveries (the crew marks Delivered on a phone); the carts at an address; carts in the
@@ -11,10 +11,10 @@
 //                     municipal report in the DEP / county columns, and the Section 904 packet.
 // Money (fees, tipping fees, cost per ton) reaches only owners and managers: the server leaves it out for everyone else,
 // and these screens show what they get.
-import { get, post, put, patch, download, sendBytes, fetchBlob } from '../api.js';
-import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs, todayStr } from '../ui.js';
-import { whenNew } from '../newmenu.js';
-import { registerTab } from '../trashtabs.js';
+import { get, post, put, patch, download, sendBytes, fetchBlob } from './api.js';
+import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs, todayStr } from './ui.js';
+import { whenNew } from './newmenu.js';
+import { registerTab } from './trashtabs.js';
 
 const office = () => can('counter');
 const crewRole = () => isManager() || (ctx.me && ctx.me.role === 'staff');
@@ -693,8 +693,8 @@ function detailsPart(panel, r, year, redraw) {
 }
 
 // ================================================================ registration
-registerTab({ id: 'carts', label: 'Carts', order: 40, show: () => office() || crewRole(), render: cartsTab });
-registerTab({ id: 'tonnage', label: 'Tonnage', order: 50, show: () => office(), render: tonnageTab });
-registerTab({ id: 'recycling', label: 'Recycling report', order: 60, show: () => isManager(), render: recyclingTab });
+registerTab({ id: 'carts', label: 'Carts', order: 65, show: () => office() || crewRole(), render: cartsTab });
+registerTab({ id: 'tonnage', label: 'Tonnage', order: 70, show: () => office(), render: tonnageTab });
+registerTab({ id: 'recycling', label: 'Recycling report', order: 75, show: () => isManager(), render: recyclingTab });
 
 export { cartsTab, tonnageTab, recyclingTab };
