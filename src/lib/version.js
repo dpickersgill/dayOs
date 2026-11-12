@@ -14,6 +14,10 @@
 //         or "platform" for notes only the operator sees in the console
 //   text: one plain sentence, written for the people who use the app
 //   help: optional help article id
+//   orgs: optional list ('mountain', 'municipality'): only that kind of tenant sees the note (2026.11.20)
+// A release may carry titles: { mountain: '...', municipality: '...' }, its title for that kind of tenant. Releases
+// before the municipal edition (2026.11.19) were written for ski areas: a municipality sees none of their notes. A
+// release with no note for someone is left out for them.
 const fs = require('fs');
 const path = require('path');
 
@@ -46,9 +50,11 @@ const MANAGERS = ['owner', 'manager'];
  * Can this person see this note? modules is the mountain's list of apps that are on (null means every app). A note with
  * orgs is only for those kinds of tenant ('mountain', 'municipality'; 2026.11.20), when the viewer's kind is known.
  */
-function noteFor(note, { role, modules, org = null }) {
+const FIRST_MUNICIPAL = '2026.11.19';
+function noteFor(note, { role, modules, org = null }, release = null) {
   if (note.who === 'platform') return false;
   if (Array.isArray(note.orgs) && org && !note.orgs.includes(org)) return false;
+  if (org === 'municipality' && release && compare(release.version, FIRST_MUNICIPAL) < 0) return false;
   if (note.app && modules && !modules.includes(note.app)) return false;
   if (MANAGERS.includes(role)) return true;
   return !Array.isArray(note.who) || note.who.includes(role);
@@ -56,7 +62,7 @@ function noteFor(note, { role, modules, org = null }) {
 
 /** The releases this person would care about, newest first, each with only their notes; releases left empty are dropped. */
 function releasesFor(viewer) {
-  return RELEASES.map((r) => ({ version: r.version, date: r.date, title: r.title || null, notes: r.notes.filter((n) => noteFor(n, viewer)).map(({ kind, app, text, help }) => ({ kind, app: app || null, text, help: help || null })) }))
+  return RELEASES.map((r) => ({ version: r.version, date: r.date, title: (viewer.org && r.titles && r.titles[viewer.org]) || r.title || null, notes: r.notes.filter((n) => noteFor(n, viewer, r)).map(({ kind, app, text, help }) => ({ kind, app: app || null, text, help: help || null })) }))
     .filter((r) => r.notes.length);
 }
 

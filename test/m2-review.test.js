@@ -255,3 +255,16 @@ test('6. a ski area is refused the municipal crew endpoints (403, module_disable
   assert.equal((await api('GET', '/workforce/staff', { token: S.token })).status, 200);
   for (const p of ['/workforce/crew-board', '/workforce/oncall', '/ops/work-orders/map']) assert.equal((await api('GET', p, { token: tokens.manager })).status, 200, `municipality: ${p}`);
 });
+
+test('7. What\'s new: a ski area sees its own title for 2026.11.20 and only its notes; a municipality sees no ski-only release', async () => {
+  const S = await skiArea('seven');
+  const ski = (await api('GET', '/whats-new', { token: S.token })).body.releases;
+  const r20 = ski.find((r) => r.version === '2026.11.20');
+  assert.ok(r20, 'the passkey note is for everyone');
+  assert.ok(!/municipal/i.test(r20.title), `ski title: ${r20.title}`);
+  assert.ok(r20.notes.every((n) => !/municipal|borough|residents|water main|Chapter 94|MS4/i.test(n.text)), JSON.stringify(r20.notes.map((n) => n.text.slice(0, 40))));
+  const muni = (await api('GET', '/whats-new', { token: tokens.owner })).body.releases;
+  assert.match(muni.find((r) => r.version === '2026.11.20').title, /^Municipal edition/);
+  assert.ok(muni.every((r) => require('../src/lib/version').compare(r.version, '2026.11.19') >= 0), `releases before the municipal edition: ${muni.map((r) => r.version).filter((v) => v < '2026.11.19').slice(0, 5)}`);
+  assert.ok(muni.every((r) => r.notes.length), 'no empty release');
+});
