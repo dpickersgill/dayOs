@@ -366,7 +366,7 @@ function locDialog(l, all, done) {
   const cur = l || {};
   formDialog(l ? `Edit ${l.name}` : 'Add a place', h('div', { class: 'form' },
     field('Name', input({ name: 'name', required: true, maxlength: 100, value: cur.name || '' })),
-    field('Kind', select([['shop', 'Shop'], ['yard', 'Yard'], ['building', 'Building'], ['lift', 'Lift terminal'], ['storage', 'Storage'], ['area', 'Area'], ['other', 'Other']], cur.kind || 'area', { name: 'kind' })),
+    field('Kind', select([['shop', 'Shop'], ['yard', 'Yard'], ['building', 'Building'], ...(isMuni() && cur.kind !== 'lift' ? [] : [['lift', 'Lift terminal']]), ['storage', 'Storage'], ['area', 'Area'], ['other', 'Other']], cur.kind || 'area', { name: 'kind' })),
     field('Inside', select([['', 'Nothing'], ...all.filter((x) => x.id !== cur.id).map((x) => [x.id, x.name])], cur.parent_id || '', { name: 'parent_id' })),
     l ? h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'active', checked: Boolean(cur.active) }), ' In use') : null),
   async (fd) => {

@@ -98,7 +98,8 @@ function guarded(a) {
 
 export async function render(root, params = []) {
   enterArea();
-  const asked = params[0] || null;
+  // #/settings/organization is the details page's address (2026.11.20); #/settings/mountain, the old one, still opens it.
+  const asked = params[0] === 'organization' ? 'mountain' : params[0] || null;
   const manager = isManager();
   const pl = manager ? null : await patrolLevel();
   const who = { manager, schoolDirector: !manager && schoolCan('director'), patrolAdmin: Boolean(pl && (pl.level === 'admin' || pl.features.includes('manage_settings'))), patrol: pl };
@@ -117,7 +118,7 @@ export async function render(root, params = []) {
       const mine = pages.filter((p) => p[1] === g);
       if (!mine.length) return null;
       return h('div', { class: 'set-group' }, h('p', { class: 'set-group-name' }, name),
-        h('ul', null, mine.map(([key, , text]) => h('li', null, guarded(h('a', { href: `#/settings/${key}`, class: 'set-link', dataset: { page: key }, 'aria-current': key === page[0] && !(home && phone) ? 'page' : null }, text))))));
+        h('ul', null, mine.map(([key, , text]) => h('li', null, guarded(h('a', { href: `#/settings/${key === 'mountain' ? 'organization' : key}`, class: 'set-link', dataset: { page: key }, 'aria-current': key === page[0] && !(home && phone) ? 'page' : null }, text))))));
     }));
 
   // ---- the page

@@ -41,7 +41,7 @@ async function whoDid(conn, req, given) {
 /**
  * Records one inspection inside the caller's transaction. target: from targetOf (locked). body: { template_id, items,
  * hours, miles, inspector, note }. opts: { programId, recordMeter(conn, req, assetId, meter, value, source, at) }.
- * Returns { id, result, work_order_id, condition_score }.
+ * Returns { id, result, work_order_id, condition_score, out_of_service (true when a safety-critical failure took it out) }.
  */
 async function record(conn, req, target, body, { programId = null, recordMeter = null } = {}) {
   const t = req.auth.tenantId;
@@ -65,8 +65,11 @@ async function record(conn, req, target, body, { programId = null, recordMeter =
   const failed = items.filter((i) => i.result === 'fail');
   if (target.type === 'asset' && recordMeter) {
     for (const m of ['hours', 'miles']) if (body[m] !== null && body[m] !== undefined) await recordMeter(conn, req, target.id, m, body[m], 'inspection', at);
+    // A pre-trip's odometer reading is the vehicle's miles, when the miles were not given separately (2026.11.20).
+    const odo = items.find((i) => i.key === 'odometer' && i.result !== 'na' && typeof i.value === 'number');
+    if (odo && (body.miles === null || body.miles === undefined)) await recordMeter(conn, req, target.id, 'miles', odo.value, 'inspection', at);
   }
-  let woId = null;
+  let woId = null; let stopped = false;
   if (failed.length) {
     const maintenance = require('../routes/maintenance');
     const urgent = target.critical || (target.criticality !== null && target.criticality >= 4);
@@ -78,7 +81,13 @@ async function record(conn, req, target, body, { programId = null, recordMeter =
       map_feature_id: target.type === 'feature' ? target.id : null,
       program_id: programId,
     }, programId ? 'program' : 'inspection');
-    if (target.type === 'asset' && target.status === 'in_service') await conn.query("UPDATE ops_assets SET status = 'needs_service' WHERE tenant_id = ? AND id = ?", [t, target.id]);
+    // A failed safety-critical item (stops_use: brakes, steering, lights, tires) takes the vehicle out of service; any other
+    // failure marks an in-service asset as needing service (2026.11.20).
+    if (target.type === 'asset' && failed.some((i) => i.stops_use) && ['in_service', 'needs_service'].includes(target.status)) {
+      await conn.query("UPDATE ops_assets SET status = 'out_of_service' WHERE tenant_id = ? AND id = ?", [t, target.id]);
+      stopped = true;
+    }
+    else if (target.type === 'asset' && target.status === 'in_service') await conn.query("UPDATE ops_assets SET status = 'needs_service' WHERE tenant_id = ? AND id = ?", [t, target.id]);
   }
   const score = tpl.sets_condition ? CR.conditionOf(items) : null;
   const who = await whoDid(conn, req, body.inspector);
@@ -95,7 +104,7 @@ async function record(conn, req, target, body, { programId = null, recordMeter =
       [t, target.type === 'asset' ? target.id : null, target.type === 'feature' ? target.id : null, id, i.key, i.label.slice(0, 150), i.value, at]);
   }
   await audit(conn, req, 'inspect', target.type === 'asset' ? 'ops_assets' : 'map_features', target.id, { inspection_id: id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, ...(programId ? { program_id: programId } : {}), ...(score !== null ? { condition_score: score } : {}) });
-  return { id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, condition_score: score };
+  return { id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, condition_score: score, ...(stopped ? { out_of_service: true } : {}) };
 }
 
 /**

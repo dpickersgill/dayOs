@@ -540,24 +540,30 @@ router.get('/auth/me', authenticate, async (req, res) => {
 
 /**
  * Passkeys first for leaders: owners, managers and patrol directors and admins (roster Admin or Manager) are asked after
- * each sign-in until they have two passkeys (this device and a second one: another device or a security key). Everyone
- * else who can open patient care records (patrollers, the ski area login) is offered it once. Always skippable ("Not
- * now" only hides it for this session in the app); app codes and recovery codes stay as backups. Never on a shared
+ * each sign-in until they have two passkeys (this device and a second one: another device or a security key), except that
+ * "Not now" puts it off for 30 days for that login (2026.11.20: every new session asking was too much, on a ski area as
+ * much as in a borough). Everyone else who can open patient care records (patrollers, the ski area login) is offered it
+ * once. App codes and recovery codes stay as backups. Never on a shared
  * terminal, the patrol-room screen or a demo. Returns { kind: 'leader' | 'once', have, want } or null.
  */
+const PASSKEY_ASK_AGAIN_DAYS = 30;
 async function passkeyPrompt(user, req) {
   if (req.auth.terminalId || req.auth.display || Number(user.sandbox_expires_at ? 1 : 0)) return null;
   const have = await passkeys.count('user', user.id);
   const leader = ['owner', 'manager'].includes(user.role) || Number(user.patrol_lead);
   // What else this login signs in with, so the offer says "keep working as a backup" only about what it really has.
   const backup = async () => ({ app: Boolean(Number(user.totp_enabled)), codes: Number((await one(pool, 'SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.id])).n) > 0 });
-  if (leader) return have >= 2 ? null : { kind: 'leader', have, want: 2, ...(await backup()) };
+  if (leader) {
+    if (have >= 2) return null;
+    const recent = await one(pool, "SELECT id FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'passkey_offer_seen' AND at > UTC_TIMESTAMP() - INTERVAL ? DAY LIMIT 1", [req.auth.tenantId, req.auth.userId, PASSKEY_ASK_AGAIN_DAYS]);
+    return recent ? null : { kind: 'leader', have, want: 2, ...(await backup()) };
+  }
   const records = user.role === 'patrol' || user.role === 'area' || Number(user.on_patrol);
   if (!records || have) return null;
   const offered = await one(pool, "SELECT id FROM audit_log WHERE tenant_id = ? AND user_id = ? AND action = 'passkey_offer_seen' LIMIT 1", [req.auth.tenantId, req.auth.userId]);
   return offered ? null : { kind: 'once', have, want: 1, ...(await backup()) };
 }
-/** "Not now" on the passkey offer: a line patroller is not offered it again (leaders are, at their next sign-in). */
+/** "Not now" on the passkey offer: a line patroller is not offered it again; a leader is asked again after 30 days. */
 router.post('/auth/passkey-prompt/seen', authenticate, async (req, res) => {
   await audit(pool, req, 'passkey_offer_seen', 'users', req.auth.userId);
   res.status(204).end();

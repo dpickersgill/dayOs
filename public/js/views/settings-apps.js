@@ -4,7 +4,7 @@
 // (guests buying online, date changes, the daily limit, the shop's look) and Ski school (online booking, cancellations
 // and refunds). A module without the export, or one that fails to load, simply adds nothing.
 import { get, put } from '../api.js';
-import { h, ctx, input, errorBox, toCents, centsToInput, loading } from '../ui.js';
+import { h, ctx, input, errorBox, toCents, centsToInput, loading, isMuni } from '../ui.js';
 import { brandPanel } from './shopbrand.js';
 import { card, row, toggle, amount, linkRow, formTracker, nothingHere } from './settings-kit.js';
 
@@ -51,7 +51,8 @@ async function sectionsFor(page, who) {
     if (!moduleOn(mod)) continue;
     if (who.schoolDirector && !who.manager && file !== 'school') continue; // a ski school director: the school's own sections (2026.11.9)
     const secs = await sectionsOf(file);
-    for (const [key, sec] of Object.entries(secs)) if (sec && typeof sec.render === 'function' && allowed(sec, who)) out.push([file, key, sec]);
+    // sec.orgs: a section for one kind of tenant only (a ski area's Staff for attractions is not a municipality's).
+    for (const [key, sec] of Object.entries(secs)) if (sec && typeof sec.render === 'function' && allowed(sec, who) && (!sec.orgs || sec.orgs.includes(isMuni() ? 'municipality' : 'mountain'))) out.push([file, key, sec]);
   }
   return out;
 }

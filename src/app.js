@@ -440,6 +440,7 @@ function createApp() {
   api.use('/board', board);
   api.use('/calendar', require('./routes/mountaincal').router); // 2026.11.10: the Mountain calendar
   api.use('/street-notices', require('./routes/streetnotices').router); // muni release 1: street notices and resident alerts
+  api.use('/jump', require('./routes/jump')); // 2026.11.20: Jump to finds records (map items, assets, work orders, requests, people)
   api.use(finance); // tax rules, tenant profile, till, reconciliation, receipts, exports
 
   app.use('/api/v1', api);

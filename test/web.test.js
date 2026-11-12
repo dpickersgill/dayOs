@@ -3799,7 +3799,9 @@ test('municipal assets: risk on the overview, the new checklist kinds, a map ite
     [...root.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Inspect V-1' || b.getAttribute('aria-label') === 'Inspect Valve V-1').click(); await settle();
     const ins = document.querySelector('.dialog.sheet');
     clean(ins, 'program inspection sheet');
-    for (const [i, v] of [[0, '18'], [1, '18']]) { const f = ins.querySelector(`#ins-${i}-l`).closest('.ins-item').querySelector('input[type=number]'); f.value = v; }
+    // A valve with neither turns on its record nor a size: "turns expected" is not asked (2026.11.20), only the count.
+    assert.equal(ins.querySelector('#ins-0-l'), null); assert.doesNotMatch(ins.textContent, /Turns expected|at least 0/);
+    for (const [i, v] of [[1, '18']]) { const f = ins.querySelector(`#ins-${i}-l`).closest('.ins-item').querySelector('input[type=number]'); f.value = v; }
     ins.querySelector('#ins-2 [data-value="Right to close"]').click();
     ins.querySelector('#ins-3 [data-value=yes]').click();
     ins.querySelector('#ins-4 [data-value=Good]').click();

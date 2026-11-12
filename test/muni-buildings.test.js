@@ -90,7 +90,7 @@ test('the life-safety library is seeded when Buildings is turned on, once', asyn
   assert.equal(elev.certificate, 'Certificate of operation'); assert.equal(elev.standard, '34 Pa. Code 405.7');
   assert.equal(lib.body.data.find((x) => x.code === 'backflow_annual').items.find((i) => i.key === 'check1').type, 'number');
   // The asset register's own starting checklists are still there.
-  assert.ok((await q("SELECT id FROM inspection_templates WHERE tenant_id = ? AND name = 'Vehicle pre-trip'", [muni.id])).length);
+  assert.ok((await q("SELECT id FROM inspection_templates WHERE tenant_id = ? AND name = 'Public works truck pre-trip'", [muni.id])).length, 'a municipality\'s trucks get the public works pre-trip (2026.11.20)');
 
   // A manager removes one and renames another; asking again does not put either back.
   const roof = lib.body.data.find((x) => x.code === 'roof_annual');

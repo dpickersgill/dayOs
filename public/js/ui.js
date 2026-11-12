@@ -428,10 +428,11 @@ export function formDialog(title, fieldsEl, submit, { submitText = 'Save', wide 
   return dlg;
 }
 
-export function confirmDialog(title, message, confirmText, onConfirm, { danger = false } = {}) {
+export function confirmDialog(title, message, confirmText, onConfirm, { danger = false, noText = 'Cancel' } = {}) {
   const slot = h('div');
   const yes = h('button', { type: 'button', class: danger ? 'btn danger' : 'btn primary' }, confirmText);
-  const no = h('button', { type: 'button', class: 'btn' }, 'Cancel');
+  // noText: the way back, in words, when "Cancel" would be read as the action itself ("Cancel job" asks "Keep the job").
+  const no = h('button', { type: 'button', class: 'btn' }, noText);
   const dlg = dialog(title, [h('p', null, message), slot, h('div', { class: 'footer row' }, no, yes)]);
   no.addEventListener('click', dlg.close);
   yes.addEventListener('click', async () => {

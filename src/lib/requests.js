@@ -84,14 +84,18 @@ function standardFor(standards, categoryId, streetClass) {
 }
 
 // ---------------------------------------------------------------- references and tokens
-/** A short reference residents can read out on the phone: R-4821. Four digits while they last, then more. */
+/**
+ * The next reference in this municipality, in the order requests come in: R-1001, R-1002, ... (2026.11.20; before that
+ * references were random four-digit numbers, which stay as they were). The counter row is locked until the caller's
+ * transaction ends, so two requests at once never get the same number; a number an older random reference already holds
+ * is skipped. The reference is only a name to read out on the phone: the resident's status link uses status_token.
+ */
 async function newReference(conn, tenantId) {
-  for (let digits = 4; digits <= 7; digits += 1) {
-    for (let i = 0; i < 12; i += 1) {
-      const n = crypto.randomInt(10 ** (digits - 1), 10 ** digits);
-      const ref = `R-${n}`;
-      if (!(await one(conn, 'SELECT id FROM requests WHERE tenant_id = ? AND reference = ?', [tenantId, ref]))) return ref;
-    }
+  await conn.query('INSERT IGNORE INTO request_numbers (tenant_id, last_n) VALUES (?, 1000)', [tenantId]);
+  for (let i = 0; i < 200; i += 1) {
+    const [r] = await conn.query('UPDATE request_numbers SET last_n = LAST_INSERT_ID(last_n + 1) WHERE tenant_id = ?', [tenantId]);
+    const ref = `R-${Number(r.insertId)}`;
+    if (!(await one(conn, 'SELECT id FROM requests WHERE tenant_id = ? AND reference = ?', [tenantId, ref]))) return ref;
   }
   throw new Error('Could not make a request reference');
 }
@@ -106,25 +110,34 @@ function normalRef(text) {
 const msOf = (local, tz) => (local ? Date.parse(`${utcFromLocal(String(local).slice(0, 19), tz).replace(' ', 'T')}Z`) : null);
 const hoursBetween = (a, b, tz) => (a && b ? Math.max(0, (msOf(b, tz) - msOf(a, tz)) / 3600000) : null);
 
-/** A length of time in plain words: "40 minutes", "31 hours", "4.5 days". */
+/** A length of time in plain words: "40 minutes", "31 hours", "2.5 days". Hours under 48, days from 48 on. */
 function spanWords(hours) {
   if (hours === null || hours === undefined) return '';
   if (hours < 1) { const m = Math.max(1, Math.round(hours * 60)); return `${m} minute${m === 1 ? '' : 's'}`; }
-  if (hours < 72) { const h = Math.round(hours); return `${h} hour${h === 1 ? '' : 's'}`; }
+  if (hours < 47.5) { const h = Math.round(hours); return `${h} hour${h === 1 ? '' : 's'}`; }
   const d = Math.round((hours / 24) * 2) / 2;
   return `${d % 1 ? d.toFixed(1) : d} days`;
 }
-/** A target as the manager set it: whole days when it is a number of days of two or more, else hours. */
+/**
+ * A target in the same unit everywhere it shows (the request, the lists, the ledger, Settings): hours under 48, days from
+ * 48 on ("5 days", "2.5 days", "2 days 2 hours" when it is not a whole or half day).
+ */
 function targetWords(hours) {
   if (hours === null || hours === undefined) return '';
-  if (hours >= 48 && hours % 24 === 0) return `${hours / 24} days`;
-  return `${hours} hour${hours === 1 ? '' : 's'}`;
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`;
+  if (hours % 12 === 0) { const d = hours / 24; return `${d % 1 ? d.toFixed(1) : d} days`; }
+  const rest = hours % 24;
+  return `${Math.floor(hours / 24)} days ${rest} hour${rest === 1 ? '' : 's'}`;
+}
+/** A standard in words: "make safe within 24 hours, fix within 5 days". */
+function standardWords(std) {
+  return `${std.make_safe_hours ? `make safe within ${targetWords(std.make_safe_hours)}` : 'no make-safe target'}, ${std.fix_hours ? `fix within ${targetWords(std.fix_hours)}` : 'no fix target'}`;
 }
 
 /**
  * One measure (make safe or fix) against its target, in plain words:
- *   done:  "Fixed in 31 hours, target 48 hours" (met), "Fixed in 3 days, target 48 hours" (missed)
- *   open:  "Open 20 hours, target 48 hours", "Open 60 hours, 12 hours past the 48-hour target"
+ *   done:  "Fixed in 31 hours, target 2 days" (met), "Fixed in 3 days, target 2 days" (missed)
+ *   open:  "Open 20 hours, target 2 days", "Open 2.5 days, 12 hours past the target of 2 days"
  */
 function measure(what, from, to, target, now, tz, { stopped = false } = {}) {
   const done = Boolean(to);
@@ -135,7 +148,7 @@ function measure(what, from, to, target, now, tz, { stopped = false } = {}) {
   else if (stopped) out.words = '';
   else if (!target) out.words = `Open ${spanWords(hours)}, no target set`;
   else if (hours <= target) out.words = `Open ${spanWords(hours)}, target ${targetWords(target)}`;
-  else out.words = `Open ${spanWords(hours)}, ${spanWords(hours - target)} past the ${targetWords(target).replace(/s$/, '').replace(' ', '-')} target`;
+  else out.words = `Open ${spanWords(hours)}, ${spanWords(hours - target)} past the target of ${targetWords(target)}`;
   if (done && !target) out.words += ', no target set';
   return out;
 }
@@ -420,7 +433,7 @@ async function ledger(conn, tenantId, { street_id: streetId, category_id: catego
 
 module.exports = {
   DEFAULT_CATEGORIES, SOURCES, SOURCE_WORDS, STATUSES, STATUS_WORDS, OPEN, DONE, CLASSES, CLASS_WORDS, REQ_SQL, ALERT_THREAD,
-  ensureSetup, settingsOf, categoriesOf, standardsOf, standardFor, newReference, newToken, normalRef,
+  ensureSetup, settingsOf, categoriesOf, standardsOf, standardFor, standardWords, newReference, newToken, normalRef,
   spanWords, targetWords, measure, timing, placeWords, roundPosition, requestOf, event, tzOf, publicStatus, statusLink,
   tellResident, syncAlertThread, alertNew, makeWorkOrder, markFixed, workOrderDone, duplicatesOf, tellFixed, ledger, hoursBetween, withoutHouseNumber, publicPlace,
 };

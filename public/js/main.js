@@ -193,7 +193,7 @@ function showSignIn(message) {
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Sign in');
   // The remembered organization is said plainly, with a way to change it: signing in to the wrong one looks exactly like a
   // wrong password. The page does not know yet whether it is a ski area or a municipality, so the words fit both.
-  const slugField = field('Organization', slug, 'The short name you were given, such as spring-mountain or riverbend-borough');
+  const slugField = field('Organization', slug, 'The short name you were given, such as your-organization');
   const note = h('div', { 'aria-live': 'polite', 'data-mountain-note': '' });
   const change = h('button', { type: 'button', class: 'btn link', 'aria-label': `Change the organization (now ${known})` }, 'Change');
   const shown = known ? h('p', { class: 'signin-mountain', 'data-mountain': known }, 'Organization: ', h('strong', null, known), '.', change) : null;
@@ -211,7 +211,7 @@ function showSignIn(message) {
     clear(err);
     const tenant = slug.value.trim().toLowerCase();
     const login = email.value.trim();
-    if (!tenant) { slugField.hidden = false; if (shown) shown.remove(); err.append(errorBox(new Error('Type your mountain first'))); slug.focus(); return; }
+    if (!tenant) { slugField.hidden = false; if (shown) shown.remove(); err.append(errorBox(new Error('Type your organization first'))); slug.focus(); return; }
     go.disabled = true;
     try {
       keepShared = Boolean(remember && remember.checked && ownDevice);
@@ -230,7 +230,7 @@ function showSignIn(message) {
   const pk = passkey.supported() ? button('Sign in with a passkey', async () => {
     clear(pkErr);
     const tenant = slug.value.trim().toLowerCase();
-    if (!tenant) { pkErr.append(errorBox(new Error('Type your mountain first'))); slugField.hidden = false; slug.focus(); return; }
+    if (!tenant) { pkErr.append(errorBox(new Error('Type your organization first'))); slugField.hidden = false; slug.focus(); return; }
     pk.disabled = true;
     try {
       keepShared = Boolean(remember && remember.checked && ownDevice);
@@ -258,7 +258,7 @@ function showSignIn(message) {
   const pkBlock = pk ? h('div', { class: 'stack tight signin-passkey' }, h('p', { class: 'muted small' }, pkFirst ? 'You used a passkey here before: one touch signs you in.' : 'Or, if you added a passkey on this phone or computer:'), pk, pkErr) : null;
   app.append(h('div', { class: 'signin' },
     h('section', { class: 'signin-side' },
-      h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Run the whole operation from one screen.'),
+      h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, 'Run the whole operation from one screen.'),
         h('p', null, 'The daily work, the crews and the records, in one place.')), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'Sign in'), message ? h('p', { class: 'muted', role: 'status' }, message) : null, pkFirst ? pkBlock : null, form,
       pkFirst ? null : pkBlock,
@@ -371,7 +371,7 @@ function showLocked(who, message) {
 /** The sign-in page frame used by the email screens: the ridge on one side, the form on the other. */
 function signInFrame(lead, say, title, ...body) {
   clear(app);
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, lead), h('p', null, say)), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, lead), h('p', null, say)), ridge()),
     h('section', { class: 'signin-form stack' }, h('h2', null, title), ...body)));
 }
 
@@ -385,11 +385,11 @@ function showEmailCode(purpose, tenant0 = readSlug(), login0 = '') {
   const slug = input({ name: 'tenant', autocomplete: 'organization', autocapitalize: 'none', spellcheck: 'false', value: tenant0 || readSlug(), required: true });
   const who = input({ name: 'login', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', value: login0, required: true });
   const go = h('button', { type: 'submit', class: 'btn primary' }, 'Email me a code');
-  const form = h('form', { novalidate: true, 'data-step': 'email-ask' }, field('Mountain', slug), field('Username or email', who, `The code goes to the email on your login. No email on your login? Ask a manager to add one, or sign in with your password. ${NOT_CASE}`), err, h('div', { class: 'row' }, go, button('Back to sign in', () => showSignIn(), { small: true })));
+  const form = h('form', { novalidate: true, 'data-step': 'email-ask' }, field('Organization', slug), field('Username or email', who, `The code goes to the email on your login. No email on your login? Ask a manager to add one, or sign in with your password. ${NOT_CASE}`), err, h('div', { class: 'row' }, go, button('Back to sign in', () => showSignIn(), { small: true })));
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); clear(err);
     const tenant = slug.value.trim().toLowerCase(); const login = who.value.trim();
-    if (!tenant || !login) { err.append(errorBox(new Error('Enter your mountain and your username or email'))); return; }
+    if (!tenant || !login) { err.append(errorBox(new Error('Enter your organization and your username or email'))); return; }
     go.disabled = true;
     try {
       const out = await post('/auth/email-code', { tenant, login, purpose });
@@ -495,7 +495,7 @@ function showSecondStep(first) {
   }
   const lead = methods.email ? 'Check your email.' : 'One more step.';
   const say = methods.email ? 'This device has not signed in to your account before.' : methods.passkey ? 'Use your passkey to finish signing in.' : 'Enter the code from your authenticator app to finish signing in.';
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, lead), h('p', null, say)), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, lead), h('p', null, say)), ridge()),
     h('section', { class: 'signin-form stack' }, h('h2', null, methods.email ? 'New device' : 'Two-step sign-in'), ...parts, err, button('Start again', () => showSignIn(), { small: true }))));
   const first_ = app.querySelector('.signin-form .btn.primary, .signin-form input');
   if (first_) first_.focus();
@@ -518,7 +518,7 @@ async function showPinSignIn(message) {
     try { await signedIn(await post('/auth/pin-login', { tenant: term.tenant, terminal: term.secret, login: who.value.trim(), pin: pin.value.trim() })); } catch (ex) { pin.value = ''; err.append(errorBox(ex)); go.disabled = false; pin.focus(); }
   });
   const title = h('h2', null, term.name);
-  app.append(h('div', { class: 'signin terminal' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Shared terminal.'), h('p', null, 'Switch in with your username and PIN. Sign out when you step away, so the next person starts as themselves.')), ridge()),
+  app.append(h('div', { class: 'signin terminal' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, 'Shared terminal.'), h('p', null, 'Switch in with your username and PIN. Sign out when you step away, so the next person starts as themselves.')), ridge()),
     h('section', { class: 'signin-form' }, title, message ? h('p', { class: 'muted', role: 'status' }, message) : null, form,
       h('p', { class: 'small' }, button('Sign in with a password or passkey', () => showSignIn(), { small: true })))));
   who.focus();
@@ -530,7 +530,7 @@ async function showPinSignIn(message) {
 function showEnrollment() {
   clear(app);
   const done = async () => { await start(); };
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : ctx.me.mfa_rule === 'school_director' ? 'Ski school directors sell, refund and approve pay, so they use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, 'Protect your account.'), h('p', null, ctx.me.mfa_rule === 'mountain' ? 'Your mountain requires two-step sign-in.' : ctx.me.mfa_rule === 'patrol' ? 'Patrol holds patient details, so patrollers use two-step sign-in.' : ctx.me.mfa_rule === 'school_director' ? 'Ski school directors sell, refund and approve pay, so they use two-step sign-in.' : 'Owners, managers and patrol leads use two-step sign-in, because they can change everything.')), ridge()),
     h('section', { class: 'signin-form stack' }, h('p', null, 'Add a passkey (quickest: your fingerprint or face) or an authenticator app. Either one works.'), passkeysPanel(done), mfaPanel(done), button('Sign out', () => signOut(), { small: true }))));
 }
 
@@ -556,7 +556,7 @@ function showPasswordChange() {
       await start();
     } catch (ex) { err.append(errorBox(ex)); go.disabled = false; }
   });
-  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-logo-dark.png', alt: 'Verdynt/OS, resort operating system', width: '220', height: '109' })), h('h1', null, 'Choose your password.'), h('p', null, `Signed in as ${ctx.me.username || ctx.me.email}. Your password was set by a manager; choose your own to continue.`)), ridge()),
+  app.append(h('div', { class: 'signin' }, h('section', { class: 'signin-side' }, h('div', null, h('p', { class: 'brand' }, h('img', { class: 'brand-logo-full', src: '/brand/verdynt-word-dark.png', alt: 'Verdynt/OS', width: '220', height: '40' })), h('h1', null, 'Choose your password.'), h('p', null, `Signed in as ${ctx.me.username || ctx.me.email}. Your password was set by a manager; choose your own to continue.`)), ridge()),
     h('section', { class: 'signin-form' }, h('h2', null, 'New password'), form)));
   cur.focus();
 }
@@ -997,17 +997,25 @@ function backupLine(p) {
   return null;
 }
 
+// Field work on a phone (a work order, a program's targets, a request, a pre-trip): never interrupted by the offer. It
+// waits for a sign-in that opens somewhere else (2026.11.20).
+const FIELD_VIEWS = ['works', 'assetprograms', 'requests', 'assets', 'bulk', 'buildings', 'notices'];
+function inFieldWork() {
+  const small = window.matchMedia && window.matchMedia('(max-width: 700px)').matches;
+  const view = String(location.hash || '').replace(/^#\/?/, '').split(/[/?]/)[0];
+  return small && FIELD_VIEWS.includes(view);
+}
+
 function offerPasskey(p) {
   const SKIP = 'so.pk.later';
   try { if (sessionStorage.getItem(SKIP)) return; } catch (_) { /* fine */ }
-  if (!passkey.supported()) return;
+  if (!passkey.supported() || inFieldWork()) return;
   const leader = p.kind === 'leader';
   const err = h('div');
-  const later = async () => {
-    try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ }
-    if (!leader) post('/auth/passkey-prompt/seen').catch(() => {});
-    dlg.close();
-  };
+  // Not now (or closing it) puts it off: a leader is asked again in 30 days, anyone else never (the server keeps it per login).
+  let told = false;
+  const seen = () => { if (told) return; told = true; try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ } post('/auth/passkey-prompt/seen').catch(() => {}); };
+  const later = async () => { seen(); dlg.close(); };
   const add = button(p.have ? 'Add a second passkey here' : 'Add a passkey on this device', async () => {
     clear(err); add.disabled = true;
     try {
@@ -1015,8 +1023,7 @@ function offerPasskey(p) {
       await addPasskey();
       notePasskeyHere();
       toast(leader && p.have + 1 < 2 ? 'Passkey added. Add a second one on another phone or a security key, in Settings.' : 'Passkey added. Next time, one touch signs you in.');
-      try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ }
-      if (!leader) post('/auth/passkey-prompt/seen').catch(() => {});
+      seen();
       dlg.close();
     } catch (ex) { err.append(errorBox(ex)); add.disabled = false; }
   }, { kind: 'primary' });
@@ -1027,8 +1034,8 @@ function offerPasskey(p) {
       : leader ? h('p', null, `You can see every patient record and change who can do what, so a passkey is the safest way in: nobody can phish it or guess it. Add two: one on this device, and a second on another phone or a security key, so a lost phone never locks you out. You have ${p.have} of 2.`)
       : h('p', null, 'Patrol records are private. A passkey signs you in and opens records with one touch, even with cold hands.'),
     backupLine(p) ? h('p', { class: 'muted small', 'data-backup': '' }, backupLine(p)) : null,
-    add, err, h('div', { class: 'row' }, button('Not now', later, { small: true, kind: 'quiet' })));
-  const dlg = dialog('Add a passkey', body, { onClose: () => { try { sessionStorage.setItem(SKIP, '1'); } catch (_) { /* fine */ } } });
+    add, err, h('div', { class: 'row' }, button('Not now', later, { small: true, kind: 'quiet' }), leader ? h('span', { class: 'muted small' }, 'We ask again in 30 days.') : null));
+  const dlg = dialog('Add a passkey', body, { onClose: seen });
 }
 
 /** Opened with no signal: a strip says so, and offers to reload once the signal is back. */

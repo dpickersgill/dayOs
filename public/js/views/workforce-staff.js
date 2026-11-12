@@ -2,7 +2,7 @@
 // details, positions they work, certifications, availability (weekly and instructor open dates), their login, their
 // patrol and ski school roles, this week's hours and upcoming shifts.
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, state, label, empty, errorBox, fmtDate, todayStr, addDays, isManager } from '../ui.js';
+import { h, clear, input, select, field, button, toast, formDialog, confirmDialog, dialog, table, state, label, empty, errorBox, fmtDate, todayStr, addDays, isManager, isMuni } from '../ui.js';
 import { availabilityDialog, WEEKDAYS } from './myshifts.js';
 import { span, hrs, dayShort, monthDay, tod, STAFF_STATUS, STATUS_TONE, fullName } from './workforce-common.js';
 
@@ -20,7 +20,8 @@ export async function drawStaff(box) {
   const q = input({ type: 'search', placeholder: 'Find by name, email or phone', 'aria-label': 'Find staff' });
   const status = select([['active', 'Active'], ['onboarding', 'Onboarding'], ['applicant', 'Applicants'], ['inactive', 'Inactive'], ['', 'Everyone']], 'active', { 'aria-label': 'Status' });
   const pos = select([['', 'Any position'], ...positions.map((p) => [p.id, p.name])], '', { 'aria-label': 'Position' });
-  const kind = select([['', 'Employees and volunteers'], ['employee', 'Employees'], ['volunteer', 'Volunteers'], ['patrol', 'On ski patrol']], '', { 'aria-label': 'Type' });
+  // A municipality has no ski patrol or ski school (2026.11.20): no patrol filter, card or checkbox there.
+  const kind = select([['', 'Employees and volunteers'], ['employee', 'Employees'], ['volunteer', 'Volunteers'], ...(isMuni() ? [] : [['patrol', 'On ski patrol']])], '', { 'aria-label': 'Type' });
   const list = h('div');
   let token = 0;
   async function load() {
@@ -69,10 +70,10 @@ function addStaff() {
     field('Email', input({ name: 'email', type: 'email', maxlength: 255 })), field('Phone', input({ name: 'phone', type: 'tel', maxlength: 40 })),
     field('Paid or volunteer', select([['employee', 'Employee (paid)'], ['volunteer', 'Volunteer']], 'employee', { name: 'kind' }), 'Volunteers do not use the time clock or appear in payroll'),
     field('Status', select(STAFF_STATUS, 'active', { name: 'status' }), 'Only active people can be scheduled'), field('Hired on', input({ name: 'hired_on', type: 'date' })),
-    h('label', { class: 'check wide' }, patrol, ' On ski patrol (they appear in Patrol, where the director sets their access)'), rankField), async (fd) => {
+    isMuni() ? null : h('label', { class: 'check wide' }, patrol, ' On ski patrol (they appear in Patrol, where the director sets their access)'), isMuni() ? null : rankField), async (fd) => {
     const v = (k) => String(fd.get(k) || '').trim() || undefined;
     const r = await post('/workforce/staff', { person: { first_name: v('first'), last_name: v('last'), email: v('email'), phone: v('phone') }, employee: fd.get('kind') !== 'volunteer', status: v('status'), hired_on: v('hired_on') });
-    if (fd.get('patrol')) await post('/patrol/team', { staff_id: Number(r.id), level: v('rank') || 'patroller' });
+    if (!isMuni() && fd.get('patrol')) await post('/patrol/team', { staff_id: Number(r.id), level: v('rank') || 'patroller' });
     toast('Staff member added');
     location.hash = `#/workforce/staff/${r.id}`;
   }, { submitText: 'Add and open' });
@@ -112,14 +113,14 @@ export async function personPage(root, id) {
           p.instructor && p.instructor.open_dates.length ? [h('p', { class: 'muted small' }, 'Also open on these dates (from Instructor availability):'),
             h('ul', { class: 'plain-list' }, p.instructor.open_dates.map((d) => h('li', null, `${dayShort(String(d.open_date).slice(0, 10))} ${monthDay(String(d.open_date).slice(0, 10))}, ${tod(d.start_time)} to ${tod(d.end_time)}`)))] : null),
         card('Sign-in', p.login ? null : h('div', { class: 'row' }, button('Create login', () => createLogin(p, draw), { small: true, kind: 'primary' }), button('Link existing', () => linkLogin(p, draw), { small: true })),
-          p.login ? h('p', null, h('b', null, p.login.username || p.login.email), ` (${label(p.login.role)}${p.login.email && p.login.username ? `, ${p.login.email}` : ''}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
-            : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
-        card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/people?tab=team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
+          p.login ? h('p', null, h('b', null, p.login.username || p.login.email), ` (${isMuni() ? { staff: 'Crew', counter: 'Front desk' }[p.login.role] || label(p.login.role) : label(p.login.role)}${p.login.email && p.login.username ? `, ${p.login.email}` : ''}). They see their shifts in My shifts, clock in, and get schedule messages in their Inbox.`)
+            : h('p', { class: 'muted' }, p.employee ? 'No login. Without one they use the time clock kiosk and do not get schedule messages.' : isMuni() ? 'No login. A volunteer needs one to see their shifts and get schedule messages.' : 'No login. A volunteer patroller needs one to write cases and see the patrol schedule.')),
+        isMuni() ? null : card('Ski patrol', p.patrol ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/patrol/people?tab=team' }, 'Open in Patrol'), button('Take off patrol', () => offPatrol(p, draw), { small: true, kind: 'danger' })) : button('Put on ski patrol', () => onPatrol(p, draw), { small: true }),
           p.patrol ? [h('p', null, h('b', null, label(p.patrol.level)), p.patrol.callsign ? `, call sign ${p.patrol.callsign}` : '', p.patrol.patrol_number ? `, patrol number ${p.patrol.patrol_number}` : '', '.'),
             h('p', { class: 'muted small' }, `Patrol access: ${label(p.patrol.access_level || 'patrol')}${Number(p.patrol.exceptions) ? `, with ${p.patrol.exceptions} exception${Number(p.patrol.exceptions) === 1 ? '' : 's'}` : ''}. ${isManager() ? 'Change it with Edit details, or single permissions in Patrol, People, Roster.' : 'A patrol Admin sets access and permissions in Patrol, People, Roster.'}`),
             p.login ? null : h('p', { class: 'muted small' }, 'They need a login to open Patrol. Create one under Sign-in.')]
             : h('p', { class: 'muted' }, 'Not on ski patrol. Putting them on adds them to the patrol roster and lets them open Patrol with their login.')),
-        card('Ski school', isManager() ? button('Change access', () => schoolAccessDialog(id, name, draw), { small: true, label: `Change ski school access for ${name}` }) : null, schoolAccessLine(id), h('ul', { class: 'plain-list' },
+        isMuni() ? null : card('Ski school', isManager() ? button('Change access', () => schoolAccessDialog(id, name, draw), { small: true, label: `Change ski school access for ${name}` }) : null, schoolAccessLine(id), h('ul', { class: 'plain-list' },
           h('li', null, p.instructor ? [h('b', null, 'Ski school: '), p.instructor.is_public ? 'public instructor profile' : 'instructor profile (not public)', p.instructor.disciplines ? `, ${p.instructor.disciplines}` : '', '. ', h('a', { href: '#/availability' }, 'Instructor availability')] : h('span', { class: 'muted' }, 'No instructor profile.')))),
         card('Contact', null, h('p', null, [p.email, p.phone].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No email or phone.')))));
   }
@@ -230,7 +231,7 @@ function offPatrol(p, done) {
 /** A login for this person: username from their name, email optional (managers need one), a temporary password. */
 async function createLogin(p, done) {
   const { username } = await get(`/users/suggest-username?staff_id=${p.id}`);
-  const role = select([['staff', 'Staff'], ['counter', 'Counter'], ['instructor', 'Instructor'], ['patrol', 'Patrol'], ['manager', 'Manager']], p.patrol ? 'patrol' : 'staff', { name: 'role' });
+  const role = select(isMuni() ? [['staff', 'Crew'], ['counter', 'Front desk'], ['manager', 'Manager']] : [['staff', 'Staff'], ['counter', 'Counter'], ['instructor', 'Instructor'], ['patrol', 'Patrol'], ['manager', 'Manager']], p.patrol && !isMuni() ? 'patrol' : 'staff', { name: 'role' });
   formDialog(`Create a login for ${fullName(p)}`, h('div', { class: 'form' },
     field('Username', input({ name: 'username', value: username, required: true, maxlength: 40, autocapitalize: 'none', spellcheck: 'false' }), 'What they type to sign in. Not case sensitive: JSmith and jsmith are the same.'),
     field('Email', input({ name: 'email', type: 'email', value: p.email || '' }), 'Optional, except for managers'),

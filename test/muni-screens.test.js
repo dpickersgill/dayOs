@@ -119,7 +119,7 @@ test('Today: cards from every municipal app, for the owner, the crew and the fro
 
 // [view key in the menu, its file, the address, who has it, words that must be on it]
 const SCREENS = [
-  ['works', 'works', '#/works', ['owner', 'crew1'], ['Work orders', 'Download spreadsheet']],
+  ['works', 'works', '#/works', ['owner', 'crew1'], ['Work orders']],
   ['assetprograms', 'asset-programs', '#/assetprograms', ['owner', 'crew1'], ['Exercise zone 3 valves']],
   ['requests', 'requests', '#/requests', ['owner', 'crew1', 'frontdesk'], ['Requests']],
   ['notices', 'street-notices', '#/notices', ['owner', 'crew1', 'frontdesk'], ['Street notices']],
@@ -144,14 +144,15 @@ for (const [key, file, hash, users, words] of SCREENS) {
   });
 }
 
-test('Work orders: the crew sees the house number of a job from a request, and the spreadsheet button is there for everyone', skip(), async () => {
+test('Work orders: the crew sees the house number of a job from a request; the spreadsheet is for the office, not the crew', skip(), async () => {
   const [[w]] = await pool.query("SELECT w.id, w.location FROM work_orders w JOIN tenants t ON t.id = w.tenant_id JOIN requests r ON r.tenant_id = w.tenant_id AND r.id = w.request_id WHERE t.slug = ? AND r.house_number IS NOT NULL AND w.status NOT IN ('done','cancelled') LIMIT 1", [demo]);
   assert.ok(w, 'the demo has an open work order made from a request with a house number');
   const root = await show('crew1', 'works', '#/works');
   assert.ok(root.textContent.includes(w.location), 'the full location on the crew\'s list');
-  assert.ok([...root.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Download spreadsheet'));
+  assert.equal([...root.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Download spreadsheet'), false, 'the crew has no spreadsheet button (2026.11.20)');
   assert.equal([...root.querySelectorAll('label')].some((l) => /Include contact details/.test(l.textContent)), false, 'only a manager is offered contact details');
   const mgr = await show('owner', 'works', '#/works');
+  assert.ok([...mgr.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Download spreadsheet'));
   assert.ok([...mgr.querySelectorAll('label')].some((l) => /Include contact details \(logged\)/.test(l.textContent)));
 });
 
@@ -164,12 +165,14 @@ test('Bulk pickup, Collection day: no "null" above the counts on a day with no p
 
 test('municipal screens never call the ski APIs (/skischool, /guest-types) that would refuse them', skip(), async () => {
   asked.length = 0;
-  for (const [file, hash, params] of [['myshifts', '#/myshifts', []], ['workforce', '#/workforce', []], ['settings', '#/settings/streets', ['streets']], ['settings', '#/settings', []]]) {
+  const [[st]] = await pool.query('SELECT s.id FROM staff s JOIN tenants t ON t.id = s.tenant_id WHERE t.slug = ? ORDER BY s.id LIMIT 1', [demo]);
+  const [[as]] = await pool.query('SELECT a.id FROM ops_assets a JOIN tenants t ON t.id = a.tenant_id WHERE t.slug = ? ORDER BY a.id LIMIT 1', [demo]);
+  for (const [file, hash, params] of [['myshifts', '#/myshifts', []], ['workforce', '#/workforce', []], ['workforce', `#/workforce/staff/${st.id}`, ['staff', String(st.id)]], ['assets', `#/assets/a/${as.id}`, ['a', String(as.id)]], ['settings', '#/settings/streets', ['streets']], ['settings', '#/settings', []]]) {
     const root = await show('owner', file, hash, params);
     const box = root.querySelector('.error-box');
     assert.equal(box, null, `${hash}: ${box && box.textContent}`);
   }
-  const ski = asked.filter((u) => /\/api\/v1\/(skischool|guest-types)(\/|\?|$)/.test(u));
+  const ski = asked.filter((u) => /\/api\/v1\/(skischool|guest-types|schedule\/lifts)(\/|\?|$)/.test(u));
   assert.deepEqual(ski, [], 'no ski API asked for');
 });
 

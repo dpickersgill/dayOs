@@ -2278,6 +2278,21 @@ body:has(.tour-card) .demo-pill { display: none; }
 .filter-bar select { min-height: 44px; }
 .filter-bar .btn.primary { margin-left: auto; }
 .notice-box { border-left: 4px solid var(--warn-mark); padding-left: 14px; }
+/* Street notice review (2026.11.20): Send now on its own line, "Or send it later" with its own label, the draft's Edit and
+   Delete apart from sending; blanks still in a message are marked. */
+.notice-send { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.notice-later { display: grid; gap: 4px; margin-top: 4px; }
+.notice-later > label { font-weight: 700; }
+.notice-later .row { align-items: center; }
+.notice-later input[type="datetime-local"] { flex: 1 1 14rem; max-width: 18rem; min-width: 0; }
+.notice-draft-actions { border-top: 1px solid var(--line); padding-top: 10px; }
+.msg-body mark { background: var(--hold-tint); color: var(--hold); font-weight: 700; border-radius: 3px; padding: 0 2px; }
+/* A request's clock label ("Make safe:", "Fix:") before its words, in the list and the request (2026.11.20). */
+.clock-label { font-weight: 700; margin-right: 2px; }
+.state.req-clock { white-space: normal; align-items: baseline; }
+.state.req-clock::before { align-self: center; }
+/* A work order's Cancel job and Delete, apart from the work buttons (2026.11.20). */
+.wo-danger { border-top: 1px solid var(--line); padding-top: 10px; }
 .person-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--quiet); margin-top: 4px; }
 .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
 .pcard { display: grid; gap: 10px; }

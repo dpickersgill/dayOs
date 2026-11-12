@@ -23,10 +23,19 @@ const ref = () => Math.random().toString(36).slice(2, 12);
 let META = null;
 const meta = async (fresh = false) => { if (!META || fresh) META = await get('/requests/meta'); return META; };
 
-/** Time against the standard: the words, marked late when the target was missed. */
-function clock(m) {
+/** Time against the standard: the words, marked late when the target was missed. prefix: a label in front of them. */
+function clock(m, prefix = null) {
   if (!m || !m.words) return '';
-  return h('span', { class: m.met === false ? 'state' : null, dataset: m.met === false ? { state: 'bad' } : undefined }, m.words);
+  // One inner span, so a long line wraps on a phone instead of running off the screen.
+  return h('span', { class: m.met === false ? 'state req-clock' : 'req-clock', dataset: m.met === false ? { state: 'bad' } : undefined }, h('span', null, prefix ? h('span', { class: 'clock-label' }, prefix) : null, m.words));
+}
+/**
+ * The same, labeled, for places that show both clocks together (2026.11.20): "Make safe: Open 20 hours, target 24 hours",
+ * "Fix: Open 3 days, target 5 days". A finished clock's words already say which it is ("Fixed in 31 hours").
+ */
+function labeled(m, which) {
+  if (!m || !m.words) return null;
+  return clock(m, m.done ? null : `${which === 'Made safe' ? 'Make safe' : 'Fix'}: `);
 }
 
 export async function render(root, params = []) {
@@ -60,12 +69,12 @@ async function list(box, view) {
     clear(body);
     if (!data.length) { body.append(empty(view === 'new' ? 'Nothing new to look at.' : view === 'open' ? 'No open requests.' : 'Nothing here yet.')); return; }
     body.append(table([
-      { head: 'Request', cell: (r) => h('span', { class: 'stack tight' }, h('strong', null, r.reference), h('span', { class: 'muted small' }, r.priority !== 'normal' ? `${r.priority} priority` : '')) },
+      { head: 'Request', cell: (r) => h('span', { class: 'stack tight' }, h('strong', { style: 'white-space:nowrap' }, r.reference), h('span', { class: 'muted small' }, r.priority !== 'normal' ? `${r.priority} priority` : '')) },
       { head: 'What', cell: (r) => r.category },
       { head: 'Where', cell: (r) => r.place },
       { head: 'Status', cell: (r) => state(r.status_words, TONE[r.status]) },
       { head: 'Reported', cell: (r) => fmtDateTime(r.reported_at) },
-      { head: view === 'done' ? 'Fixed' : 'Against the standard', cell: (r) => (view === 'done' ? clock(r.fix) : h('span', { class: 'stack tight' }, r.status === 'made_safe' ? null : clock(r.make_safe), clock(r.fix))) },
+      { head: view === 'done' ? 'Fixed' : 'Against the standard', cell: (r) => (view === 'done' ? clock(r.fix) : h('span', { class: 'stack tight' }, r.status === 'made_safe' ? null : labeled(r.make_safe, 'Made safe'), labeled(r.fix, 'Fixed'))) },
       { head: '', actions: true, cell: (r) => button('Open', () => openRequest(r.id, load), { small: true, label: `Open ${r.reference}` }) },
     ], data));
   }
@@ -108,13 +117,13 @@ async function openRequest(id, after) {
     r.closed_reason ? ['Closed because', r.closed_reason] : null,
     r.duplicate_of ? ['Duplicate of', r.duplicate_of.reference] : null,
     r.duplicates.length ? ['Duplicates', r.duplicates.map((d) => d.reference).join(', ')] : null,
-    ['Response standard', `${r.standard.make_safe_hours ? `make safe in ${r.standard.make_safe_hours} hours` : 'no make-safe target'}, ${r.standard.fix_hours ? `fix in ${r.standard.fix_hours} hours` : 'no fix target'}${r.street_class ? ` (${CLASS_WORDS[r.street_class]} street)` : ''}`],
+    ['Response standard', `${r.standard.words.charAt(0).toUpperCase()}${r.standard.words.slice(1)}${r.street_class ? ` (${CLASS_WORDS[r.street_class]} street)` : ''}`],
     r.work_order ? ['Work order', `#${r.work_order.id} ${r.work_order.title} (${r.work_order.status.replace('_', ' ')}${r.work_order.assignee ? `, ${r.work_order.assignee}` : ''})`] : null,
   ].filter(Boolean);
   const dlg = dialog(`${r.reference}: ${r.category}`, [
     h('p', null, state(r.status_words, TONE[r.status]), ' ', r.place),
     r.description ? h('p', null, r.description) : null,
-    h('p', null, clock(r.make_safe), h('br'), clock(r.fix)),
+    h('p', { class: 'stack tight' }, labeled(r.make_safe, 'Made safe'), labeled(r.fix, 'Fixed')),
     h('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
     r.public_note ? h('p', null, h('strong', null, 'Note for the resident: '), r.public_note) : null,
     r.contact ? h('section', { class: 'panel' }, h('h3', null, 'Resident'), h('p', null, [r.contact.name, r.contact.phone && h('a', { href: `tel:${r.contact.phone.replace(/[^0-9+]/g, '')}` }, r.contact.phone), r.contact.email].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]))),
@@ -326,7 +335,7 @@ async function drawLedger(box) {
       { head: 'Fixed in time', cell: (s) => (s.fix_pct === null ? 'No target or none done' : `${s.fix_pct}% (${s.fix_met} of ${s.fix_n})`) },
     ], d.summary));
     body.append(h('h3', null, 'Every request'), table([
-      { head: 'Request', cell: (r) => h('span', { class: 'stack tight' }, h('strong', null, r.reference), r.category) },
+      { head: 'Request', cell: (r) => h('span', { class: 'stack tight' }, h('strong', { style: 'white-space:nowrap' }, r.reference), r.category) },
       { head: 'Where', cell: (r) => [r.house_number, r.street, r.cross_street ? `near ${r.cross_street}` : null].filter(Boolean).join(' ') || 'Phone location' },
       { head: 'Told', cell: (r) => fmtDateTime(r.reported_at) },
       { head: 'Made safe', cell: (r) => h('span', { class: 'stack tight' }, r.made_safe_at ? fmtDateTime(r.made_safe_at) : '', clock(r.make_safe)) },

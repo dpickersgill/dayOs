@@ -68,7 +68,7 @@ async function renderBilling(root, query) {
     if (b.interval === 'season') lines.push(b.season_paused_until ? `Paid over the season: nothing to pay until ${dateText(b.season_paused_until)}, and everything keeps working meanwhile.` : 'Paid over the season: six monthly payments, November to April.');
     if (s.kind === 'cancelling' && s.until) lines.push(`Ends ${dateText(s.until)}. Use Manage payment to keep it going.`);
     if (s.kind === 'paid_manually' && s.until) lines.push(`Paid through ${dateText(s.until)}.`);
-    if (s.state === 'grace') lines.push(`Everything keeps working until ${dateText(s.until)} (${s.days_left} day${s.days_left === 1 ? '' : 's'}). After that the mountain becomes read only: people can sign in, see and export everything, but nothing new is sold, booked or added. Patrol, the time clock and the Inbox keep working.`);
+    if (s.state === 'grace') lines.push(`Everything keeps working until ${dateText(s.until)} (${s.days_left} day${s.days_left === 1 ? '' : 's'}). After that the ${orgWord()} becomes read only: people can sign in, see and export everything, but nothing new is sold, booked or added. ${isMuni() ? 'The time clock' : 'Patrol, the time clock'} and the Inbox keep working.`);
     if (s.read_only) lines.push('Verdynt/OS is read only. Everything can be seen and exported, and patrol, the time clock and the Inbox keep working, but nothing new is sold, booked or added. Pay below to turn everything back on straight away.');
     return h('section', { class: `panel billing-standing is-${s.state}` },
       h('div', { class: 'spread' }, h('h2', null, 'Subscription'), state(word, kind)),
@@ -269,7 +269,7 @@ function payWay(title, text, btn) {
 /** The strip across the top of the app when billing needs attention: grace days or read only. Owners get a link. */
 export function billingBanner(s, { canFix }) {
   if (!s || (s.state === 'ok' && !(s.kind === 'trial' && s.days_left <= 3))) return null;
-  const text = s.read_only ? 'Verdynt/OS is read only because the subscription has lapsed. Patrol, the time clock and the Inbox still work.'
+  const text = s.read_only ? `Verdynt/OS is read only because the subscription has lapsed. ${isMuni() ? 'The time clock' : 'Patrol, the time clock'} and the Inbox still work.`
     : s.state === 'grace' ? `${s.kind === 'payment_failed' ? 'The last Verdynt/OS payment did not go through.' : 'The Verdynt/OS trial or paid time has ended.'} Everything keeps working until ${dateText(s.until)}.`
       : `The Verdynt/OS trial ends ${s.days_left === 0 ? 'today' : s.days_left === 1 ? 'tomorrow' : `in ${s.days_left} days`}.`;
   return h('div', { class: `billing-banner is-${s.read_only ? 'read_only' : s.state === 'grace' ? 'grace' : 'trial'}`, role: s.read_only ? 'alert' : 'status' },

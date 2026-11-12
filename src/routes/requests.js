@@ -387,7 +387,7 @@ router.get('/:id', async (req, res) => {
   res.json({
     ...view, house_number: r.house_number, cross_street: r.cross_street, accuracy_m: r.accuracy_m, description: r.description, public_note: r.public_note,
     source_words: Q.SOURCE_WORDS[r.source], referred_to: r.referred_to, referred_at: r.referred_at, closed_reason: r.closed_reason, made_safe_note: r.made_safe_note, assigned_at: r.assigned_at,
-    street_class: r.street_class || null, standard: std,
+    street_class: r.street_class || null, standard: { ...std, words: Q.standardWords(std) },
     has_resident: Boolean(r.resident_id || r.contact_phone || r.contact_email || r.contact_name), updates_by_text: Boolean(r.updates_by_text), updates_by_email: Boolean(r.updates_by_email),
     // The contact the request was made with (what the person typed), not whatever the resident record says now.
     contact: resident ? { name: resident.name, phone: resident.phone, email: resident.email, texts_ok: Boolean(r.updates_by_text), emails_ok: Boolean(r.updates_by_email) } : null,
