@@ -291,7 +291,7 @@ test('the SPA knows the kind: isMuni and orgWord, municipal views with stubs, gr
     assert.match(main, new RegExp(`\\['${key}', '[^']+', \\(\\) => [^\\]]+import\\('./views/${file.replace('.', '\\.')}'\\)\\]`), key);
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'js', 'views', file)), file);
   }
-  assert.match(main, /const VIEW_MODULE = \{ requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings' \};/);
+  assert.match(main, /const VIEW_MODULE = \{ requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings', monthreport: 'assets' \};/); // 2026.11.20: the monthly report
   // The menu plan uses the municipal groups for a municipality, and the ski groups otherwise.
   const os = require('os'); const { pathToFileURL } = require('url');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'so-muni-'));

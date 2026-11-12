@@ -53,11 +53,12 @@ const VIEWS = [
   ['assetprograms', 'Programs', () => can('staff'), () => import('./views/asset-programs.js')],
   ['bulk', 'Bulk pickup', () => can('counter', 'staff'), () => import('./views/bulk-pickup.js')],
   ['buildings', 'Buildings', () => can('counter', 'staff'), () => import('./views/buildings.js')],
+  ['monthreport', 'Monthly report', () => isManager(), () => import('./views/month-report.js')], // 2026.11.20: for the manager and council
 ];
 // A view whose app (lib/modules.js) has another name. Every other view's key is its app's key.
-const VIEW_MODULE = { requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings' };
+const VIEW_MODULE = { requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings', monthreport: 'assets' };
 // The views a municipality may have at all (with their apps on, for the roles that may open them). Ski views never show there.
-const MUNI_VIEWS = ['dashboard', 'inbox', 'myshifts', 'requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'workforce', 'messages', 'documents', 'settings', 'help'];
+const MUNI_VIEWS = ['dashboard', 'inbox', 'myshifts', 'requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'monthreport', 'workforce', 'messages', 'documents', 'settings', 'help'];
 
 // Old addresses that still work: Partner passes is the last tab of Sell, Billing is a page of Settings. Instructor
 // availability is Lessons, Instructors, Availability for everyone but an instructor, whose own menu keeps the page.

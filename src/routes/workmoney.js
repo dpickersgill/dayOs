@@ -8,6 +8,7 @@
 //   GET    /cost-pickers                   what Mark done chooses from: crew, equipment, parts in stock, departments, funds, streets
 //   POST   /work-orders/:id/equipment      equipment hours on a job;  DELETE /work-orders/:id/equipment/:rowId
 //   POST   /work-orders/:id/materials      a one-off material;        DELETE /work-orders/:id/materials/:rowId
+//   POST   /work-orders/:id/cost-lines     Add costs: several lines at once (all or nothing)
 //   POST   /work-orders/:id/complete       Mark done: what was done, with its crew hours, equipment, materials and outside cost
 //   GET    /month-report?month=YYYY-MM     the monthly report (managers); /month-report.csv the same as a spreadsheet
 //   GET    /month-report/photos/:kind/:id  a highlight's photo, with where it was taken removed (managers)
@@ -123,13 +124,8 @@ router.delete('/work-orders/:id/equipment/:rowId', async (req, res) => { await t
 router.post('/work-orders/:id/materials', validate(materialLine), async (req, res) => res.status(201).json({ id: await tx((conn) => W.addMaterial(conn, req, paramId(req), req.body)) }));
 router.delete('/work-orders/:id/materials/:rowId', async (req, res) => { await tx((conn) => W.removeLine(conn, req, paramId(req), 'materials', paramId(req, 'rowId'))); res.status(204).end(); });
 
-/**
- * Mark done, with its costs, in one go: what was done, each person's hours, equipment hours, parts from stock, one-off
- * materials, the outside vendor's bill (a manager's), time out of service, and (a manager's) the department and fund.
- * All or nothing: a part short in stock saves none of it.
- */
-router.post('/work-orders/:id/complete', validate(z.object({
-  resolution: z.string().trim().min(1, 'Say what was done').max(500),
+// The lines Mark done and Add costs record together, all or nothing (a part short in stock saves none of it).
+const linesFields = {
   worked_on: nullable(dateStr),
   labor: z.array(z.object({ staff_id: nullable(z.number().int().positive()), worker: nullable(z.string().trim().max(100)), hours: z.number().positive().max(200) })
     .refine((l) => l.staff_id || l.worker, 'Say who worked')).max(30).default([]),
@@ -139,38 +135,61 @@ router.post('/work-orders/:id/complete', validate(z.object({
   vendor_id: nullable(z.number().int().positive()), vendor_cost_cents: nullable(money),
   downtime_hours: nullable(z.number().min(0).max(100000)),
   department_id: nullable(z.number().int().positive()), fund_id: nullable(z.number().int().positive()), street_id: nullable(z.number().int().positive()),
-})), async (req, res) => {
-  const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
+};
+
+/** Records the lines inside the caller's transaction. The order is locked and must be open. */
+async function addLines(conn, req, id, b) {
+  const t = req.auth.tenantId;
   if ((b.vendor_cost_cents !== undefined || b.vendor_id !== undefined) && !isManager(req)) throw forbidden('Only a manager records outside costs');
   if ((b.department_id !== undefined || b.fund_id !== undefined) && !isManager(req)) throw forbidden('Only a manager chooses the department and fund');
+  const w = await one(conn, 'SELECT id, status FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
+  if (!w) throw notFound('Work order');
+  if (w.status === 'cancelled') throw conflict('This work order was canceled');
+  const day = b.worked_on || todayIn(await tzOf(t));
+  for (const l of b.labor) await W.addLabor(conn, req, id, { ...l, worked_on: day });
+  for (const e of b.equipment) await W.addEquipment(conn, req, id, { ...e, used_on: day });
+  for (const p of b.parts) await W.issuePart(conn, req, id, p);
+  for (const m of b.materials) await W.addMaterial(conn, req, id, { ...m, used_on: day });
+  const set = {};
+  for (const k of ['vendor_id', 'vendor_cost_cents', 'downtime_hours', 'department_id', 'fund_id', 'street_id']) if (b[k] !== undefined) set[k] = b[k];
+  for (const [k, table, what] of [['vendor_id', 'vendors', 'Vendor'], ['department_id', 'departments', 'Department'], ['fund_id', 'funds', 'Fund'], ['street_id', 'streets', 'Street']]) {
+    if (b[k] && !(await one(conn, `SELECT id FROM ${table} WHERE tenant_id = ? AND id = ?`, [t, b[k]]))) throw notFound(what);
+  }
+  if (Object.keys(set).length) {
+    await W.fillBooks(conn, t, { ids: [id] });
+    const keys = Object.keys(set);
+    await conn.query(`UPDATE work_orders SET ${keys.map((k) => `${k} = ?`).join(', ')}${keys.some((k) => ['department_id', 'fund_id', 'street_id'].includes(k)) ? ', books_checked = 1' : ''} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => set[k]), t, id]);
+  }
+  await audit(conn, req, 'costs', 'work_orders', id, { labor: b.labor.length, equipment: b.equipment.length, parts: b.parts.length, materials: b.materials.length, ...(set.vendor_cost_cents !== undefined ? { vendor: true } : {}) });
+  return w;
+}
+const answer = async (req, id) => {
+  const c = (await W.orderCosts(pool, req.auth.tenantId, [id])).get(id);
+  return { ok: true, labor_hours: c.labor_hours, ...(isManager(req) ? { total_cents: c.total_cents } : {}) };
+};
+
+/** Add costs to a work order (open or done): each person's hours, equipment, parts, materials, the outside bill. */
+router.post('/work-orders/:id/cost-lines', validate(z.object(linesFields)), async (req, res) => {
+  const id = paramId(req);
+  await tx((conn) => addLines(conn, req, id, req.body));
+  res.status(201).json(await answer(req, id));
+});
+
+/**
+ * Mark done, with its costs, in one go: what was done, each person's hours, equipment hours, parts from stock, one-off
+ * materials, the outside vendor's bill (a manager's), time out of service, and (a manager's) the department and fund.
+ */
+router.post('/work-orders/:id/complete', validate(z.object({ resolution: z.string().trim().min(1, 'Say what was done').max(500), ...linesFields })), async (req, res) => {
+  const t = req.auth.tenantId; const id = paramId(req);
   const maintenance = require('./maintenance');
   const fixed = await tx(async (conn) => {
-    const w = await one(conn, 'SELECT id, status FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
-    if (!w) throw notFound('Work order');
-    if (w.status === 'done') throw conflict('This work order is already done');
-    if (w.status === 'cancelled') throw conflict('This work order was canceled');
-    const day = b.worked_on || todayIn(await tzOf(t));
-    for (const l of b.labor) await W.addLabor(conn, req, id, { ...l, worked_on: day });
-    for (const e of b.equipment) await W.addEquipment(conn, req, id, { ...e, used_on: day });
-    for (const p of b.parts) await W.issuePart(conn, req, id, p);
-    for (const m of b.materials) await W.addMaterial(conn, req, id, { ...m, used_on: day });
-    const set = {};
-    for (const k of ['vendor_id', 'vendor_cost_cents', 'downtime_hours', 'department_id', 'fund_id', 'street_id']) if (b[k] !== undefined) set[k] = b[k];
-    if (b.vendor_id && !(await one(conn, 'SELECT id FROM vendors WHERE tenant_id = ? AND id = ?', [t, b.vendor_id]))) throw notFound('Vendor');
-    if (b.department_id && !(await one(conn, 'SELECT id FROM departments WHERE tenant_id = ? AND id = ?', [t, b.department_id]))) throw notFound('Department');
-    if (b.fund_id && !(await one(conn, 'SELECT id FROM funds WHERE tenant_id = ? AND id = ?', [t, b.fund_id]))) throw notFound('Fund');
-    if (b.street_id && !(await one(conn, 'SELECT id FROM streets WHERE tenant_id = ? AND id = ?', [t, b.street_id]))) throw notFound('Street');
-    if (Object.keys(set).length) {
-      await W.fillBooks(conn, t, { ids: [id] });
-      const keys = Object.keys(set);
-      await conn.query(`UPDATE work_orders SET ${keys.map((k) => `${k} = ?`).join(', ')}${keys.some((k) => ['department_id', 'fund_id', 'street_id'].includes(k)) ? ', books_checked = 1' : ''} WHERE tenant_id = ? AND id = ?`, [...keys.map((k) => set[k]), t, id]);
-    }
-    await audit(conn, req, 'costs', 'work_orders', id, { labor: b.labor.length, equipment: b.equipment.length, parts: b.parts.length, materials: b.materials.length, ...(set.vendor_cost_cents !== undefined ? { vendor: true } : {}) });
-    return maintenance.changeStatus(conn, req, id, { status: 'done', resolution: b.resolution });
+    const w = await one(conn, 'SELECT status FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, id]);
+    if (w && w.status === 'done') throw conflict('This work order is already done');
+    await addLines(conn, req, id, req.body);
+    return maintenance.changeStatus(conn, req, id, { status: 'done', resolution: req.body.resolution });
   });
   if (fixed.length) await require('../lib/requests').tellFixed(t, fixed, require('../lib/baseurl').baseUrl(req));
-  const costs = (await W.orderCosts(pool, t, [id])).get(id);
-  res.json({ ok: true, labor_hours: costs.labor_hours, ...(isManager(req) ? { total_cents: costs.total_cents } : {}) });
+  res.json(await answer(req, id));
 });
 
 // ---------------------------------------------------------------- the monthly report (managers)

@@ -7,6 +7,7 @@
 //   work_orders                   department_id, fund_id, street_id (for the Liquid Fuels report), books_checked (the
 //                                 department, fund and street were filled in once, from the asset, map item or request)
 //   staff_labor_rates             each crew member's hourly labor cost; without one the shop labor rate is used
+//   work_orders.labor_hours       to two decimals (quarter hours), as its labor lines are
 //   work_order_labor.personal     the line was costed at the person's own rate (its cost is a manager's to see)
 //   work_order_equipment          equipment hours on a job, at the asset's hourly rate when logged
 //   work_order_materials          one-off materials on a job (not from stock): what, how many, at what unit cost
@@ -60,6 +61,11 @@ module.exports = ({ tableExists, columnExists }) => {
     ix('work_orders', 'ix_wo_completed', 'INDEX ix_wo_completed (tenant_id, completed_at)'),
     ix('work_orders', 'ix_wo_books', 'INDEX ix_wo_books (tenant_id, books_checked)'),
 
+    // Quarter hours (0.25) on the work order's own hour total, the same as its labor lines.
+    ['work_orders.labor_hours to quarter hours', async (c) => {
+      const [r] = await c.query("SELECT NUMERIC_SCALE AS s FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'work_orders' AND column_name = 'labor_hours'");
+      return Boolean(r.length && Number(r[0].s) >= 2);
+    }, 'ALTER TABLE work_orders MODIFY labor_hours DECIMAL(8,2) NULL'],
     col('work_order_labor', 'personal', 'personal TINYINT(1) NOT NULL DEFAULT 0'),
     ix('work_order_labor', 'ix_wol_day', 'INDEX ix_wol_day (tenant_id, worked_on)'),
 

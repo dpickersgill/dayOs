@@ -1994,6 +1994,34 @@ a.stat:hover { border-color: var(--ink); }
 .cost-grid .k { font-size: 0.8125rem; color: var(--quiet); font-weight: 700; }
 .cost-grid b { font-size: 1.125rem; }
 
+/* ---- Work order costs, the Done tab's totals and the monthly report (2026.11.20, works-costs.js, month-report.js) */
+.cost-rows { display: grid; gap: 8px; }
+.cost-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cost-row select { flex: 1 1 200px; min-width: 0; }
+.cost-row input:not(.short-num) { flex: 2 1 180px; min-width: 0; }
+.cost-row .short-num { flex: 0 0 96px; width: 96px; }
+.cost-form fieldset { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; }
+.wo-costs { border-top: 1px solid var(--line); padding-top: 10px; }
+.done-range input[type='date'] { width: auto; }
+.done-totals { margin-bottom: 12px; }
+.month-report .report-head h2 { font-size: 1.5rem; margin: 0; }
+.month-report .report-head p { margin: 0; }
+.highlights { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.highlight { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; display: grid; gap: 6px; break-inside: avoid; }
+.highlight h3, .highlight p { margin: 0; }
+.highlight .photo-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.highlight figure { margin: 0; display: grid; gap: 2px; }
+.highlight img { width: 140px; height: 105px; object-fit: cover; border-radius: var(--radius); background: var(--line); }
+.top-streets { margin: 0; padding-left: 1.4em; columns: 2; }
+@media (max-width: 560px) { .cost-row .short-num { flex-basis: 84px; width: 84px; } .top-streets { columns: 1; } }
+@media print {
+  .month-report .report-part { break-inside: avoid-page; border: 0; padding: 0; }
+  .month-report .table-wrap { overflow: visible; }
+  .month-report table { font-size: 11px; }
+  .month-report details { display: block; }
+  .month-report details > summary { list-style: none; font-weight: 700; }
+}
+
 /* Gate: phone helpers, the camera view and pairing codes */
 .reader-tools { justify-content: center; gap: 8px; }
 .camera-view { width: 100%; max-height: 50vh; background: var(--black); border-radius: var(--radius); object-fit: cover; }

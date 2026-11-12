@@ -6,7 +6,8 @@
 import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
-import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
+import { costPickers, markDone, costsSection, booksFacts, booksFields, booksBody, doneRange, doneTotals } from './works-costs.js';
+import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam, money } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -22,11 +23,12 @@ const workforceOn = () => Boolean(ctx.me && ctx.me.modules && ctx.me.modules.inc
 
 /** What the pickers need: the asset register (Assets and fleet) and, for managers, the staff to assign. */
 async function pickers() {
-  const [assets, staff] = await Promise.all([
+  const [assets, staff, books] = await Promise.all([
     assetsOn() ? get('/assets/register').then((r) => r.data).catch(() => []) : Promise.resolve([]),
     isManager() && workforceOn() ? get('/workforce/staff').then((r) => r.data || []).catch(() => []) : Promise.resolve([]),
+    assetsOn() ? costPickers({ fresh: true }) : Promise.resolve(null), // departments, funds and streets (works-costs.js)
   ]);
-  return { assets, staff: staff.filter((s) => ['active', 'onboarding'].includes(s.status)) };
+  return { assets, staff: staff.filter((s) => ['active', 'onboarding'].includes(s.status)), books };
 }
 const staffName = (s) => `${s.first_name} ${s.last_name}`.trim();
 
@@ -59,8 +61,11 @@ async function drawOrders(box, status, pick) {
   // Work orders are public records. The spreadsheet leaves out what would identify a resident (the house number and the
   // resident's own words on a work order made from a request) unless a manager ticks the box, which is logged.
   const contacts = h('input', { type: 'checkbox' });
+  // The Done tab: a date range, and the totals of what matches (works-costs.js).
+  const range = status === 'closed' ? doneRange(() => load()) : null;
   const filters = () => {
     const q = new URLSearchParams({ status });
+    if (range) range.apply(q);
     if (priority.value) q.set('priority', priority.value);
     if (who.value === 'mine') q.set('mine', '1'); else if (who.value) q.set('assigned_staff_id', who.value);
     if (source.value) q.set('source', source.value);
@@ -72,12 +77,13 @@ async function drawOrders(box, status, pick) {
     isManager() ? h('label', { class: 'check', title: 'Logged with your name' }, contacts, ' Include contact details (logged)') : null,
     h('span', { class: 'muted small' }, 'Work orders are public records. The spreadsheet leaves out residents’ house numbers and their own words.'));
   clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
-    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, exportRow);
+    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null, range ? range.el : null), body, exportRow);
   async function load() {
     const q = filters();
-    const { data } = await get(`/ops/work-orders?${q}`);
+    const { data, totals } = await get(`/ops/work-orders?${q}`);
     clear(body);
-    if (!data.length) { body.append(empty(status === 'open' ? 'No open work orders. Nice work.' : 'Nothing done yet.')); return; }
+    if (totals) body.append(doneTotals(totals));
+    if (!data.length) { body.append(empty(status === 'open' ? 'No open work orders. Nice work.' : 'Nothing done in these dates.')); return; }
     const today = todayStr();
     body.append(table([
       { head: 'Priority', cell: (w) => state(label(w.priority), PRIORITY_TONE[w.priority]) },
@@ -86,6 +92,7 @@ async function drawOrders(box, status, pick) {
       { head: status === 'open' ? 'Due' : 'Done', cell: (w) => (status === 'open' ? (w.due_date ? h('span', null, fmtDate(w.due_date), String(w.due_date).slice(0, 10) < today ? h('span', null, ' ', state('Overdue', 'bad')) : null) : '') : (w.completed_at ? fmtDateTime(w.completed_at) : STATUS_TEXT[w.status])) },
       { head: 'Status', cell: (w) => STATUS_TEXT[w.status] || label(w.status) },
       { head: 'From', cell: (w) => SOURCE_TEXT[w.source] || label(w.source) },
+      ...(status === 'closed' ? [{ head: 'Hours', num: true, cell: (w) => (w.hours ? String(w.hours) : '') }, ...(isManager() ? [{ head: 'Cost', num: true, cell: (w) => (w.cost_cents ? money(w.cost_cents) : '') }] : [])] : []),
       { head: '', actions: true, cell: (w) => button('Open', () => openOrder(w.id, pick, load), { small: true, label: `Open ${w.title}` }) },
     ], data));
   }
@@ -101,11 +108,13 @@ function orderFields(pick, w = {}) {
     field('Where', input({ name: 'location', maxlength: 120, value: w.location || '', placeholder: 'Mill Street at 3rd Avenue' })),
     pick.staff.length ? field('Assigned to', select([['', 'Nobody yet'], ...pick.staff.map((s) => [s.id, staffName(s)])], w.assigned_staff_id || '', { name: 'assigned_staff_id' })) : null,
     field('Due', input({ name: 'due_date', type: 'date', value: w.due_date ? String(w.due_date).slice(0, 10) : '' })),
-    field('Details', h('textarea', { name: 'description', rows: 3, maxlength: 5000 }, w.description || '')));
+    field('Details', h('textarea', { name: 'description', rows: 3, maxlength: 5000 }, w.description || '')),
+    pick.books ? booksFields(pick.books, w) : null);
 }
-const orderBody = (fd, pick) => ({
+const orderBody = (fd, pick, w = {}) => ({
   title: val(fd, 'title'), priority: val(fd, 'priority'), location: val(fd, 'location'), due_date: val(fd, 'due_date'), description: val(fd, 'description'),
   ...(pick.assets.length ? { asset_id: num(fd, 'asset_id') } : {}), ...(pick.staff.length ? { assigned_staff_id: num(fd, 'assigned_staff_id') } : {}),
+  ...(pick.books ? booksBody(fd, pick.books, w) : {}),
 });
 
 function addOrder(pick, done) {
@@ -122,6 +131,10 @@ async function openOrder(id, pick, done) {
   const open = w.status !== 'done' && w.status !== 'cancelled';
   const act = (status, text, kind) => button(text, () => setStatus(w, status), { small: true, kind });
   const mapSlot = h('div');
+  // Its costs: each person's hours, equipment, parts and materials, and Add costs (works-costs.js).
+  const costSlot = h('div');
+  const reopen = async () => { dlg.close(); await done(); await openOrder(id, pick, done); };
+  if (assetsOn()) costsSection(w, reopen).then((el) => { if (el) costSlot.append(el); });
   if (w.map_feature_id) miniMap({ geometry: w.feature_geometry, points: w.feature_points, lat: w.feature_lat, lng: w.feature_lng }, { label: 'Where it is on the map' }).then((el) => mapSlot.append(el));
   const dlg = formDialog(w.title, h('div', { class: 'stack' },
     h('div', { class: 'row between' }, h('p', null, state(STATUS_TEXT[w.status] || label(w.status), w.status === 'done' ? 'good' : 'neutral'), ' ', state(label(w.priority), PRIORITY_TONE[w.priority])), shareButton('work_order', w.id)),
@@ -136,10 +149,12 @@ async function openOrder(id, pick, done) {
       w.due_date ? [h('dt', null, 'Due'), h('dd', null, fmtDate(w.due_date))] : null,
       [h('dt', null, 'From'), h('dd', null, SOURCE_TEXT[w.source] || label(w.source))],
       [h('dt', null, 'Opened'), h('dd', null, fmtDateTime(w.opened_at))],
+      booksFacts(w),
       w.labor_hours ? [h('dt', null, 'Labor'), h('dd', null, `${Number(w.labor_hours)} hours`)] : null,
       w.parts_note ? [h('dt', null, 'Parts'), h('dd', null, w.parts_note)] : null),
     w.map_feature_id ? mapSlot : null,
     w.resolution ? h('p', null, h('strong', null, 'Done: '), w.resolution) : null,
+    costSlot,
     h('ul', { class: 'wo-notes' }, ...w.notes.map((n) => h('li', null, h('span', { class: 'muted small' }, `${fmtDateTime(n.at)} ${n.author || ''}`), h('span', null, n.body)))),
     h('div', { class: 'row' }, note, button('Add note', async () => { if (!note.value.trim()) return; await post(`/ops/work-orders/${id}/notes`, { body: note.value.trim() }); dlg.close(); await openOrder(id, pick, done); }, { small: true })),
     h('div', { class: 'row wrap' },
@@ -155,22 +170,14 @@ async function openOrder(id, pick, done) {
     if (status !== 'done') {
       return post(`/ops/work-orders/${order.id}/status`, { status }).then(async () => { toast('Updated'); dlg.close(); await done(); });
     }
-    formDialog('Mark done', h('div', { class: 'form' },
-      field('What was done', h('textarea', { name: 'resolution', rows: 3, required: true, maxlength: 500 })),
-      field('Labor (hours)', input({ name: 'labor_hours', type: 'number', step: '0.25', min: '0' })),
-      field('Parts used', input({ name: 'parts_note', maxlength: 255 }))), async (fd) => {
-      await post(`/ops/work-orders/${order.id}/status`, { status: 'done', resolution: val(fd, 'resolution'), labor_hours: num(fd, 'labor_hours'), parts_note: val(fd, 'parts_note') });
-      toast('Work order done');
-      dlg.close();
-      await done();
-    }, { submitText: 'Mark done' });
-    return Promise.resolve();
+    // Mark done with what it took: each person's hours, equipment, parts and materials (works-costs.js).
+    return markDone(order, async () => { dlg.close(); await done(); });
   }
 }
 
 function editOrder(w, pick, done) {
   formDialog(`Edit ${w.title}`, orderFields(pick, w), async (fd) => {
-    await patch(`/ops/work-orders/${w.id}`, orderBody(fd, pick));
+    await patch(`/ops/work-orders/${w.id}`, orderBody(fd, pick, w));
     toast('Saved');
     await done();
   });

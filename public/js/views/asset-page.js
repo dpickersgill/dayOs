@@ -5,7 +5,7 @@
 import { assetMapLink } from './asset-map.js';
 import { CONDITIONS, CRITICALITIES, OWNERSHIP, conditionText, criticalityText, riskState, scoreSelect, photoStrip, runHoursTable, miniMap, inspectDialog, inspectionRows } from './asset-bits.js';
 import { get, post, patch, del } from '../api.js';
-import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx } from '../ui.js';
+import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx, isMuni } from '../ui.js';
 import { qr } from '../barcode.js';
 import { shareButton } from '../share.js';
 
@@ -25,8 +25,9 @@ export const tagUrl = (tag) => `${location.origin}${location.pathname}#/assets/t
 
 /** Everything the asset forms choose from: types, checklists, places, lifts, other assets and vendors. */
 export async function fullMeta() {
+  const booksP = isMuni() ? get('/assets/books').catch(() => null) : Promise.resolve(null); // a municipality's departments and funds (2026.11.20)
   const [m, locs, lifts, reg, vendors] = await Promise.all([get('/assets/meta'), get('/assets/locations'), get('/schedule/lifts?limit=500').catch(() => ({ data: [] })), get('/assets/register'), get('/assets/vendors')]);
-  return { ...m, locations: locs.data.filter((l) => l.active), lifts: lifts.data, assets: reg.data, vendors: vendors.data.filter((v) => v.active) };
+  return { ...m, locations: locs.data.filter((l) => l.active), lifts: lifts.data, assets: reg.data, vendors: vendors.data.filter((v) => v.active), books: await booksP };
 }
 
 export async function renderAsset(root, id) {
@@ -199,6 +200,11 @@ export function assetDialog(meta, a, done) {
       can ? field('Purchase price ($)', input({ name: 'purchase', inputmode: 'decimal', value: centsToInput(cur.purchase_cents) })) : null,
       can ? field('Useful life (years)', input({ name: 'useful_life_years', type: 'number', min: 1, max: 100, value: cur.useful_life_years || '' })) : null,
       can ? field('Salvage value ($)', input({ name: 'salvage', inputmode: 'decimal', value: centsToInput(cur.salvage_cents) })) : null),
+    // What it costs a job, and the department and fund it belongs to (2026.11.20; managers).
+    can && meta.books ? h('fieldset', { class: 'form' }, h('legend', null, 'Job costs'),
+      field('Hourly rate on jobs ($)', input({ name: 'hourly_rate', inputmode: 'decimal', value: centsToInput(cur.hourly_rate_cents), placeholder: cur.suggested_rate_cents ? `Suggested ${centsToInput(cur.suggested_rate_cents)}` : '' }), cur.suggested_rate_cents ? `Leave blank to use the suggested ${money(cur.suggested_rate_cents)} an hour for its type` : 'What an hour of it costs a job, without the operator'),
+      field('Department', select([['', 'Not set'], ...meta.books.departments.filter((d) => d.active || d.id === cur.department_id).map((d) => [d.id, d.name])], cur.department_id || '', { name: 'department_id' }), 'Its repairs are charged here; vehicles default to Fleet'),
+      field('Fund', select([['', 'The department\'s fund'], ...meta.books.funds.filter((f) => f.active || f.id === cur.fund_id).map((f) => [f.id, f.name])], cur.fund_id || '', { name: 'fund_id' }))) : null,
     field('Notes', h('textarea', { name: 'notes', rows: 2, maxlength: 500 }, cur.notes || ''))),
   async (fd) => {
     const body = {
@@ -214,6 +220,11 @@ export function assetDialog(meta, a, done) {
       if (p !== null && toCents(p) === null) throw new Error('Purchase price must be an amount like 52000 or 52000.00');
       if (s !== null && toCents(s) === null) throw new Error('Salvage value must be an amount');
       body.purchase_cents = p === null ? null : toCents(p); body.salvage_cents = s === null ? null : toCents(s); body.useful_life_years = num(fd, 'useful_life_years');
+      if (meta.books) {
+        const r = val(fd, 'hourly_rate');
+        if (r !== null && toCents(r) === null) throw new Error('The hourly rate must be an amount, like 85 or 85.00');
+        Object.assign(body, { hourly_rate_cents: r === null ? null : toCents(r), department_id: num(fd, 'department_id'), fund_id: num(fd, 'fund_id') });
+      }
     }
     if (!a) { for (const k of ['hours', 'miles']) if (num(fd, k) !== null) body[k] = num(fd, k); }
     if (!a) for (const k of Object.keys(body)) if (body[k] === null) delete body[k];
@@ -319,7 +330,7 @@ export async function workOrderSheet(woId, a, done) {
     w.resolution ? h('p', null, h('b', null, 'Done: '), w.resolution) : null,
     closed ? null : h('div', { class: 'row' }, w.status !== 'in_progress' ? st('in_progress', 'Start work') : null, w.status !== 'waiting_parts' ? st('waiting_parts', 'Waiting for parts') : null, st('done', 'Complete', 'primary')),
     h('section', { class: 'stack tight' }, h('h3', null, 'Labor'),
-      c.labor.length ? h('ul', { class: 'plain' }, c.labor.map((l) => h('li', { class: 'spread' }, h('span', null, `${l.who || 'Not named'}: ${l.hours} h on ${fmtDate(l.worked_on)}`, h('span', { class: 'muted small' }, ` ${money(Math.round(l.hours * l.rate_cents))}`)),
+      c.labor.length ? h('ul', { class: 'plain' }, c.labor.map((l) => h('li', { class: 'spread' }, h('span', null, `${l.who || 'Not named'}: ${l.hours} h on ${fmtDate(l.worked_on)}`, l.rate_cents === null ? null : h('span', { class: 'muted small' }, ` ${money(Math.round(l.hours * l.rate_cents))}`)),
         l.mine || isManager() ? button('Remove', async () => { await del(`/assets/work-orders/${woId}/labor/${l.id}`); await refresh(); }, { small: true, kind: 'quiet', label: `Remove ${l.hours} h by ${l.who || 'unnamed'}` }) : null))) : h('p', { class: 'muted' }, 'None logged.'),
       h('div', { class: 'row tight' }, who, hrs, button('Log time', async () => { if (!hrs.value) throw new Error('Enter the hours'); await post(`/assets/work-orders/${woId}/labor`, { worker: who.value.trim() || null, hours: Number(hrs.value) }); toast('Time logged'); await refresh(); }, { small: true }))),
     h('section', { class: 'stack tight' }, h('h3', null, 'Parts from stock'),
@@ -329,7 +340,9 @@ export async function workOrderSheet(woId, a, done) {
     h('section', { class: 'stack tight' }, h('h3', null, 'Meter at service and outside work'),
       h('p', { class: 'small' }, [c.meter_hours !== null ? `${n1(c.meter_hours)} h` : null, c.meter_miles !== null ? `${n1(c.meter_miles)} mi` : null].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No meter recorded'), c.vendor_cost_cents !== null ? ` · Outside work ${money(c.vendor_cost_cents)}${c.vendor ? ` (${c.vendor})` : ''}` : ''),
       button('Record meter or outside cost', () => costsDialog(woId, c, refresh), { small: true })),
-    h('p', { class: 'wo-total' }, h('b', null, 'Total so far: '), money(c.total_cents), h('span', { class: 'muted small' }, ` (labor ${money(c.labor_cents)}, parts ${money(c.parts_cents)}${c.vendor_cost_cents ? `, outside ${money(c.vendor_cost_cents)}` : ''})`)),
+    // A person's own labor rate is pay: the crew sees the hours, a manager the money (2026.11.20).
+    c.total_cents === null ? h('p', { class: 'wo-total' }, h('b', null, 'Labor so far: '), `${c.labor_hours} h`)
+      : h('p', { class: 'wo-total' }, h('b', null, 'Total so far: '), money(c.total_cents), h('span', { class: 'muted small' }, ` (labor ${money(c.labor_cents)}, parts ${money(c.parts_cents)}${c.equipment_cents ? `, equipment ${money(c.equipment_cents)}` : ''}${c.materials_cents ? `, materials ${money(c.materials_cents)}` : ''}${c.vendor_cost_cents ? `, outside ${money(c.vendor_cost_cents)}` : ''})`)),
   );
   return dlg;
 }
