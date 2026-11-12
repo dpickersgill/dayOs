@@ -35,8 +35,8 @@ const progressBar = (p) => h('div', { class: 'rt-bar', role: 'progressbar', 'ari
 
 // ================================================================ the Routes tab
 registerTab({
-  id: 'routes', label: 'Routes', order: 20,
-  show: (c) => on('collectionroutes') && (!c || !c.model || c.model === 'inhouse') && can('counter', 'staff'),
+  id: 'routes', label: 'Routes', order: 15,
+  show: (c) => (c && c.on ? c.on.includes('collectionroutes') : on('collectionroutes')) && (!c || !c.model || c.model === 'inhouse') && can('counter', 'staff'),
   render: async (el) => {
     watchGps();
     const id = Number(hashParam('route')) || null;
@@ -470,8 +470,8 @@ async function costsView(el) {
 
 // ================================================================ the Hauler tab
 registerTab({
-  id: 'hauler', label: 'Hauler', order: 21,
-  show: (c) => on('hauler') && (!c || !c.model || c.model === 'contract') && can('counter'),
+  id: 'hauler', label: 'Hauler', order: 17,
+  show: (c) => (c && c.on ? c.on.includes('hauler') : on('hauler')) && (!c || !c.model || c.model === 'contract') && can('counter'),
   render: async (el) => {
     const views = [['missed', 'Missed pickups'], ['scorecard', 'Scorecard'], ['contract', 'Contract']];
     let view = views.some((v) => v[0] === hashParam('view')) ? hashParam('view') : 'missed';

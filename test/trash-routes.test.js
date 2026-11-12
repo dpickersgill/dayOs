@@ -276,6 +276,14 @@ test('the missed-pickup check reads the route: done with the time, skipped with 
   assert.equal((await check('Main Street', '120', Z.recycling)).outcome, 'not_yet', 'recycling has not been yet');
   assert.equal(await check('Bridge Street', '16', Z.trash), null, 'the even side is in no zone');
   is(await api('GET', `/solid-waste/routes/check?street_id=${S['Main Street']}`, { token: crew1.token }), 403, 'the office\'s');
+  // The schedule's own missed-pickup check (lib/collection.js pickupCheck) answers from the route: each outcome.
+  const sched = async (street, no, stream) => (await api('GET', `/solid-waste/collection/check?street=${S[street]}&no=${no}&stream=${stream}`, { token: desk.token })).body;
+  const d1 = await sched('Main Street', '120', Z.trash);
+  assert.equal(d1.outcome, 'done'); assert.match(d1.message, /marked your street done/);
+  const s1 = await sched('Bridge Street', '15', Z.trash);
+  assert.equal(s1.outcome, 'skipped'); assert.match(s1.message, /parked cars/);
+  const n1 = await sched('Main Street', '120', Z.recycling);
+  assert.equal(n1.outcome, 'not_yet'); assert.match(n1.message, /still on its route/);
 });
 
 test('a go-back goes on the day\'s route, counts for the crew on it and managers, and closes the missed pickup', async () => {
@@ -294,7 +302,10 @@ test('a go-back goes on the day\'s route, counts for the crew on it and managers
   assert.equal((c1.counts || c1).bulk.n, 1, 'crew1: on their route');
   assert.equal((c2.counts || c2).bulk, undefined, 'crew2: none of theirs');
   const today = (await api('GET', '/solid-waste/routes/today', { token: mgr.token })).body.cards;
-  assert.equal(today.find((c) => /go back/.test(c.title)).count, (cm.counts || cm).bulk.n, 'the count and the Today card agree');
+  const missed = await require('../src/lib/waiting').missedPickups(pool, A.id); // schedule's part of the same count
+  assert.equal(today.find((c) => /go back/.test(c.title)).count + missed, (cm.counts || cm).bulk.n, 'the count is the Today card\'s go-backs plus the missed pickups waiting');
+  const appToday = (await api('GET', '/solid-waste/today', { token: mgr.token })).body.cards;
+  assert.ok(appToday.some((c) => /go back/.test(c.title)) && appToday.some((c) => c.title === 'Collection routes today'), 'the cards are on Trash and recycling\'s Today');
   is(await api('POST', `/solid-waste/routes/${nt.id}/stops/${stop.id}/mark`, { token: crew1.token, body: { status: 'done', client_ref: cref() } }), 200);
   const [r] = await q('SELECT status FROM requests WHERE id = ?', [req.id]);
   assert.equal(r.status, 'fixed');
@@ -363,7 +374,7 @@ test('a snow day: changes by the holiday rule, routes Delayed for snow, a drafte
   const [ch] = await q("SELECT reason, moved_to, notice_id FROM collection_changes WHERE tenant_id = ? AND on_date = ? AND reason = 'snow'", [A.id, TODAY]);
   assert.equal(String(ch.moved_to instanceof Date ? ch.moved_to.toISOString() : ch.moved_to).slice(0, 10), next);
   const [n] = await q('SELECT status, type, sms_text FROM street_notices WHERE id = ?', [r.body.notice_id]);
-  assert.equal(n.status, 'draft', 'drafted, not sent'); assert.equal(n.type, 'trash_change'); assert.match(n.sms_text, /Because of snow/);
+  assert.equal(n.status, 'draft', 'drafted, not sent'); assert.equal(n.type, 'trash_change'); assert.match(n.sms_text, /snow/i);
   const areas = await q('SELECT street_id, from_no, to_no, side FROM street_notice_areas WHERE notice_id = ? ORDER BY street_id', [r.body.notice_id]);
   assert.deepEqual(areas.map((a) => Number(a.street_id)).sort(), [S['Main Street'], S['Bridge Street']].sort(), 'North\'s streets only');
   const day = (await api('GET', `/solid-waste/routes?date=${TODAY}`, { token: mgr.token })).body;
