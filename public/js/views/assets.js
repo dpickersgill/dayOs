@@ -327,6 +327,7 @@ async function poSheet(id, vendors, parts, done) {
 // ---------------------------------------------------------------- costs (managers)
 async function drawCosts(box) {
   const { data, settings } = await get('/assets/lifecycle');
+  data.sort((x, y) => (y.total || 0) - (x.total || 0) || x.name.localeCompare(y.name)); // what costs most first
   clear(box).append(h('div', { class: 'stack' },
     h('div', { class: 'spread' }, h('p', { class: 'muted' }, `Labor at each person's rate (else ${money(settings.labor_rate_cents)} an hour), parts and materials at cost, outside work and fuel. Book value is straight-line over the useful life, down to salvage. A replacement is flagged when the last 12 months of upkeep pass ${settings.replace_pct}% of book value, or the asset is past its life.`),
       button('Download spreadsheet', () => download('/assets/lifecycle?format=csv', 'asset-costs.csv'), { small: true })),

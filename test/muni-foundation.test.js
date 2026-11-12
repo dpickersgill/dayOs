@@ -402,11 +402,16 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
       assets: await one("SELECT COUNT(*) AS n FROM ops_assets a WHERE a.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM asset_locations l JOIN buildings b ON b.tenant_id = l.tenant_id AND (b.location_id = l.id OR b.location_id = l.parent_id) WHERE l.tenant_id = a.tenant_id AND l.id = a.location_id)"),
       plans: await one('SELECT COUNT(*) AS n FROM pm_tasks m WHERE m.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM building_plans p WHERE p.tenant_id = m.tenant_id AND p.pm_task_id = m.id)'),
       open: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status NOT IN ('done','cancelled') AND w.map_feature_id IS NULL AND w.program_id IS NULL AND w.request_id IS NULL AND w.source NOT IN ('request','program','notice') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id)"),
-      done: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status = 'done' AND w.map_feature_id IS NULL AND w.program_id IS NULL AND w.request_id IS NULL AND w.source NOT IN ('request','program','notice') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id)"),
+      done: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status = 'done' AND w.map_feature_id IS NULL AND w.program_id IS NULL AND w.request_id IS NULL AND w.source NOT IN ('request','program','notice') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id) "
+        + "AND NOT EXISTS (SELECT 1 FROM work_order_labor l WHERE l.tenant_id = w.tenant_id AND l.work_order_id = w.id AND l.note LIKE 'demo-money:%')"), // 2026.11.20: the year of costed jobs (90-money.js)
+      // 2026.11.20 (db/demo-municipal/90-money.js): the costed jobs and their lines, so a second run is seen not to double them.
+      money: await one("SELECT COUNT(*) AS n FROM work_order_labor WHERE tenant_id = ?"),
     };
   };
   const first = await counts();
-  assert.deepEqual(first, { users: 7, crew: 4, desk: 1, streets: 40, assets: 8, plans: 12, open: 6, done: 10 });
+  const { money, ...base } = first;
+  assert.deepEqual(base, { users: 7, crew: 4, desk: 1, streets: 40, assets: 8, plans: 12, open: 6, done: 10 });
+  assert.ok(money > 300, 'a year of costed work orders');
   run();
   assert.deepEqual(await counts(), first, 'the second run adds nothing');
   // Its owner signs in, has every municipal app, and sees the Today cards for work orders.

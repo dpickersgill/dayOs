@@ -60,6 +60,18 @@ const JOBS = [
   ['Loader 1 service and tires', 'fleet', null, [9], 1, [3, 5], [], [['OIL-1540', 4, 4], ['FLT-OIL', 1, 1], ['FLT-FUEL', 1, 1]], [], ['Valley Truck and Equipment', 1600, 3200, 1], false, 'Loader 1'],
 ];
 
+// What the crew wrote when each kind of job was done.
+const DONE_WORDS = {
+  'Plow and salt': 'Plowed curb to curb and salted the hills and intersections.', 'Fill potholes': 'Potholes cut square and filled with cold patch.',
+  Sweep: 'Swept both sides; gutters cleared.', 'Mill and overlay': 'Milled 2 inches and paved with the contractor; manholes and valve boxes raised.',
+  'Replace sign': 'New sign on a new post.', 'Repaint crosswalks': 'Crosswalks and stop bars repainted.', 'Fix streetlight': 'LED head replaced and tested at dusk.',
+  'Repair sidewalk': 'Lifted slabs removed and new concrete poured.', 'Water main break': 'Valves shut, clamp installed on the break, trench backfilled and patched.',
+  'Repair valve box': 'Box cleaned out, new lid set to grade.', 'Repair hydrant': 'Caps replaced, flushed, painted.', 'Jet sewer main': 'Main jetted manhole to manhole; heavy grease cleared.',
+  'Raise manhole': 'Frame raised with riser rings and mortared.', 'Clear storm inlets': 'Inlets vacuumed and grates cleared.', 'Replace inlet grate': 'Broken grate replaced.',
+  'Leaf collection': 'Leaf piles vacuumed along the whole street.', 'Bulk and brush route': 'Route finished; loads to the transfer station.',
+};
+const doneWords = (title) => (Object.entries(DONE_WORDS).find(([k]) => title.startsWith(k)) || [null, 'Done as planned.'])[1];
+
 // A small fixed sequence, so every run spreads the same numbers the same way.
 function seq(seed) { let s = seed; return () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
 
@@ -85,6 +97,10 @@ module.exports = async function money(conn, T, { today, addDays, daysAgo, staffI
   }
   const assets = await ids('ops_assets');
   for (const [name, cents] of EQUIPMENT) if (assets.has(name)) await conn.query('UPDATE ops_assets SET hourly_rate_cents = COALESCE(hourly_rate_cents, ?) WHERE tenant_id = ? AND id = ?', [cents, T, assets.get(name)]);
+  // What each was bought for, so book value and replace-or-repair have something to go on (only where not set).
+  for (const [name, cents, life] of [['Plow 1', 18900000, 12], ['Plow 2', 16500000, 12], ['Packer 7', 21500000, 10], ['Pickup 4', 5200000, 8], ['Loader 1', 16800000, 15], ['Sweeper 1', 26500000, 10], ['Jet-Vac 1', 41000000, 15], ['Generator 1', 6200000, 20]]) {
+    if (assets.has(name)) await conn.query("UPDATE ops_assets SET purchase_cents = ?, useful_life_years = ?, salvage_cents = ?, purchased_on = CONCAT(model_year, '-06-01') WHERE tenant_id = ? AND id = ? AND purchase_cents IS NULL AND model_year IS NOT NULL", [cents, life, Math.round(cents * 0.1), T, assets.get(name)]);
+  }
   const partIds = await ids('parts', 'sku');
   let partsMade = 0;
   for (const [sku, name, unit, cents, onHand, reorder] of PARTS) {
@@ -191,7 +207,7 @@ module.exports = async function money(conn, T, { today, addDays, daysAgo, staffI
       const [w] = await conn.query(`INSERT INTO work_orders (tenant_id, title, priority, status, asset_id, location, source, assigned_staff_id, due_date, opened_at, opened_by, completed_at, resolution,
           department_id, fund_id, street_id, books_checked, vendor_id, vendor_cost_cents, downtime_hours) VALUES (?, ?, ?, 'done', ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       [T, title, /main break/i.test(title) ? 'urgent' : 'normal', assetId, street ? street.name : (assetId ? 'Public works garage' : null), crew[0] || null, day, `${addDays(day, -1)} 08:00:00`, opener, `${day} ${String(13 + (n % 4)).padStart(2, '0')}:30:00`,
-        'Done as planned.', dept ? dept.id : null, fund, street ? street.id : null, v ? v[0] : null, v ? v[1] : null, assetId ? down : null]);
+        doneWords(titleT), dept ? dept.id : null, fund, street ? street.id : null, v ? v[0] : null, v ? v[1] : null, assetId ? down : null]);
       const wo = Number(w.insertId);
       for (const [i, s] of crew.entries()) if (s) await labor(wo, s, hours, day, i === 0 ? key : null);
       for (const [name, share] of gear) if (assets.has(name)) await equip(wo, assets.get(name), Math.max(0.5, Math.round(hours * share * 4) / 4), day);

@@ -41,12 +41,11 @@ const section = (title, ...kids) => h('section', { class: 'panel stack report-pa
 const stat = (n, text) => h('div', { class: 'stat' }, h('b', null, String(n)), h('span', null, text));
 const costCols = [
   { head: 'Opened', num: true, cell: (x) => x.opened },
-  { head: 'Completed', num: true, cell: (x) => x.closed },
-  { head: 'Labor hours', num: true, cell: (x) => hrs(x.labor_hours) },
-  { head: 'Equipment hours', num: true, cell: (x) => hrs(x.equipment_hours) },
+  { head: 'Done', num: true, cell: (x) => x.closed },
+  { head: 'Hours', num: true, cell: (x) => hrs(x.labor_hours) },
   { head: 'Labor', num: true, cell: (x) => money(x.labor_cents) },
   { head: 'Equipment', num: true, cell: (x) => money(x.equipment_cents) },
-  { head: 'Parts and materials', num: true, cell: (x) => money(x.parts_cents + x.materials_cents) },
+  { head: 'Materials', num: true, cell: (x) => money(x.parts_cents + x.materials_cents) },
   { head: 'Outside', num: true, cell: (x) => money(x.outside_cents) },
   { head: 'Cost', num: true, cell: (x) => h('b', null, money(x.total_cents)) },
 ];
@@ -77,7 +76,7 @@ function draw(r) {
   out.push(section('Work by department', r.by_department.length ? table([{ head: 'Department', cell: (x) => x.name }, ...costCols], r.by_department) : empty('No work orders this month.')));
   out.push(section('Work by type of job', r.by_category.length ? table([{ head: 'Type of job', cell: (x) => x.name }, ...costCols], r.by_category) : empty('No work orders this month.')));
   if (r.by_fund.length) {
-    out.push(section('Cost by fund', table([{ head: 'Fund', cell: (x) => x.name }, { head: 'Labor hours', num: true, cell: (x) => hrs(x.labor_hours) }, ...costCols.slice(4)], r.by_fund),
+    out.push(section('Cost by fund', table([{ head: 'Fund', cell: (x) => x.name }, ...costCols.slice(2)], r.by_fund),
       r.department_fund.length ? h('details', null, h('summary', null, 'Each department by fund'), table([{ head: 'Department', cell: (x) => x.department }, { head: 'Fund', cell: (x) => x.fund }, { head: 'Labor hours', num: true, cell: (x) => hrs(x.hours) }, { head: 'Cost', num: true, cell: (x) => money(x.total_cents) }], r.department_fund)) : null));
   }
   if (r.requests) {

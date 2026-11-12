@@ -269,7 +269,15 @@ async function costLines(conn, t, from, to) {
   return [...labor, ...equip, ...parts, ...mats, ...vendor].map((l) => ({ work_order_id: Number(l.work_order_id), kind: l.kind, day: sameDay(l.day), hours: Number(l.hours || 0), cents: Math.round(Number(l.cents || 0)), asset_id: l.asset_id ? Number(l.asset_id) : null }));
 }
 
-/** What kind of job a work order is, for the report: the request's category, else where it came from. */
+// The kind of job a work order entered by hand is, by the words in its title (it has no category of its own).
+const JOB_WORDS = [
+  [/\b(plow|salt|snow|ice)\b/i, 'Snow and ice'], [/pothole/i, 'Pothole'], [/\b(overlay|paving|pave|mill)\b/i, 'Paving'], [/\bsweep/i, 'Street sweeping'],
+  [/\bsigns?\b/i, 'Signs'], [/crosswalk|line paint|striping/i, 'Pavement markings'], [/street ?light/i, 'Street light out'], [/sidewalk|curb/i, 'Sidewalk or curb'],
+  [/main break|water main/i, 'Water main break'], [/valve/i, 'Valves'], [/hydrant/i, 'Hydrants'], [/\bjet|sewer main|sewer line/i, 'Sewer cleaning'], [/manhole/i, 'Manholes'],
+  [/inlet|storm|outfall|basin/i, 'Storm drains'], [/\bleaf|leaves\b/i, 'Leaf collection'], [/bulk|brush|trash|recycl/i, 'Trash, bulk and brush'],
+  [/\bmow|park|playground|field/i, 'Parks'], [/boiler|hvac|roof|building|hall\b/i, 'Buildings'], [/tree|branch/i, 'Tree or branch down'],
+];
+/** What kind of job a work order is, for the report: the request's category, else where it came from, else its title's words. */
 function categoryOf(w) {
   if (w.request_category) return w.request_category;
   if (w.source === 'preventive') return 'Service plans';
@@ -278,7 +286,8 @@ function categoryOf(w) {
   if (w.source === 'notice') return 'Street notices';
   if (w.feature_kind_label) return w.feature_kind_label;
   if (w.asset_category) return ['fleet', 'equipment'].includes(w.asset_category) ? 'Vehicle and equipment repair' : w.asset_category === 'facility' ? 'Building repair' : 'Equipment repair';
-  return 'Other work';
+  const hit = JOB_WORDS.find(([re]) => re.test(String(w.title || '')));
+  return hit ? hit[1] : 'Other work';
 }
 
 module.exports = {

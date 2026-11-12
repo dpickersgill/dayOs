@@ -34,6 +34,14 @@
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`, run in name order (base, assets, requests, bulk pickup, street notices, buildings). Running it again also turns every municipal add-on back on. The borough has sample response targets (Requests, Settings), so the repair record shows requests that met them and requests that did not.
 
+## Costs, departments and funds for a municipality (2026.11.20)
+
+- Nothing to turn on: departments and funds are made the first time a manager opens Assets and fleet or a work order. Ask the municipality which fund pays for road work (often Liquid Fuels) and set the Streets department's default fund to it (Assets and fleet, Settings, Departments). Tick Liquid Fuels on that fund.
+- Labor rates: under Assets and fleet, Settings, Labor rates, the manager types each person's cost an hour. Without one, the shop labor rate is used. Rates are only seen by managers and owners.
+- Equipment: set the hourly rate on each truck and machine (Edit, Job costs). Blank uses a suggested rate for its type.
+- Existing work orders are given a department, fund and street automatically the first time the list is read after the upgrade; work orders done before costs were recorded show their hours with no cost.
+- The monthly report is under Public works, Monthly report (managers and owners). If a council member asks why a cost is on a street, open the work order and check its street and fund.
+
 ## Public pages for a municipality
 
 Every municipal public page is `https://<app address>/<page>/<web name>`, with no sign-in. Link them from the municipality's website.
