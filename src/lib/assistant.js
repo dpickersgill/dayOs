@@ -205,7 +205,7 @@ async function ask(who, question, { history = [], extra = '' } = {}) {
   const plus = modules.has('assistant_plus');
   const articles = isStaff ? await findArticles(`${question} ${history.slice(-2).map((x) => x.q).join(' ')}`, { role: who.role, modules, page: who.page }) : [];
   const helpIds = new Set(articles.map((a) => a.id));
-  const news = isStaff ? V.releasesFor({ role: who.role, modules: [...modules] }).filter((r) => V.compare(r.version, V.VERSION) <= 0).slice(0, 2) : [];
+  const news = isStaff ? V.releasesFor({ role: who.role, modules: [...modules], org: await modulesLib.orgTypeOf(who.tenantId) }).filter((r) => V.compare(r.version, V.VERSION) <= 0).slice(0, 2) : [];
   const ctx = { tenantId: who.tenantId, role: who.role, modules, today };
   const toolList = isStaff && plus ? tools.toolsFor(ctx) : [];
   const model = toolList.length ? config.assistant.dataModel : config.assistant.model;

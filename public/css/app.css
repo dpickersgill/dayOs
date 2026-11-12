@@ -2315,7 +2315,7 @@ body:has(.tour-card) .demo-pill { display: none; }
 .notice-later .row { align-items: center; }
 .notice-later input[type="datetime-local"] { flex: 1 1 14rem; max-width: 18rem; min-width: 0; }
 .notice-draft-actions { border-top: 1px solid var(--line); padding-top: 10px; }
-.msg-body mark { background: var(--hold-tint); color: var(--hold); font-weight: 700; border-radius: 3px; padding: 0 2px; }
+.msg-body mark { background: var(--hold-tint); color: var(--hold); font-weight: 700; border-radius: var(--radius-xs); padding: 0 2px; }
 /* A request's clock label ("Make safe:", "Fix:") before its words, in the list and the request (2026.11.20). */
 .clock-label { font-weight: 700; margin-right: 2px; }
 .state.req-clock { white-space: normal; align-items: baseline; }

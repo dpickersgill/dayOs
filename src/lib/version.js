@@ -42,9 +42,13 @@ function compare(a, b) {
 }
 
 const MANAGERS = ['owner', 'manager'];
-/** Can this person see this note? modules is the mountain's list of apps that are on (null means every app). */
-function noteFor(note, { role, modules }) {
+/**
+ * Can this person see this note? modules is the mountain's list of apps that are on (null means every app). A note with
+ * orgs is only for those kinds of tenant ('mountain', 'municipality'; 2026.11.20), when the viewer's kind is known.
+ */
+function noteFor(note, { role, modules, org = null }) {
   if (note.who === 'platform') return false;
+  if (Array.isArray(note.orgs) && org && !note.orgs.includes(org)) return false;
   if (note.app && modules && !modules.includes(note.app)) return false;
   if (MANAGERS.includes(role)) return true;
   return !Array.isArray(note.who) || note.who.includes(role);

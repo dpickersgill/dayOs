@@ -1141,6 +1141,18 @@ The Buildings add-on (`buildings`, paths `/buildings`, view `#/buildings`) is th
 ### Demo
 - `db/demo-municipal/70-utilities.js`: streets on map items, four main breaks (Main Street's cast iron main has 3 in 5 years, one open break on Bridge Street), 200 customer addresses (fictional 555-01xx phones and example.com emails, imported with consent), rated flows, connections and two overflows, ten clean outfall screenings and OF-07's case, a permit year of MS4 records, the Monday route order, and an open pothole work order at 111 Market Street.
 
+## Municipal edition: how the four 2026.11.20 workstreams fit together
+
+- **Today's Water, Sewer and Stormwater work order cards** count the open work orders charged to that department (the department whose kind is water, sewer or stormwater) and open `#/works?department_id=<id>`, the same list. Without such a department (retired, or renamed to another kind), they count the work orders on the system's map items and open `#/works?system=` as before.
+- **Work orders read every filter from the link**: `priority`, `who`, `source`, `system`, `overdue`, `department_id`, and `fund_id` and `street_id` (shown as a filter only when the link names one). A value that is not one of the choices is ignored.
+- **On call is per department.** A municipality picks a rotation's department from its list (`oncall_rotations.department_id`); a ski area still types a department or crew. A name typed before (2026.11.20 crew branch) becomes the department of that name, any case, in the migration (`db/steps/m2-release.js`) or the first time On call opens once the departments exist; one that matches none stays as typed until a manager picks one. Changing a rotation changes only what is sent (a change no longer resets its categories, turn length and hours).
+- **Messages: `{organization}`** is the tenant's name, for everyone; `{mountain}` keeps working. A municipality's Messages screen and Help show `{organization}`.
+- **Help in a municipality's words.** `MUNI_TEXT` in `public/js/help-content.js` lays a municipality's own title, intro, steps or tips over shared articles written around lifts, patrol, lessons or guests (Get around the menu, Jump to, sign-in and passkeys, Inbox, Messages, Settings, Staff and schedule). The ski Today and morning brief articles are for ski areas only; a municipality reads "Today: the crew board".
+- **Map item names**: a road reads "Road" on a municipality's work orders, monthly report, inspections, the map item picker and the risk list (`MF.kindLabel`).
+- **The sign-in page** shows soft contour lines instead of a mountain ridgeline, for everyone.
+- **What's new**: a note can carry `orgs` (`["municipality"]` or `["mountain"]`), and only that kind of tenant sees it.
+- **Jump to** finds On call and Overtime (Staff and schedule).
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

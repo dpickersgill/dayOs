@@ -12,7 +12,7 @@ const router = express.Router();
 
 async function viewerOf(req) {
   const u = await one(pool, 'SELECT role, seen_version FROM users WHERE id = ? AND tenant_id = ?', [req.auth.userId, req.auth.tenantId]);
-  return { role: u ? u.role : req.auth.role, seen: u ? u.seen_version : null, modules: await moduleGate.enabledKeys(req.auth.tenantId) };
+  return { role: u ? u.role : req.auth.role, seen: u ? u.seen_version : null, modules: await moduleGate.enabledKeys(req.auth.tenantId), org: await moduleGate.orgTypeOf(req.auth.tenantId) };
 }
 
 router.get('/', async (req, res) => {
