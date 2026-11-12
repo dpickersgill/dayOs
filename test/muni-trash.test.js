@@ -487,7 +487,7 @@ test('the report adds up by month: bookings, items, money and the not-out rate',
 });
 
 test('the report counts exactly in a fresh municipality', async () => {
-  const today = todayIn(NY);
+  const today = todayIn('Pacific/Pago_Pago'); // P's own day (it is on Pago Pago time), whatever the hour the test runs
   const s = await settings(P, { collection_days: [0, 1, 2, 3, 4, 5, 6], cutoff_days_before: 1, cutoff_time: '00:00', capacity: 50 });
   // Two at the office ($35 + $15), one with stickers; one not out, one picked up, one canceled.
   const mk = (k, items, pay) => api('POST', '/solid-waste/bookings', { token: P.token, body: { collection_date: today, street_id: streets[P.id][0], house_number: String(k), items, pay, override: true, ...resident(60 + k, { texts_ok: false, emails_ok: false }) } });
