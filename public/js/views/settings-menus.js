@@ -1,8 +1,10 @@
-// Settings, Team and logins, Menus for each role, owners and managers included: what each role sees in its menu, in what
-// order, and the screen it opens on. Home (Today, Inbox, Calendar, My shifts) is pinned at the top for everyone, so it is
-// shown here as fixed and is not offered. Everything else the role may open stays under All apps (and Jump to). Owners
-// change; managers can look. The patrol director has a menu apart from the patrollers', and each position (Staff and
-// schedule) can have one: Park crew gets the terrain park, not the lifts.
+// Settings, Team and logins, Menus for each role, owners and managers included: each role's starting pins (the pages
+// under Pinned at the top of its menu), in what order, and the screen it opens on. Since 2026.11.21 these are where a
+// person starts: each person can change their own pins (public/js/pins.js), and a change made here keeps reaching
+// everyone who has not made their own. Home (Today, Inbox, Calendar, My shifts) is at the top for everyone, so it is
+// shown here as fixed and is not offered. Everything else the role may open is always in the menu, in its section (and
+// in Jump to). Owners change; managers can look. The patrol director has a menu apart from the patrollers', and each
+// position (Staff and schedule) can have one: Park crew gets the terrain park, not the lifts.
 import { get, put } from '../api.js';
 import { h, clear, ctx, select } from '../ui.js';
 import { ROLE_NAMES } from '../nav.js';
@@ -51,7 +53,8 @@ export async function drawMenus(box) {
   const posPicker = positions.length ? h('div', { class: 'set-roles', role: 'radiogroup', 'aria-labelledby': 'set-pos-h' }) : null;
   const body = h('div', { class: 'stack' });
   box.append(h('div', { class: 'stack set-menus' },
-    h('p', { class: 'set-lead' }, 'Choose what each role sees in its menu. People can still open anything their role allows from All apps or Jump to; this only decides what is in front of them.'),
+    h('p', { class: 'set-lead' }, 'These are each role’s starting pins: the pages under Pinned at the top of the menu for everyone with that role, and the screen they open on. Each person can change their own pins, and go back to these with Reset to my role’s menu. A change here reaches everyone who has not made their own.'),
+    h('p', { class: 'set-hint' }, 'Every app a role may open is always in the menu, in its section, and in Jump to. Pins only decide what is at the top.'),
     can ? null : h('div', { class: 'callout' }, 'Only the owner can change the menus. You can see them here.'),
     picker,
     posPicker ? h('div', { class: 'stack tight' }, h('h2', { class: 'set-sub', id: 'set-pos-h' }, 'Positions'),
@@ -108,8 +111,8 @@ export async function drawMenus(box) {
     const rest = may.filter((k) => !m.apps.includes(k) && !home.includes(k));
     const outList = rest.length ? h('ul', { class: 'set-menu-list', 'data-list': 'out' }, rest.map((k) => h('li', { dataset: { app: k } },
       h('span', { class: 'set-menu-name plain' }, name(k), note(k) ? h('small', { class: 'set-menu-note' }, note(k)) : null),
-      h('button', { type: 'button', class: 'btn small', 'data-act': 'in', disabled: !can, onclick: () => addIn(k) }, 'Add to menu'))))
-      : h('p', { class: 'set-card-intro' }, 'Everything this role can open is in its menu.');
+      h('button', { type: 'button', class: 'btn small', 'data-act': 'in', disabled: !can, onclick: () => addIn(k) }, 'Add to pins'))))
+      : h('p', { class: 'set-card-intro' }, 'Everything this role can open is pinned.');
     const start = select([...fixed, ...m.apps.filter(startable)].map((k) => [k, name(k)]), m.start, { name: 'start', disabled: !can });
     start.id = 'set-menu-start';
     start.addEventListener('change', () => { m.start = start.value; bar.refresh(); });
@@ -127,13 +130,13 @@ export async function drawMenus(box) {
           : role === 'staff' && positions.length ? 'For lift and mountain staff whose positions have no menu of their own.' : null;
     body.append(...[who ? h('p', { class: 'set-hint' }, who) : null, homeCard].filter(Boolean),
       h('div', { class: 'set-two' },
-        h('section', { class: 'set-card', 'aria-labelledby': 'set-in-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-in-h' }, 'In their menu'), h('span', { class: 'set-hint' }, 'In this order')), inList),
-        h('section', { class: 'set-card', 'aria-labelledby': 'set-out-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-out-h' }, 'Under All apps'), h('span', { class: 'set-hint' }, 'Still one click away')), outList)),
+        h('section', { class: 'set-card', 'aria-labelledby': 'set-in-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-in-h' }, 'Starting pins'), h('span', { class: 'set-hint' }, 'In this order')), inList),
+        h('section', { class: 'set-card', 'aria-labelledby': 'set-out-h' }, h('div', { class: 'set-card-head' }, h('h2', { id: 'set-out-h' }, 'Not pinned'), h('span', { class: 'set-hint' }, 'Still in the menu, in its section')), outList)),
       h('div', { class: 'set-card set-menu-foot' },
         h('div', { class: 'field' }, h('label', { for: 'set-menu-start' }, 'Opens on'), start),
         h('p', { class: 'set-hint' }, m.apps.includes('sell') || may.includes('sell')
           ? ['Partner passes is a tab inside Sell. Turn it off under ', h('a', { href: '#/settings/sell' }, 'Sell and gate'), ' if your mountain does not take a partner pass.']
-          : isStandard ? 'This is the standard menu for this role.' : 'Changed from the standard menu.'),
+          : isStandard ? 'These are the standard starting pins for this role.' : 'Changed from the standard menu.'),
         reset));
     bar.refresh();
     if (focusSel) { const el = body.querySelector(focusSel); if (el && !el.disabled) el.focus(); else { const any = body.querySelector('.set-menu-list button:not([disabled])'); if (any) any.focus(); } }

@@ -579,6 +579,17 @@ If Twilio's debugger shows error 11200 with a 403, the Request URL is not exactl
 Limits (Cloud Run settings, rarely changed): `HELP_SMS_CALL_CAP` (texts out per call, default 20) and
 `HELP_SMS_HOURLY_CAP` (texts out per mountain per hour, default 300). Past either, the call's timeline says to call the guest.
 
+## Pins (release 2026.11.21)
+
+Each person's pins (the top of their menu, and their phone bar) are in `user_nav`: one row for a person who has arranged their own, none for someone still on their role's menu. `node db/migrate.js` makes the table (step `user_nav`, in `db/steps/nav-pins.js`); nothing else to set up, and no setting turns it off.
+
+- **"My pins are gone" or "my menu is wrong".** Ask them to open Edit beside Pinned and press Reset to my role's menu. That deletes their row; they are back on the role's menu from Settings, Team and logins, Menus for each role. To do it for them: `DELETE FROM user_nav WHERE tenant_id = <tenant> AND user_id = <user>;` (always both). They see it on their next page load.
+- **A role's menu changed and someone did not get it.** They have pins of their own (a row in `user_nav`), which an owner's change never overwrites. Reset, as above.
+- **A pin disappeared.** Its app was turned off for the tenant, or their role no longer opens it. It is hidden, not deleted, until they next save their pins; turning the app back on before then brings it back.
+- **At the counter the menu is not theirs.** On a shared computer (signed in by PIN) everyone gets their role's starting pins and nothing can be saved. That is on purpose.
+- **Saving is refused with "read only".** A tenant whose subscription has lapsed is read only, and that includes pins. They work again once it is paid.
+- A row holds at most 12 pins and 4 bar entries, a few hundred bytes. Rows go with the login (`ON DELETE CASCADE`) and with the tenant's data when a closed tenant is emptied.
+
 ## Utilities (release 2026.11.20)
 
 ### Water customer list
