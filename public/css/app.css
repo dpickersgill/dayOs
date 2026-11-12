@@ -2436,6 +2436,53 @@ body:has(.tour-card) .demo-pill { display: none; }
 .badge.warn { background: var(--hold-tint); color: var(--hold); border-color: var(--hold-line); }
 .badge.bad { background: var(--closed-tint); color: var(--closed); border-color: var(--closed-line-soft); }
 
+/* ---------- Today for a municipality, by role (2026.11.20, views/today-muni.js) ---------- */
+.today-muni { display: flex; flex-direction: column; gap: 18px; }
+.today-h { font-size: 1.125rem; margin: 6px 0 -4px; }
+.today-cards { display: flex; flex-direction: column; gap: 14px; }
+.bd-tile.bd-action { border-left: 4px solid var(--closed); }
+.today-lines { list-style: none; margin: 0; padding: 0; }
+.today-lines li + li { border-top: 1px solid var(--line); }
+.today-line { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; color: inherit; text-decoration: none; }
+a.today-line:hover .today-t b { text-decoration: underline; }
+.today-n { min-width: 2.2ch; text-align: right; font-size: 1.25rem; }
+.today-t { min-width: 0; }
+.today-quiet { margin: 0; }
+.today-oncall { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cb-board { display: flex; flex-direction: column; gap: 12px; }
+.cb-board h2, .cb-board h3 { margin: 0; }
+.cb-board h3 { font-size: 1rem; margin-bottom: 4px; }
+.cb-counts { margin: 0; }
+.cb-oncall-box { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
+.cb-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.cb-card { border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cb-card.is-in { border-left: 4px solid var(--open); }
+.cb-card p { margin: 0; }
+.cb-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; align-items: baseline; }
+.cb-work { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.cb-off, .cb-unassigned { margin: 0; }
+.myday { display: flex; flex-direction: column; gap: 14px; }
+.myday-clock { gap: 10px 14px; align-items: center; }
+.myday-list { list-style: none; margin: 0; padding: 0; }
+.myday-list li + li { border-top: 1px solid var(--line); }
+.myday-item { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 12px 0; color: inherit; text-decoration: none; min-height: 44px; }
+.myday-item:hover b { text-decoration: underline; }
+.myday-title { min-width: 0; }
+.myday-meta { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.desk-oncall p { margin: 4px 0 8px; }
+/* Work orders: pick several to assign, and the map (2026.11.20) */
+.wo-bulkbar { position: sticky; bottom: 0; z-index: 5; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 10px 14px; gap: 10px; align-items: center; box-shadow: 0 -6px 18px -12px rgba(0, 0, 0, 0.35); }
+.wo-pick { width: 22px; height: 22px; }
+.oncall-cal { overflow-x: auto; }
+.oncall-cal tr.is-today td { background: var(--surface-2); font-weight: 700; }
+.oncall-cal .is-holiday { color: var(--hold); }
+.apps-list { list-style: none; margin: 0; padding: 0 20px; }
+.apps-foot { padding-bottom: 16px; }
+.apps-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 12px 0; align-items: center; }
+.apps-list li + li { border-top: 1px solid var(--line); }
+.apps-list .app-text { min-width: 0; flex: 1 1 280px; }
+.apps-list .app-side { display: inline-flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
 /* ---------- Today: the morning board (the same card the website shows) ---------- */
 .bd-tile.bd-morning { grid-column: 1 / -1; padding: 0; overflow: hidden; border: 0; background: transparent; box-shadow: none; }
 .bd-tile.bd-morning > header { display: none; }

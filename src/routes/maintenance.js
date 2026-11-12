@@ -162,6 +162,7 @@ async function orderFilters(req) {
   if (req.query.lift_id) { where.push('w.lift_id = ?'); params.push(Number(first(req.query.lift_id))); }
   if (req.query.map_feature_id) { where.push('w.map_feature_id = ?'); params.push(Number(first(req.query.map_feature_id))); }
   if (req.query.program_id) { where.push('w.program_id = ?'); params.push(Number(first(req.query.program_id))); }
+  require('../lib/crewday').systemFilter(req, where, params); // ?system=water|sewer|stormwater: on that system's map items (2026.11.20)
   if (req.query.mine === '1' && req.auth.staffId) { where.push('w.assigned_staff_id = ?'); params.push(req.auth.staffId); }
   // Filters for the municipal Work orders screen (muni release 1): priority, who it is assigned to, where it came from, overdue.
   if (['low', 'normal', 'high', 'urgent'].includes(first(req.query.priority || ''))) { where.push('w.priority = ?'); params.push(first(req.query.priority)); }

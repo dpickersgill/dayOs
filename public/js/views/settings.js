@@ -13,6 +13,8 @@ const GROUPS = { you: 'You', mountain: 'The mountain', apps: 'Apps' };
 // pages (Sell, Lessons, Waivers, Patrol and the rest) never show there.
 const MUNI_GROUPS = { you: 'You', mountain: 'The municipality', apps: 'Apps' };
 const MUNI_PAGES = ['profile', 'brief', 'mountain', 'team', 'billing', 'payments', 'workforce', 'messages', 'streets'];
+// Settings, Apps (2026.11.20): what is on and the add-ons with their prices; the owner adds or removes one. Municipalities only.
+MUNI_PAGES.push('apps');
 const MUNI_TITLES = { mountain: ['Municipality details', 'The name, phone and address residents see, and the municipality’s time zone.'], team: ['Team and logins', 'Who can sign in, and who must use two-step sign-in.'], payments: ['Payments', 'The Stripe account residents’ card payments go into.'] };
 const groupsNow = () => (isMuni() ? MUNI_GROUPS : GROUPS);
 
@@ -26,6 +28,7 @@ const PAGES = [
   ['billing', 'mountain', 'Billing and plan', 'Your Verdynt/OS plan, how you pay for it, invoices and history.', () => import('./billing.js')],
   ['payments', 'mountain', 'Payments and card readers', 'The Stripe account guests’ card payments go into, and the card readers at the counter.', () => import('./billing.js')],
   ['assistant', 'mountain', 'Assistant', 'Who can ask the assistant, which guest pages show it, and this month’s use.', () => import('./settings-mountain.js')],
+  ['apps', 'apps', 'Apps and add-ons', 'What is on, what each add-on costs, and adding or removing one. Only the owner changes them.', () => import('./settings-appswitch.js')],
   ['sell', 'apps', 'Sell and gate', 'The ticket window’s limits, quick sale, partner passes, and the gate. Only owners and managers see this page.', () => import('./settings-apps.js')],
   ['shop', 'apps', 'Online shop', 'Whether guests can buy online, date changes, limits and prices by day, and how the shop page looks.', () => import('./settings-apps.js')],
   ['school', 'apps', 'Lessons', 'Online lesson booking, cancellations and refunds, and the levels you teach. Only owners, managers and the ski school Director see this page.', () => import('./settings-apps.js')],
@@ -69,6 +72,7 @@ async function visiblePages(who) {
     if (group === 'you') { out.push(p); continue; }
     if (ctx.me.role === 'area') continue;
     if (group === 'mountain') { if (who.manager) out.push(p); continue; }
+    if (key === 'apps') { if (isMuni() && who.manager) out.push(p); continue; } // the app switches: owners change, managers look
     if (!moduleOn(APP_OF[key][2])) continue;
     if (key === 'streets') { if (isMuni() && who.manager) out.push(p); continue; } // the street list: managers of a municipality
     if (key === 'patrol' ? !(who.manager || who.patrol) : key === 'school' ? !(who.manager || who.schoolDirector) : !who.manager) continue; // school: a ski school director too (2026.11.9) // patrol: the cards decide, by permission

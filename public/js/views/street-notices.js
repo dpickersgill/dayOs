@@ -284,6 +284,13 @@ async function settings(box) {
   const s = await get('/street-notices/settings');
   const boxes = s.crew.map((c) => ({ c, el: h('input', { type: 'checkbox', id: `crew-${c.id}`, checked: s.crew_senders.includes(c.id) }) }));
   const ops = s.logins.map((c) => ({ c, el: h('input', { type: 'checkbox', id: `op-${c.id}`, checked: s.certified_operators.includes(c.id) }) }));
+  // The people whose staff record holds an unexpired Pennsylvania water operator license (Staff and schedule,
+  // certifications), marked beside their login, with one button to tick them all. The manual ticks stay (2026.11.20).
+  const holders = new Map();
+  const { ctx, fmtDay } = await import('../ui.js');
+  try { if ((ctx.me.modules || []).includes('workforce')) for (const x of (await get('/workforce/licenses?kind=water')).data) for (const u of x.user_ids) holders.set(u, x); } catch (_) { /* no license list: the manual list only */ }
+  const holderNote = (id) => { const x = holders.get(id); return x ? h('span', { class: 'muted small' }, ` (${x.certification}${x.expires_on ? `, until ${fmtDay(x.expires_on)}` : ''})`) : null; };
+  const tickHolders = holders.size ? button('Tick everyone with a water operator license', () => { for (const b of ops) if (holders.has(b.c.id)) b.el.checked = true; toast('Ticked. Press Save to keep it.'); }, { small: true }) : null;
   const save = button('Save', async () => {
     await put('/street-notices/settings', { crew_senders: boxes.filter((b) => b.el.checked).map((b) => b.c.id), certified_operators: ops.filter((b) => b.el.checked).map((b) => b.c.id) });
     toast('Saved');
@@ -294,7 +301,8 @@ async function settings(box) {
     boxes.length ? h('div', { class: 'stack tight' }, ...boxes.map((b) => h('label', { class: 'check', for: `crew-${b.c.id}` }, b.el, ` ${b.c.name}`))) : h('p', { class: 'muted' }, 'No Crew logins yet.'),
     h('h2', null, 'Certified operators'),
     h('p', { class: 'muted' }, 'The people who hold a water operator certification. Only they can be named as issuing a boil water advisory. Your records of their certification stay with you.'),
-    ops.length ? h('div', { class: 'stack tight' }, ...ops.map((b) => h('label', { class: 'check', for: `op-${b.c.id}` }, b.el, ` ${b.c.name}`))) : h('p', { class: 'muted' }, 'No logins yet.'),
+    ops.length ? h('div', { class: 'stack tight' }, ...ops.map((b) => h('label', { class: 'check', for: `op-${b.c.id}` }, b.el, ` ${b.c.name}`, holderNote(b.c.id)))) : h('p', { class: 'muted' }, 'No logins yet.'),
+    tickHolders ? h('div', { class: 'row' }, tickHolders) : (ops.length ? h('p', { class: 'muted small' }, 'Tip: record each operator\u2019s license in Staff and schedule, Staff, so it shows here with its expiry date.') : null),
     h('div', { class: 'row' }, save),
     h('h2', null, 'Texting number'),
     s.from_number

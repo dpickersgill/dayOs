@@ -28,10 +28,12 @@ export async function render(root, params = []) {
 function progress(p) {
   const pr = p.progress;
   const pct = (n) => (pr.total ? `${(n / pr.total) * 100}%` : '0');
+  // The server's words (routes/assetprograms.js), the same ones Today shows (2026.11.20).
+  const words = pr.words || `${pr.done} of ${pr.total} done${pr.skipped ? `, ${pr.skipped} skipped` : ''}${pr.failed ? `, ${pr.failed} failed` : ''}${pr.todo ? `, ${pr.todo} to do` : ''}`;
   return h('div', { class: 'stack tight' },
-    h('div', { class: 'prog-bar', role: 'img', 'aria-label': `${pr.done + pr.skipped} of ${pr.total} done` },
+    h('div', { class: 'prog-bar', role: 'img', 'aria-label': words },
       h('span', { class: 'done', style: `width:${pct(pr.done - pr.failed)}` }), h('span', { class: 'failed', style: `width:${pct(pr.failed)}` }), h('span', { class: 'skipped', style: `width:${pct(pr.skipped)}` })),
-    h('span', { class: 'muted small' }, `${pr.done} of ${pr.total} done${pr.skipped ? `, ${pr.skipped} skipped` : ''}${pr.failed ? `, ${pr.failed} failed` : ''}${pr.todo ? `, ${pr.todo} to do` : ''}`));
+    h('span', { class: 'muted small' }, words));
 }
 
 // ---------------------------------------------------------------- the list

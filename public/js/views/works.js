@@ -3,10 +3,14 @@
 // the API under /ops/work-orders and /ops/pm, the same statuses, notes and "Make work order"), without lifts or ski words.
 // Reachable with Assets and fleet on (lib/modules.js opens those two paths for it). Tabs: Open, Done, Service plans.
 // Filters: priority, assigned to, where it came from, overdue. #/works?tab=done, #/works?overdue=1, #/works/12 opens one.
+// 2026.11.20 (crew): ?system=water|sewer|stormwater (work orders on that system's map items, from Today's cards),
+// ?who=mine|none|<staff id>, ?new=1 opens New work order; a manager picks several open ones and assigns them to a person
+// and day at once (POST /ops/work-orders/assign); the Map tab shows open work orders by priority (GET /ops/work-orders/map).
 import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
-import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
+import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
+import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam, errorBox } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -18,6 +22,10 @@ const PM_TONE = { overdue: 'bad', soon: 'warn', ok: 'good', never: 'neutral' };
 const PM_TEXT = { overdue: 'Overdue', soon: 'Due soon', ok: 'On track', never: 'Never done' };
 
 const assetsOn = () => Boolean(ctx.me && ctx.me.modules && ctx.me.modules.includes('assets'));
+const moduleOn = (k) => Boolean(ctx.me && ctx.me.modules && ctx.me.modules.includes(k));
+// The utility systems a work order can be on (its map item's), each shown when its add-on is on (2026.11.20).
+const SYSTEMS = [['water', 'Water'], ['sewer', 'Sewer'], ['stormwater', 'Stormwater']];
+const PRIORITY_COLOR = { urgent: '#c62828', high: '#e8710a', normal: '#1f5fd1', low: '#6b7780' };
 const workforceOn = () => Boolean(ctx.me && ctx.me.modules && ctx.me.modules.includes('workforce'));
 
 /** What the pickers need: the asset register (Assets and fleet) and, for managers, the staff to assign. */
@@ -43,16 +51,21 @@ export async function render(root, params = []) {
   holder.append(tabs([
     ['open', 'Open', (box) => { reload = () => drawOrders(box, 'open', pick); return drawOrders(box, 'open', pick); }],
     ['done', 'Done', (box) => { reload = () => drawOrders(box, 'closed', pick); return drawOrders(box, 'closed', pick); }],
+    ['map', 'Map', (box) => { reload = () => drawWorkMap(box, pick); return drawWorkMap(box, pick); }],
     ['plans', 'Service plans', (box) => { reload = () => drawPlans(box, pick); return drawPlans(box, pick); }],
-  ], ['open', 'done', 'plans'].includes(wanted) ? wanted : 'open', { param: 'tab' }));
+  ], ['open', 'done', 'map', 'plans'].includes(wanted) ? wanted : 'open', { param: 'tab' }));
   if (opened) openOrder(opened, pick, () => reload()).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
+  else if (hashParam('new') === '1') addOrder(pick, () => reload());
 }
 
 // ---------------------------------------------------------------- work orders
 async function drawOrders(box, status, pick) {
   const priority = select([['', 'Any priority'], ...PRIORITIES], '', { 'aria-label': 'Priority' });
-  const who = select([['', 'Anyone'], ...(ctx.me.staff_id ? [['mine', 'Assigned to me']] : []), ['none', 'Not assigned'], ...pick.staff.map((s) => [s.id, staffName(s)])], '', { 'aria-label': 'Assigned to' });
+  const whoWanted = hashParam('who') || '';
+  const who = select([['', 'Anyone'], ...(ctx.me.staff_id ? [['mine', 'Assigned to me']] : []), ['none', 'Not assigned'], ...pick.staff.map((s) => [s.id, staffName(s)])], whoWanted, { 'aria-label': 'Assigned to' });
   const source = select([['', 'From anywhere'], ...SOURCES], '', { 'aria-label': 'Where it came from' });
+  const systems = SYSTEMS.filter(([k]) => moduleOn(k));
+  const system = select([['', 'Any system'], ...systems], systems.some(([k]) => k === hashParam('system')) ? hashParam('system') : '', { 'aria-label': 'System' });
   const overdue = h('input', { type: 'checkbox', name: 'overdue' });
   overdue.checked = status === 'open' && hashParam('overdue') === '1';
   const body = h('div');
@@ -64,22 +77,48 @@ async function drawOrders(box, status, pick) {
     if (priority.value) q.set('priority', priority.value);
     if (who.value === 'mine') q.set('mine', '1'); else if (who.value) q.set('assigned_staff_id', who.value);
     if (source.value) q.set('source', source.value);
+    if (system.value) q.set('system', system.value);
     if (status === 'open' && overdue.checked) q.set('overdue', '1');
     return q;
+  };
+  // A manager picks several open work orders and assigns them at once (2026.11.20).
+  const bulk = status === 'open' && isManager() && pick.staff.length;
+  const picked = new Set();
+  const bar = h('div', { class: 'wo-bulkbar row wrap', hidden: true, role: 'region', 'aria-label': 'Assign the work orders picked' });
+  const drawBar = () => {
+    bar.hidden = !picked.size;
+    if (!picked.size) return;
+    const to = select([['', 'Choose a person'], ['none', 'Nobody (unassign)'], ...pick.staff.map((s) => [s.id, staffName(s)])], '', { 'aria-label': 'Assign to' });
+    const due = input({ type: 'date', value: todayStr(), 'aria-label': 'Due' });
+    const keepDue = h('input', { type: 'checkbox' });
+    clear(bar).append(h('b', null, `${picked.size} picked`), h('label', { class: 'muted small' }, 'Assign to ', to), h('label', { class: 'muted small' }, 'Due ', due), h('label', { class: 'check small' }, keepDue, ' Keep their due dates'),
+      button('Assign', async () => {
+        if (!to.value) { toast('Choose who does them', 'error'); return; }
+        const r = await post('/ops/work-orders/assign', { ids: [...picked], assigned_staff_id: to.value === 'none' ? null : Number(to.value), ...(keepDue.checked ? {} : { due_date: due.value || null }) });
+        toast(`${r.updated} work order${r.updated === 1 ? '' : 's'} assigned`);
+        picked.clear(); drawBar(); await load();
+      }, { kind: 'primary', small: true }),
+      button('Clear', () => { picked.clear(); body.querySelectorAll('input.wo-pick').forEach((x) => { x.checked = false; }); drawBar(); }, { small: true }));
   };
   const exportRow = h('div', { class: 'row no-print' },
     button('Download spreadsheet', () => { const q = filters(); if (contacts.checked) q.set('contacts', '1'); return download(`/ops/work-orders/export?${q}`, `work-orders-${todayStr()}.csv`); }, { small: true }),
     isManager() ? h('label', { class: 'check', title: 'Logged with your name' }, contacts, ' Include contact details (logged)') : null,
     h('span', { class: 'muted small' }, 'Work orders are public records. The spreadsheet leaves out residents’ house numbers and their own words.'));
-  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
-    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, exportRow);
+  clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source, systems.length ? system : null,
+    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, bar, exportRow);
   async function load() {
     const q = filters();
     const { data } = await get(`/ops/work-orders?${q}`);
     clear(body);
     if (!data.length) { body.append(empty(status === 'open' ? 'No open work orders. Nice work.' : 'Nothing done yet.')); return; }
     const today = todayStr();
+    for (const id of [...picked]) if (!data.some((w) => w.id === id)) picked.delete(id);
+    drawBar();
+    const pickBox = (w) => { const c = h('input', { type: 'checkbox', class: 'wo-pick', 'aria-label': `Pick ${w.title}`, checked: picked.has(w.id) }); c.addEventListener('change', () => { if (c.checked) picked.add(w.id); else picked.delete(w.id); drawBar(); }); return c; };
+    const allBox = h('input', { type: 'checkbox', class: 'wo-pick', 'aria-label': 'Pick all shown' });
+    allBox.addEventListener('change', () => { for (const w of data) { if (allBox.checked) picked.add(w.id); else picked.delete(w.id); } body.querySelectorAll('tbody input.wo-pick').forEach((x) => { x.checked = allBox.checked; }); drawBar(); });
     body.append(table([
+      ...(bulk ? [{ head: allBox, cell: pickBox }] : []),
       { head: 'Priority', cell: (w) => state(label(w.priority), PRIORITY_TONE[w.priority]) },
       { head: 'Job', cell: (w) => h('span', { class: 'stack tight' }, h('strong', null, w.title), h('span', { class: 'muted small' }, [w.asset, w.feature_tag || w.feature_name, w.location].filter(Boolean).join(', '))) },
       { head: 'Assigned to', cell: (w) => w.assignee || h('span', { class: 'muted' }, 'Nobody yet') },
@@ -89,7 +128,7 @@ async function drawOrders(box, status, pick) {
       { head: '', actions: true, cell: (w) => button('Open', () => openOrder(w.id, pick, load), { small: true, label: `Open ${w.title}` }) },
     ], data));
   }
-  for (const el of [priority, who, source, overdue]) el.addEventListener('change', load);
+  for (const el of [priority, who, source, system, overdue]) el.addEventListener('change', load);
   await load();
 }
 
@@ -174,6 +213,43 @@ function editOrder(w, pick, done) {
     toast('Saved');
     await done();
   });
+}
+
+// ---------------------------------------------------------------- the map (2026.11.20)
+/** Open work orders that have a place (a map item, an asset on the map, or a resident request's location), by priority. */
+async function drawWorkMap(box, pick) {
+  const mine = h('input', { type: 'checkbox' });
+  mine.checked = !isManager() && Boolean(ctx.me.staff_id);
+  const systems = SYSTEMS.filter(([k]) => moduleOn(k));
+  const system = select([['', 'Any system'], ...systems], '', { 'aria-label': 'System' });
+  const mapEl = h('div', { class: 'map-box tall', role: 'application', 'aria-label': 'Map of open work orders, colored by priority' });
+  const note = h('p', { class: 'muted small' });
+  const legend = h('ul', { class: 'amap-legend row wrap', style: 'display:flex;gap:6px 16px;flex-wrap:wrap' }, PRIORITIES.slice().reverse().map(([k, t]) => h('li', null, h('span', { class: 'amap-swatch', style: `--c:${PRIORITY_COLOR[k]}` }), ` ${t}`)));
+  clear(box).append(h('div', { class: 'stack' },
+    h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, ctx.me.staff_id ? h('label', { class: 'check' }, mine, ' Assigned to me') : null, systems.length ? system : null),
+    legend, mapEl, note));
+  let L; let map; let layer;
+  try { L = await loadLeaflet(); const cfg = await get('/assets/map/view'); map = makeMap(L, mapEl, cfg, cfg.center || { lat: 39.8283, lng: -98.5795, zoom: 4 }, { base: 'Streets', remember: 'works' }); removeWhenGone(mapEl, map); } catch (err) { mapEl.replaceWith(errorBox(err)); return; }
+  async function load() {
+    const q = new URLSearchParams();
+    if (mine.checked) q.set('mine', '1');
+    if (system.value) q.set('system', system.value);
+    const { data, unplaced } = await get(`/ops/work-orders/map?${q}`);
+    if (layer) layer.remove();
+    layer = L.layerGroup().addTo(map);
+    const order = { low: 0, normal: 1, high: 2, urgent: 3 };
+    for (const w of [...data].sort((a, b) => order[a.priority] - order[b.priority])) {
+      const m = L.circleMarker([w.lat, w.lng], { radius: w.priority === 'urgent' ? 11 : 8, color: '#fff', weight: 2, fillColor: PRIORITY_COLOR[w.priority], fillOpacity: 0.95 }).addTo(layer);
+      const pop = h('div', { class: 'stack tight' }, h('b', null, w.title), h('span', { class: 'muted small' }, [label(w.priority), STATUS_TEXT[w.status], w.assignee || 'Nobody yet', w.place].filter(Boolean).join(' · ')),
+        button('Open', () => openOrder(w.id, pick, load), { small: true }));
+      m.bindPopup(pop);
+      m.bindTooltip(w.title);
+    }
+    if (data.length) fitMap(map, L.latLngBounds(data.map((w) => [w.lat, w.lng])), { padding: [30, 30], maxZoom: 17 });
+    note.textContent = `${data.length} open work order${data.length === 1 ? '' : 's'} on the map.${unplaced ? ` ${unplaced} more have no place on the map; they are on the Open tab.` : ''}`;
+  }
+  mine.addEventListener('change', load); system.addEventListener('change', load);
+  await load();
 }
 
 // ---------------------------------------------------------------- service plans

@@ -8,7 +8,7 @@
 // and rings items that have open work orders.
 
 import { get, post, patch, put, del } from '../api.js';
-import { h, clear, button, toast, formDialog, confirmDialog, dialog, state, field, input, select, val, num, label, isManager, can, errorBox, fail, appendAll, isMuni, fmtDateTime } from '../ui.js';
+import { h, clear, button, toast, formDialog, confirmDialog, dialog, state, field, input, select, val, num, label, isManager, can, errorBox, fail, appendAll, isMuni, fmtDateTime, hashParam } from '../ui.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { CONDITIONS, CRITICALITIES, OWNERSHIP, riskState, riskColor, scoreSelect, photoStrip, runHoursTable, miniMap, inspectDialog, inspectionRows } from './asset-bits.js';
 import { workOrderSheet } from './asset-page.js';
@@ -51,6 +51,11 @@ export async function drawMap(box, deep = '') {
   const riskFilter = select([['0', 'Any risk'], ...cfg.risk_levels.filter((r) => r.min > 1).reverse().map((r) => [String(r.min), `${r.label} risk or more`])], '0', { 'aria-label': 'Show by risk' });
   colorBy.addEventListener('change', () => { byRisk = colorBy.value === 'risk'; redraw(); });
   riskFilter.addEventListener('change', () => { minRisk = Number(riskFilter.value); redraw(); });
+  // From a Today card (2026.11.20): #/assets/map?risk=high&system=water shows that system only, at that risk or more.
+  const SYSTEM_OF = { water: ['potable'], sewer: ['sewer'], stormwater: ['storm', 'drainage'] };
+  const wantRisk = (cfg.risk_levels.find((r) => r.key === hashParam('risk')) || {}).min;
+  if (wantRisk) { minRisk = wantRisk; riskFilter.value = String(wantRisk); byRisk = true; colorBy.value = 'risk'; }
+  if (SYSTEM_OF[hashParam('system')]) for (const k of [...shown]) if (!SYSTEM_OF[hashParam('system')].includes(k)) shown.delete(k);
   const banner = h('div', { class: 'park-banner', role: 'status', hidden: true });
   const mapEl = h('div', { class: 'map-box tall park-map', role: 'application', 'aria-label': isMuni() ? 'Map of the municipality’s pipes, lines and equipment' : 'Map of the mountain’s pipes, lines and equipment' });
   const layersEl = h('div', { class: 'amap-layers' });

@@ -27,8 +27,8 @@ function routerFor([key, words, systems]) {
     [t, kinds, t, kinds, t, kinds, MF.RISK_MIN.high]);
     const n = (v) => Number(v || 0);
     return [
-      n(c.open_n) ? card({ title: `${words} work orders`, count: n(c.open_n), text: n(c.urgent) ? `${n(c.urgent)} urgent` : 'Open on the map\'s items, none urgent', href: '#/works' }) : null,
-      n(c.risky) ? card({ title: `${words}: high risk`, count: n(c.risky), text: 'Map items at high or very high risk (condition times criticality)', href: '#/assets?tab=overview' }) : null,
+      n(c.open_n) ? card({ title: `${words} work orders`, count: n(c.open_n), text: n(c.urgent) ? `${n(c.urgent)} urgent` : 'Open on the map\'s items, none urgent', href: `#/works?system=${key}` }) : null, // the list filtered to this system (2026.11.20)
+      n(c.risky) ? card({ title: `${words}: high risk`, count: n(c.risky), text: 'Map items at high or very high risk (condition times criticality)', href: `#/assets/map?risk=high&system=${key}` }) : null, // the map showing only this system at high risk or more
     ];
   }));
   return router;

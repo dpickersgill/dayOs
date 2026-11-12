@@ -18,9 +18,11 @@ export async function render(root, params = []) {
   const injuries = Boolean(ctx.me && ctx.me.staff_injuries);
   // Setup (positions, certifications, templates, the time clock) is in Settings, Staff and schedule; the old address goes there.
   if (params[0] === 'setup' && location.hash.startsWith('#/workforce/setup')) { location.replace('#/settings/workforce'); return; }
-  const initial = ['hours', 'staff', ...(injuries ? ['injuries'] : [])].includes(params[0]) ? params[0] : 'schedule';
+  const initial = ['hours', 'staff', 'oncall', 'overtime', ...(injuries ? ['injuries'] : [])].includes(params[0]) ? params[0] : 'schedule';
+  // On call and Overtime (2026.11.20): who takes after-hours calls, and hours over 40 a week with call-outs.
+  const crewTabs = [['oncall', 'On call', (b) => import('./workforce-oncall.js').then((m) => m.drawOnCall(b))], ['overtime', 'Overtime', (b) => import('./workforce-overtime.js').then((m) => m.drawOvertime(b))]];
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Staff and schedule')),
-    tabs([['schedule', 'Schedule', drawSchedule], ['hours', 'Hours', drawHours], ['staff', 'Staff', drawStaff], ...(injuries ? [['injuries', 'Injuries', drawInjuries]] : [])], initial));
+    tabs([['schedule', 'Schedule', drawSchedule], ['hours', 'Hours', drawHours], ...crewTabs, ['staff', 'Staff', drawStaff], ...(injuries ? [['injuries', 'Injuries', drawInjuries]] : [])], initial));
 }
 
 /** Setup shown in Settings, Staff and schedule (managers): positions, certifications, templates and the time clock. */

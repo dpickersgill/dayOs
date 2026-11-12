@@ -342,6 +342,8 @@ const TILES = {
 // One card per thing to look at today, from each app that is on: every municipal app's route file answers
 // GET /<its prefix>/today with { cards: [{ title, count, text, href }] } (lib/today.js). Work orders and service plans come
 // from GET /ops/work-orders/today. An app whose endpoint is not there yet, or fails, is left out without a word.
+// 2026.11.20: owners and managers see these prioritized under the crew board; the front desk a few of them; the crew
+// none (their own work instead). See views/today-muni.js.
 export const MUNI_TODAY = [
   ['assets', '/ops/work-orders/today', () => can('staff')],
   ['assets', '/assets/programs/today', () => can('staff')], // asset programs due this week and their progress
@@ -363,25 +365,15 @@ function greeting() {
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 }
 
-/** One Today card: a count when there is one, a line of text, and the page it opens. */
-export function todayCard(c) {
-  const body = [
-    c.count === null || c.count === undefined ? null : h('div', { class: 'figures' }, h('div', { class: 'figure' }, h('strong', null, String(c.count)))),
-    c.text ? h('p', null, c.text) : null,
-    c.href ? h('p', null, h('a', { href: c.href }, 'Open')) : null,
-  ];
-  return h('section', { class: 'bd-tile bd-muni' }, h('header', null, h('h2', null, c.title)), ...body);
-}
-
 async function renderMuni(root) {
-  const grid = h('div', { class: 'board-grid', 'data-today': 'municipal' }, loading());
+  // By role (2026.11.20, views/today-muni.js): the crew board and prioritized cards for owners and managers, "My work
+  // today" for the crew, and the desk's few cards with who is on call for the front desk.
+  const T = await import('./today-muni.js');
+  const role = ctx.me.role;
+  const host = h('div', { class: 'today-muni', 'data-today': 'municipal', 'data-role': isManager() ? 'manager' : role });
   root.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Today'),
-    h('p', { class: 'muted', id: 'dash-sub' }, `${greeting()}. ${fmtDateLong(todayStr())} at ${ctx.me.tenant_name}.`))), grid);
-  const on = ctx.me.modules || [];
-  const asks = MUNI_TODAY.filter(([module, , may]) => on.includes(module) && may());
-  const answers = await Promise.all(asks.map(([, path]) => get(path).then((r) => (r && Array.isArray(r.cards) ? r.cards : [])).catch(() => [])));
-  const cards = answers.flat().filter((c) => c && c.title);
-  clear(grid);
-  if (!cards.length) { grid.append(empty('Nothing needs you today.')); return; }
-  grid.append(...cards.map(todayCard));
+    h('p', { class: 'muted', id: 'dash-sub' }, `${greeting()}. ${fmtDateLong(todayStr())} at ${ctx.me.tenant_name}.`))), host);
+  if (isManager()) await T.managerToday(host, MUNI_TODAY);
+  else if (role === 'counter') await T.deskToday(host, MUNI_TODAY);
+  else await T.crewToday(host);
 }
