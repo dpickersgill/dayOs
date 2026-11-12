@@ -1169,6 +1169,20 @@ The Buildings add-on (`buildings`, paths `/buildings`, view `#/buildings`) is th
 - **What's new**: a note can carry `orgs` (`["municipality"]` or `["mountain"]`), and only that kind of tenant sees it.
 - **Jump to** finds On call and Overtime (Staff and schedule).
 
+## Pins: each person's own top of the menu (release 2026.11.21; `src/routes/menav.js`, `src/lib/menus.js`, `public/js/pins.js`)
+
+**Pinned**, at the top of the menu, is the person's own. A pin is a page: an app (`assets`), or a page inside one with its tab and filters (`patrol/cases?tab=records`, `works?dept=water&status=overdue`), with a name of the person's choosing.
+
+- **Starting pins.** With nothing saved, a person's pins are their role's menu as the owner set it under Settings, Team and logins, Menus for each role: its apps and its shortcuts (Patrol's Records requests, Access log, Case review), in order. That covers the six roles, the patrol director, position menus and a municipality's four roles. An owner's change to a role's menu keeps reaching everyone who has not made their own pins; someone with their own keeps them, and Reset gives them the new menu. That Settings page now says so: it sets each role's starting pins, and people can change their own.
+- **Pin and unpin** from three places: the star in the top bar (the page you are on, with its `?tab=` and filters, named after the page; pressed again, it unpins), right-click on any menu row or a long press on a phone tile (Pin to my menu / Unpin), and Jump to (Pin this page, Unpin this page, Edit my pins, Edit my phone bar).
+- **Edit** (beside Pinned, and in the phone's Menu): drag a pin by its handle or use the up and down arrows (the keyboard's way), Rename, Unpin, and Reset to my role's menu (asks first). Each change shows at once and is then saved; if the server refuses, the menu goes back and a message says why.
+- **The phone bar.** By default: the screen the menu opens on, then the pins, then My shifts, Today and Calendar to fill four. In Edit, Phone bar, a person chooses their own four from their pins and Today, My shifts and Calendar, in order, or goes back to the standard bar.
+- **Limits.** Up to 12 pins; a name of 1 to 40 characters; an address of at most 200 characters that is a page of the app and nothing else (an app, path parts, a query; no scheme, `//`, `#`, spaces or `..`) and whose app the person may open now. No page twice. A role's menu longer than 12 gives its first 12 as starting pins.
+- **What a person may open** is worked out on the server the way the page does it (`menus.viewsFor`: role, the apps that are on, ski area or municipality, the patrol roster, a ski school director). A pin whose app the person can no longer open (a role change, an app turned off) is not shown, comes back if the app does, and is dropped for good the next time they save.
+- **Across devices.** Pins are kept on the server for the person (`user_nav`: one row, tenant and person, their pins and their bar) and arrive with `/auth/me` (`nav: { pins, bar, custom }`), so the first paint has them. `GET /api/v1/me/nav` adds `standard` (the role's starting pins); `PUT` saves `{ pins, bar }`; `DELETE` goes back to the role's. Every query is by tenant and person from the session; there is no way to name someone else. Arranging your own menu is not in the audit log. The row goes when the login is deleted.
+- **Shared counter computers.** A session opened by PIN on a shared computer always gets the role's starting pins and cannot save (the server refuses with a plain message; the star, Edit and the row menu are not offered there). The person's own pins are untouched and show on their own devices.
+- **The ski area's read-only login** has no pins and keeps its one page.
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

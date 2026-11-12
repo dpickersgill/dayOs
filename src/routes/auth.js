@@ -530,6 +530,8 @@ router.get('/auth/me', authenticate, async (req, res) => {
     // The shortcuts in that menu (a page inside an app, such as Patrol's Records requests), and which menu it is: the
     // role's, 'patrol_director' or 'pos:<id>'. work: the kinds of work of their positions (park, lifts, grooming...).
     menu_links: muni ? {} : menus.linksIn(menu), menu_row: muni ? (menu ? user.role : null) : menus.rowFor(user.role, user.role_menus, who),
+    // Their pins (2026.11.21): their own when they have arranged their menu, else the role's menu above (routes/menav.js).
+    nav: await require('./menav').navOf(req.auth, { role: user.role, org: muni ? 'municipality' : 'mountain', modules, onPatrol: req.auth.onPatrol, schoolAccess: user.school_access || null, menu }).then(({ pins, bar, custom }) => ({ pins, bar, custom })),
     positions: positions.map((p) => p.name), work: menus.kindsOf(positions), patrol_lead: who.patrolLead,
     // The ski school access level (lib/schoolaccess.js): director for owners and managers, the teaching profile's for an instructor.
     school_access: ['owner', 'manager'].includes(user.role) ? 'director' : user.role === 'instructor' ? (user.school_access || 'instructor') : null,

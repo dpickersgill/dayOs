@@ -4443,3 +4443,54 @@ dl.facts dd { margin: 0; }
 .valve-times { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 7em; gap: 8px; padding-left: 28px; }
 .valve-times label { display: grid; gap: 2px; }
 @media (max-width: 700px) { .valve-times { grid-template-columns: minmax(0, 1fr); padding-left: 0; } }
+
+/* nav pins: start */
+/* Pins (public/js/pins.js): the star in the top bar, the Pin / Unpin menu on a menu row, and the Edit dialog. */
+.pin-star { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--quiet); cursor: pointer; }
+.pin-star:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); }
+.pin-star[aria-pressed='true'] { color: var(--accent-line); border-color: var(--accent-line); background: var(--accent-tint); }
+.pin-star[aria-pressed='true'] .ico path { fill: currentColor; }
+.pin-star:disabled { opacity: .45; cursor: default; }
+
+.pin-menu { position: fixed; z-index: 70; min-width: 190px; display: grid; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: 0 10px 30px rgba(8, 28, 36, 0.28); }
+.pin-menu-item { display: flex; align-items: center; min-height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius); background: none; color: var(--ink); font: inherit; font-size: .9375rem; text-align: left; cursor: pointer; }
+.pin-menu-item:hover, .pin-menu-item:focus-visible { background: var(--surface-2); }
+
+.pins-edit { display: grid; gap: var(--sp-5, 20px); }
+.pins-section { display: grid; gap: 10px; min-width: 0; }
+.pins-section h3 { margin: 0; font-size: 1.0625rem; }
+.pins-section h3:focus-visible { outline-offset: 4px; }
+.pins-section > p { margin: 0; }
+.pins-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pins-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.pins-row.dragging { border-color: var(--accent-line); box-shadow: 0 6px 18px rgba(8, 28, 36, 0.22); background: var(--accent-tint); }
+.pins-grip { display: inline-grid; place-items: center; flex: none; width: 28px; height: 36px; color: var(--quiet); cursor: grab; touch-action: none; border-radius: var(--radius-sm); }
+.pins-grip:hover { color: var(--ink); background: var(--surface-2); }
+.pins-row.dragging .pins-grip { cursor: grabbing; }
+.pins-name { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; font-weight: 600; }
+.pins-name.plain { font-weight: 400; }
+.pins-name .ico { flex: none; color: var(--quiet); }
+.pins-name span { min-width: 0; overflow-wrap: anywhere; }
+.pins-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.pins-name-input { flex: 1; min-width: 120px; }
+.pins-move { display: flex; gap: 4px; flex: none; }
+.pins-icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: transparent; color: var(--quiet); cursor: pointer; }
+.pins-icon-btn:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); }
+.pins-icon-btn:disabled { opacity: .35; cursor: default; }
+.pins-row .btn.small { flex: none; }
+.pins-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pins-foot p { margin: 0; flex: 1 1 100%; }
+.pins-ask { padding: 10px 12px; border: 1px solid var(--closed-line-soft); border-radius: var(--radius); background: var(--closed-tint); }
+.pins-sub { font-size: .875rem; color: var(--quiet); font-weight: 600; }
+.pins-none { margin: 0; padding: 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius); color: var(--quiet); }
+.pins-bar { padding-top: var(--sp-5, 20px); border-top: 1px solid var(--line); }
+@media (max-width: 860px) {
+  .pin-menu-item { min-height: 44px; }
+  .pins-row { flex-wrap: wrap; justify-content: flex-end; }
+  .pins-name { flex: 1 1 60%; }
+  .pins-rename { flex: 1 1 100%; }
+  .pins-grip { width: 36px; height: 44px; }
+  .pins-icon-btn { width: 44px; height: 44px; }
+  .pins-row .btn.small, .pins-foot .btn.small { min-height: 44px; }
+}
+/* nav pins: end */
