@@ -17,7 +17,8 @@ const OPTION = z.string().trim().min(1).max(60);
  *   text       a few words, written down
  *   yesno      yes or no; fail_on 'yes' or 'no' fails by itself on that answer
  *   condition  a condition score, 1 (new) to 5 (failed); fail_at fails by itself at that score or worse
- * Any step can need a photo (photo: true): it is answered only with a photo taken for it.
+ * Any step can need a photo (photo: true): it is answered only with a photo taken for it. A step with stops_use takes the
+ * asset out of service when it fails (2026.11.20: a truck's brakes, steering, lights or tires), not just to needs service.
  */
 const stepSchema = z.object({
   key: KEY,
@@ -33,6 +34,7 @@ const stepSchema = z.object({
   fail_at: z.number().int().min(1).max(5).nullable().optional(),
   photo: z.boolean().optional(),
   run_hours: z.boolean().optional(),
+  stops_use: z.boolean().optional(), // a failure takes the asset out of service (a vehicle's brakes, steering, lights, tires)
 }).superRefine((s, ctx) => {
   if (s.type === 'number' && s.min != null && s.max != null && s.min > s.max) ctx.addIssue({ code: 'custom', message: `${s.label}: the lowest allowed reading is above the highest` });
   if (s.type === 'choice') {
@@ -83,6 +85,7 @@ function evaluate(step, answer, today) {
     out.photo_id = Number(answer.photo_id);
   } else if (answer.photo_id && out.result !== 'na') out.photo_id = Number(answer.photo_id);
   if (step.run_hours) out.run_hours = true;
+  if (step.stops_use) out.stops_use = true;
   return out;
 }
 

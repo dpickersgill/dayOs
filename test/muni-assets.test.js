@@ -111,7 +111,7 @@ test('template packs: given when the add-on is turned on, once, and editable aft
   for (const [pack, list] of Object.entries(TP.PACKS)) for (const [name, , , items] of list) for (const it of items) assert.ok(CR.stepSchema.safeParse(it).success, `${pack} ${name} ${it.key}`);
   const names = (await templatesOf(A)).map((t) => t.name);
   for (const n of ['Valve exercise', 'Hydrant flush and inspection', 'Manhole inspection', 'Pump station round', 'Outfall dry-weather screening', 'Inlet inspection', 'Stormwater facility inspection']) assert.ok(names.includes(n), n);
-  assert.ok(names.includes('Vehicle pre-trip'), 'the starting checklists too');
+  assert.ok(names.includes('Public works truck pre-trip') && !names.includes('Vehicle pre-trip'), 'the trucks\' pre-trip too (2026.11.20: the public works one, not the ski area\'s)');
   assert.ok(!names.includes('Groomer pre-shift') && !names.includes('Snowmobile or UTV pre-ride'), 'nothing about snow for a municipality');
   const valve = await tplNamed(A, 'Valve exercise');
   assert.deepEqual(valve.map_kinds, ['valve']); assert.equal(valve.sets_condition, true); assert.equal(valve.pack, 'water');
@@ -127,7 +127,7 @@ test('template packs: given when the add-on is turned on, once, and editable aft
   assert.equal(again.filter((t) => t.name === 'Valve exercising (ours)').length, 1);
   assert.equal(again.filter((t) => t.name === 'Hydrant flush and inspection').length, 1);
   const [[packs]] = await pool.query('SELECT COUNT(*) AS n FROM asset_template_packs WHERE tenant_id = ?', [A.id]);
-  assert.equal(Number(packs.n), 3);
+  assert.equal(Number(packs.n), 4, 'water, sewer, stormwater and the fleet pack every municipality gets');
   is(await api('PATCH', `/assets/templates/${valve.id}`, { token: A.token, body: { name: 'Valve exercise', active: true } }), 200);
   // A pack checklist that sets the condition keeps its condition item.
   const noCond = valve.items.filter((i) => i.type !== 'condition');
@@ -194,7 +194,9 @@ test('each new item kind: a reading outside its range, a failing choice and a ye
   assert.deepEqual(panel.inspections.map((i) => i.condition_score), [4, 2], 'each inspection keeps its own score');
   // An old pass/fail checklist still works on an asset, with no type on its steps.
   const truck = await api('POST', '/assets/register', { token: A.token, body: { name: `Plow truck ${suffix}`, kind: 'truck' } });
-  const pre = await tplNamed(A, 'Vehicle pre-trip');
+  // (A municipality's own pre-trip is typed since 2026.11.20, so the old kind of checklist is made here as it was stored.)
+  await pool.query("INSERT INTO inspection_templates (tenant_id, name, kinds, items) VALUES (?, ?, 'truck', ?)", [A.id, `Old pre-trip ${suffix}`, JSON.stringify([{ key: 'brakes', label: 'Brakes' }, { key: 'lights', label: 'Lights' }])]);
+  const pre = await tplNamed(A, `Old pre-trip ${suffix}`);
   const r = await api('POST', `/assets/register/${truck.body.id}/inspections`, { token: crewA.token, body: { template_id: pre.id, items: pre.items.map((i) => ({ key: i.key, result: 'pass' })) } });
   is(r, 201); assert.equal(r.body.result, 'pass');
 });

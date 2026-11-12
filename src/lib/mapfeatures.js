@@ -17,7 +17,7 @@ const KINDS = [
   ['junction', 'Junction or pull box', 'point', 'power'], ['pole', 'Utility pole', 'point', 'power'],
   ['sewer_line', 'Sewer line', 'line', 'sewer'], ['septic', 'Septic tank or field', 'point', 'sewer'], ['cleanout', 'Sewer cleanout', 'point', 'sewer'],
   ['gas_line', 'Gas line', 'line', 'fuel'], ['fuel_tank', 'Fuel or propane tank', 'point', 'fuel'], ['gas_shutoff', 'Gas shutoff', 'point', 'fuel'],
-  ['comms_line', 'Phone, fibre or data line', 'line', 'comms'], ['comms_box', 'Comms box or antenna', 'point', 'comms'],
+  ['comms_line', 'Phone, fiber or data line', 'line', 'comms'], ['comms_box', 'Comms box or antenna', 'point', 'comms'],
   ['culvert', 'Culvert', 'line', 'drainage'], ['ditch', 'Ditch or swale', 'line', 'drainage'], ['catch_basin', 'Catch basin', 'point', 'drainage'],
   ['pond', 'Pond or reservoir', 'area', 'water'], ['building', 'Building', 'area', 'structures'], ['structure', 'Structure or shed', 'point', 'structures'],
   ['road', 'Road or cat track', 'line', 'structures'], ['fence', 'Fence', 'line', 'structures'], ['area', 'Area', 'area', 'other'],
@@ -48,6 +48,8 @@ for (const k of KINDS) {
   if (GROUP[k.key]) { k.group = GROUP[k.key]; k.orgs = ['municipality']; }
   if (MUNI_SYSTEM[k.key]) k.muni_system = MUNI_SYSTEM[k.key];
 }
+// What a municipality calls a kind, where a ski area's word does not fit (2026.11.20: no cat tracks in a borough).
+KINDS.find((k) => k.key === 'road').muni_label = 'Road';
 // A stormwater facility (a basin, a rain garden) is drawn as an area, or put down as a point when it is small.
 KINDS.find((k) => k.key === 'bmp').geometries = ['area', 'point'];
 
@@ -65,6 +67,8 @@ const kindOf = (key) => KINDS.find((k) => k.key === key);
 const orgOf = (org) => (org === 'municipality' ? 'municipality' : 'mountain');
 /** The system (layer and color) a kind is drawn in for this kind of tenant. */
 const systemFor = (k, org) => (orgOf(org) === 'municipality' && k.muni_system ? k.muni_system : k.system);
+/** A kind's name for this kind of tenant ("Road" for a municipality, "Road or cat track" for a ski area). */
+const labelFor = (k, org) => (orgOf(org) === 'municipality' && k.muni_label ? k.muni_label : k.label);
 
 /**
  * May this tenant put this kind on its map? org: 'mountain' or 'municipality'; on: the apps that are on (a Set or array).
@@ -82,7 +86,34 @@ function kindRefusal(key, org, on) {
   return null;
 }
 /** The kinds this tenant may put on its map, each with the system it is drawn in for this tenant. */
-const kindsFor = (org, on) => KINDS.filter((k) => !kindRefusal(k.key, org, on)).map((k) => ({ ...k, system: systemFor(k, org) }));
+const kindsFor = (org, on) => KINDS.filter((k) => !kindRefusal(k.key, org, on)).map((k) => ({ ...k, label: labelFor(k, org), system: systemFor(k, org) }));
+
+// ---------------------------------------------------------------- a valve's turns
+/**
+ * A valve's size in inches from what was typed ("8 in", "8\"", "8-inch", "8"), or null. A size in mm is not guessed at.
+ */
+function inchesOf(size) {
+  const m = String(size || '').trim().match(/^(\d{1,2}(?:\.\d+)?)\s*(?:in|inch|inches|"|”|-inch|-in)?\.?$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 72 ? n : null;
+}
+/**
+ * The turns a valve takes to close fully, for the valve exercise: from the valve's record when someone entered it, else an
+ * estimate from its size (a gate valve takes about 3 turns per inch of diameter plus 2: an 8 in valve about 26), else null.
+ * Returns { value, estimated, words } or null. The crew counts the real turns; the estimate is only shown as one.
+ */
+function valveTurns(f) {
+  if (!f || f.kind !== 'valve') return null;
+  if (f.turns_expected !== null && f.turns_expected !== undefined && Number(f.turns_expected) > 0) {
+    const n = Number(f.turns_expected);
+    return { value: n, estimated: false, words: `${n} turns (from the valve's record)` };
+  }
+  const d = inchesOf(f.size);
+  if (!d) return null;
+  const n = Math.round(3 * d + 2);
+  return { value: n, estimated: true, words: `about ${n} turns (an estimate from its ${d} in size: 3 per inch plus 2)` };
+}
 
 // ---------------------------------------------------------------- condition, criticality and risk
 // Condition: 1 new or like new, 2 good, 3 fair, 4 poor, 5 failed or failing. Criticality: what happens if it fails, from
@@ -148,12 +179,13 @@ function shape(f, org) {
   const pts = typeof f.points === 'string' ? JSON.parse(f.points) : f.points;
   const k = kindOf(f.kind) || { geometry: f.geometry, system: 'other', label: f.kind };
   return {
-    id: Number(f.id), kind: f.kind, kind_label: k.label, geometry: f.geometry, system: systemFor(k, org), group: k.group || null, name: f.name, tag: f.tag || null, points: pts,
+    id: Number(f.id), kind: f.kind, kind_label: labelFor(k, org), geometry: f.geometry, system: systemFor(k, org), group: k.group || null, name: f.name, tag: f.tag || null, points: pts,
     length_m: f.geometry === 'line' ? Math.round(lengthOf(pts) * 10) / 10 : null,
     area_m2: f.geometry === 'area' ? Math.round(areaOf(pts)) : null,
     size: f.size, material: f.material, depth_ft: num(f.depth_ft), installed_year: f.installed_year === null ? null : Number(f.installed_year),
     status: f.status, notes: f.notes, asset_id: f.asset_id === null ? null : Number(f.asset_id), asset_name: f.asset_name || null, asset_tag: f.asset_tag || null,
     accuracy_m: num(f.accuracy_m), placed_how: f.placed_how, updated_at: f.updated_at,
+    turns_expected: f.turns_expected === null || f.turns_expected === undefined ? null : Number(f.turns_expected), turns: valveTurns(f),
     condition_score: num(f.condition_score), criticality: num(f.criticality), ownership: f.ownership || null, risk: riskOf(f.condition_score, f.criticality),
     open_orders: f.open_orders === undefined ? undefined : Number(f.open_orders || 0), last_inspected: f.last_inspected === undefined ? undefined : f.last_inspected,
   };
@@ -175,5 +207,5 @@ function geojson(features, mountain) {
   };
 }
 
-module.exports = { KINDS, SYSTEMS, GROUPS, KIND_KEYS, kindOf, systemFor, kindRefusal, kindsFor, distance, lengthOf, areaOf, anchorOf, cleanPoints, shape, geojson,
+module.exports = { KINDS, SYSTEMS, GROUPS, KIND_KEYS, kindOf, systemFor, labelFor, inchesOf, valveTurns, kindRefusal, kindsFor, distance, lengthOf, areaOf, anchorOf, cleanPoints, shape, geojson,
   CONDITIONS, CRITICALITIES, OWNERSHIP, RISK_LEVELS, RISK_MIN, riskOf };

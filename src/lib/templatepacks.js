@@ -17,11 +17,34 @@ const yn = (key, label, failOn = null, extra = {}) => ({ key, label, type: 'yesn
 const choice = (key, label, options, failOptions = [], extra = {}) => ({ key, label, type: 'choice', options, fail_options: failOptions, ...extra });
 const cond = (key = 'condition', label = 'Condition score') => ({ key, label, type: 'condition' });
 
-// [pack (the add-on), name, map kinds, sets the condition score, items]
+// [pack (the add-on), name, map kinds, sets the condition score, items, asset kinds (optional)]
+// A pack in CORE_PACKS is given to every municipality, whatever its add-ons (2026.11.20: the fleet's pre-trip).
+const STOPS = { stops_use: true }; // a failure takes the vehicle out of service
 const PACKS = {
+  fleet: [
+    ['Public works truck pre-trip', [], false, [
+      num('odometer', 'Odometer reading', 'mi', { min: 0 }),
+      pf('lights', 'Headlights, brake lights, turn signals, flashers and beacon', STOPS),
+      pf('tires', 'Tires: tread, pressure and damage; wheels and lug nuts', STOPS),
+      pf('brakes', 'Service brakes and parking brake hold', STOPS),
+      pf('air_buildup', 'Air brakes: pressure builds (about 85 to 100 psi within 45 seconds) and the governor cuts out (about 120 to 140 psi)', STOPS),
+      pf('air_leak', 'Air brakes: leak-down within limits, and the low-air warning comes on before 60 psi', STOPS),
+      pf('steering', 'Steering: no excess play', STOPS),
+      pf('horn', 'Horn and backup alarm'),
+      pf('wipers', 'Wipers, washer fluid and defroster'),
+      pf('mirrors', 'Mirrors and glass clean, not cracked'),
+      pf('fluids', 'Engine oil, coolant and fuel; no leaks under the truck'),
+      pf('hydraulics', 'Hydraulic oil level; hoses and fittings not leaking or worn'),
+      pf('plow_mount', 'Plow and spreader mount: pins, chains, hoses and plow lights'),
+      pf('packer', 'Packer body: blade, tailgate locks and the emergency stop'),
+      pf('extinguisher', 'Fire extinguisher charged; triangles and first aid kit on board'),
+      pf('belts', 'Seat belts'),
+      pf('gauges', 'Gauges and warning lights normal after start'),
+    ], ['truck', 'bus']],
+  ],
   water: [
     ['Valve exercise', ['valve'], true, [
-      num('turns_expected', 'Turns expected (from the record)', 'turns'),
+      num('turns_expected', 'Turns expected', 'turns'), // the screen shows the valve's own record here (or an estimate from its size)
       num('turns_counted', 'Turns counted, fully closed to fully open', 'turns', { min: 0 }),
       choice('direction', 'Direction to close', ['Right to close', 'Left to close']),
       yn('operated_fully', 'Operated fully, open to closed and back', 'no'),
@@ -87,6 +110,7 @@ const PACKS = {
   ],
 };
 const PACK_KEYS = Object.keys(PACKS);
+const CORE_PACKS = ['fleet'];
 
 /** The apps on for a tenant, read inside the caller's transaction (no cache: a change being saved counts). */
 async function stateIn(conn, tenantId) {
@@ -104,7 +128,7 @@ async function stateIn(conn, tenantId) {
 async function seed(conn, tenantId) {
   const s = await stateIn(conn, tenantId);
   if (!s || s.org !== 'municipality') return [];
-  const want = PACK_KEYS.filter((p) => s.on.has(p));
+  const want = PACK_KEYS.filter((p) => CORE_PACKS.includes(p) || s.on.has(p));
   if (!want.length) return [];
   const had = new Set((await rows(conn, 'SELECT pack FROM asset_template_packs WHERE tenant_id = ?', [tenantId])).map((r) => r.pack));
   const added = [];
@@ -113,9 +137,9 @@ async function seed(conn, tenantId) {
     const [claim] = await conn.query('INSERT IGNORE INTO asset_template_packs (tenant_id, pack) VALUES (?, ?)', [tenantId, pack]);
     if (!claim.affectedRows) continue;
     let n = 0;
-    for (const [name, mapKinds, setsCondition, items] of PACKS[pack]) {
-      const [r] = await conn.query('INSERT IGNORE INTO inspection_templates (tenant_id, name, kinds, map_kinds, items, sets_condition, pack) VALUES (?, ?, NULL, ?, ?, ?, ?)',
-        [tenantId, name, mapKinds.join(','), JSON.stringify(items), setsCondition ? 1 : 0, pack]);
+    for (const [name, mapKinds, setsCondition, items, assetKinds = []] of PACKS[pack]) {
+      const [r] = await conn.query('INSERT IGNORE INTO inspection_templates (tenant_id, name, kinds, map_kinds, items, sets_condition, pack) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [tenantId, name, assetKinds.join(',') || null, mapKinds.join(',') || null, JSON.stringify(items), setsCondition ? 1 : 0, pack]);
       if (r.affectedRows) { n += 1; added.push(name); }
     }
     await conn.query('UPDATE asset_template_packs SET templates = ? WHERE tenant_id = ? AND pack = ?', [n, tenantId, pack]);
@@ -123,4 +147,4 @@ async function seed(conn, tenantId) {
   return added;
 }
 
-module.exports = { PACKS, PACK_KEYS, seed };
+module.exports = { PACKS, PACK_KEYS, CORE_PACKS, seed };

@@ -41,18 +41,20 @@ export function stepsEditor(steps, opts = {}) {
     const options = input({ maxlength: 400, value: (s.options || []).join(', '), placeholder: 'Good, Needs cleaning, Damaged', 'aria-label': 'Choices, separated by commas' });
     const failOptions = input({ maxlength: 400, value: (s.fail_options || []).join(', '), placeholder: 'Damaged', 'aria-label': 'Choices that fail, separated by commas' });
     const choiceBox = h('div', { class: 'row tight steps-rule' }, mini('Choices (commas between)', options), mini('These fail', failOptions));
-    const failOn = select([['', 'Neither fails'], ['yes', 'Yes fails'], ['no', 'No fails']], s.fail_on || '', { 'aria-label': 'Which answer fails' });
+    const failOn = select([['', 'Neither'], ['yes', 'Yes'], ['no', 'No']], s.fail_on || '', { 'aria-label': 'Which answer fails' });
     const ynBox = h('div', { class: 'row tight steps-rule' }, mini('Fails on', failOn));
     const failAt = select([['', 'Never fails by itself'], ...[5, 4, 3].map((n) => [String(n), `${n} or worse fails`])], s.fail_at ? String(s.fail_at) : '', { 'aria-label': 'Condition that fails' });
     const condBox = h('div', { class: 'row tight steps-rule' }, mini('Fails at', failAt));
     const photo = h('input', { type: 'checkbox', checked: Boolean(s.photo) });
-    const photoBox = opts.more ? h('label', { class: 'check steps-rule' }, photo, ' Needs a photo') : null;
+    // A safety-critical step on a vehicle (brakes, steering, lights, tires): failing it takes the vehicle out of service.
+    const stops = h('input', { type: 'checkbox', checked: Boolean(s.stops_use) });
+    const photoBox = opts.more ? h('div', { class: 'row tight steps-rule' }, h('label', { class: 'check' }, photo, ' Needs a photo'), h('label', { class: 'check' }, stops, ' A fail takes it out of service')) : null;
     const show = () => {
       numBox.hidden = type.value !== 'number'; dateBox.hidden = type.value !== 'date'; choiceBox.hidden = type.value !== 'choice';
       ynBox.hidden = type.value !== 'yesno'; condBox.hidden = type.value !== 'condition';
     };
     type.addEventListener('change', show); show();
-    const row = { s, labelIn, type, unit, min, max, days, options, failOptions, failOn, failAt, photo, runHours };
+    const row = { s, labelIn, type, unit, min, max, days, options, failOptions, failOn, failAt, photo, runHours, stops };
     const remove = button('Remove', () => { el.remove(); rows.splice(rows.indexOf(row), 1); }, { small: true, kind: 'quiet', label: `Remove ${s.label || 'step'}` });
     const el = h('div', { class: 'steps-row' }, h('div', { class: 'row tight' }, labelIn, type, remove), numBox, dateBox, choiceBox, ynBox, condBox, photoBox);
     row.el = el;
@@ -84,6 +86,7 @@ export function stepsEditor(steps, opts = {}) {
       if (step.type === 'yesno') step.fail_on = r.failOn.value || null;
       if (step.type === 'condition') step.fail_at = r.failAt.value ? Number(r.failAt.value) : null;
       if (opts.more && r.photo.checked) step.photo = true;
+      if (opts.more && r.stops.checked) step.stops_use = true;
       out.push(step);
     });
     return out;
@@ -94,11 +97,14 @@ export function stepsEditor(steps, opts = {}) {
 /** What a reading or date step allows, in words. */
 export function ruleText(s) {
   const u = (n) => `${n}${s.unit ? ` ${s.unit}` : ''}`;
-  if (s.type === 'number') return s.min != null && s.max != null ? `${u(s.min)} to ${u(s.max)}` : s.min != null ? `at least ${u(s.min)}` : s.max != null ? `at most ${u(s.max)}` : (s.unit || '');
-  if (s.type === 'date') return s.within_days ? `fails within ${s.within_days} days` : 'fails once passed';
-  if (s.type === 'choice' && (s.fail_options || []).length) return `${s.fail_options.join(', ')} fails`;
-  if (s.type === 'yesno' && s.fail_on) return `${s.fail_on === 'yes' ? 'Yes' : 'No'} fails`;
-  if (s.type === 'condition') return s.fail_at ? `${s.fail_at} or worse fails` : '1 new to 5 failed';
+  // A lowest reading of 0 with no highest is no rule at all (a count cannot be below 0): nothing is said (2026.11.20).
+  const min = s.min != null && !(Number(s.min) === 0 && s.max == null) ? s.min : null;
+  const or = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} or ${list[list.length - 1]}` : list[0]);
+  if (s.type === 'number') return min != null && s.max != null ? `OK: ${u(min)} to ${u(s.max)}` : min != null ? `OK: at least ${u(min)}` : s.max != null ? `OK: at most ${u(s.max)}` : '';
+  if (s.type === 'date') return s.within_days ? `Fails within ${s.within_days} days of the date` : 'Fails once the date has passed';
+  if (s.type === 'choice' && (s.fail_options || []).length) return `Fails if: ${or(s.fail_options)}`;
+  if (s.type === 'yesno' && s.fail_on) return `Fails if: ${s.fail_on === 'yes' ? 'Yes' : 'No'}`;
+  if (s.type === 'condition') return s.fail_at ? `Fails if: ${s.fail_at} or worse` : '1 new to 5 failed';
   return '';
 }
 /** Would this answer fail its rule? (The server decides; this only shows it straight away.) */
@@ -147,12 +153,23 @@ function pickChips(id, labelledBy, options) {
  * { el, answers: [{ key, get(), missing(), needsNote(), needsPhoto(), focus() }], markRestPass(), hasPassItems }.
  */
 export function answerSheet(steps, chips, opts = {}) {
+  // opts.record: what the item's own record already says, for steps that ask for it (2026.11.20). turns: a valve's turns
+  // to close ({ value, estimated, words }) or null when the record has neither the turns nor a size to estimate them from.
+  // Without opts.record (an asset, a building), every step is asked as it is.
+  const turns = opts.record ? opts.record.turns || null : undefined;
   const answers = steps.map((raw, i) => {
     const s = { ...raw, type: raw.type || 'pass' }; // checklists made before readings have no type: pass or fail
     const id = `ins-${i}`;
+    if (s.key === 'turns_expected' && s.type === 'number' && turns !== undefined) {
+      // Not asked: shown from the record (or left out when the record cannot say), never "0 turns expected".
+      const fact = turns ? h('div', { class: 'ins-item' }, h('span', { class: 'ins-label' }, 'Turns expected'), h('p', { class: 'muted' }, turns.words)) : h('span', { hidden: true });
+      return { key: s.key, step: s, el: fact, get: () => (turns ? { key: s.key, value: turns.value, note: turns.estimated ? 'Estimate from the valve size' : null } : { key: s.key, result: 'na' }),
+        missing: () => false, needsNote: () => false, needsPhoto: () => false, focus: () => {}, pass: () => {} };
+    }
     const note = input({ maxlength: 255, placeholder: 'What is wrong', 'aria-label': `What is wrong: ${s.label}`, hidden: true });
     const rule = ruleText(s);
-    const head = h('span', { id: `${id}-l`, class: 'ins-label' }, s.label, rule && s.type !== 'pass' ? h('small', { class: 'muted' }, ` ${rule}`) : null);
+    const expect = s.key === 'turns_counted' && turns ? `Expected ${turns.estimated ? 'about ' : ''}${turns.value}` : '';
+    const head = h('span', { id: `${id}-l`, class: 'ins-label' }, s.label, (rule || expect) && s.type !== 'pass' ? h('small', { class: 'muted' }, ` ${[expect, rule].filter(Boolean).join('. ')}`) : null);
     const photo = s.photo && opts.photo ? photoTaker(s, opts.photo) : null;
     const withPhoto = (a) => (photo && a.result !== 'na' ? { ...a, photo_id: photo.get() } : a);
     const needsPhoto = (isNa) => Boolean(photo) && !isNa && !photo.get();
@@ -176,10 +193,15 @@ export function answerSheet(steps, chips, opts = {}) {
       read = () => field.get();
     }
     const control = field.el || field;
-    const update = () => { const f = !na.checked && failsRule(s, read()); flag.hidden = !f; if (control.tagName === 'INPUT') control.disabled = na.checked; else control.hidden = na.checked; };
+    // A count well short of the valve's expected turns is pointed out; the crew decides whether it operated fully.
+    const short = expect ? h('span', { class: 'muted small', hidden: true }, 'Fewer turns than expected: check that it closed fully.') : null;
+    const update = () => {
+      const f = !na.checked && failsRule(s, read()); flag.hidden = !f; if (control.tagName === 'INPUT') control.disabled = na.checked; else control.hidden = na.checked;
+      if (short) short.hidden = na.checked || read() === '' || Number(read()) >= turns.value * 0.8;
+    };
     control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', update); na.addEventListener('change', update);
     const value = () => (s.type === 'number' || s.type === 'condition' ? Number(read()) : read());
-    return { key: s.key, step: s, el: h('div', { class: 'ins-item' }, head, h('div', { class: 'row tight' }, control, s.type === 'number' && s.unit ? h('span', { class: 'muted' }, s.unit) : null, flag, h('label', { class: 'check' }, na, ' N/A')), photo ? photo.el : null, note),
+    return { key: s.key, step: s, el: h('div', { class: 'ins-item' }, head, h('div', { class: 'row tight' }, control, s.type === 'number' && s.unit ? h('span', { class: 'muted' }, s.unit) : null, flag, h('label', { class: 'check' }, na, ' N/A')), short, photo ? photo.el : null, note),
       get: () => (na.checked ? { key: s.key, result: 'na' } : withPhoto({ key: s.key, value: value(), note: note.value.trim() || null })),
       missing: () => !na.checked && read() === '', needsNote: () => false, needsPhoto: () => needsPhoto(na.checked), focus: () => (control.focus ? control.focus() : null), pass: () => {} };
   });

@@ -159,7 +159,7 @@ async function renderProgram(root, id) {
     const mapEl = h('div', { class: 'map-box', role: 'application', 'aria-label': `Map of ${p.name}: blue to do, green done, red failed, gray skipped` });
     const listBox = h('div');
     const tpl = p.template ? [{ ...p.template, kinds: [], map_kinds: [], active: true }] : [];
-    const doTarget = (g) => inspectDialog({ type: g.type, kind: g.kind, id: g.asset_id || g.map_feature_id, name: g.name }, tpl, {
+    const doTarget = (g) => inspectDialog({ type: g.type, kind: g.kind, id: g.asset_id || g.map_feature_id, name: g.name, turns: g.turns }, tpl, {
       preferId: p.template_id, title: `${p.template ? p.template.name : 'Inspect'}: ${g.name}`, meters: g.type === 'asset',
       photoPath: g.type === 'asset' ? `/assets/register/${g.asset_id}/photos` : `/assets/map/features/${g.map_feature_id}/photos`,
       save: (b) => post(`/assets/programs/${p.id}/targets/${g.id}/inspect`, b), done: load,

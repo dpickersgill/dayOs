@@ -6,7 +6,7 @@
 import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
-import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
+import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam } from '../ui.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -67,12 +67,13 @@ async function drawOrders(box, status, pick) {
     if (status === 'open' && overdue.checked) q.set('overdue', '1');
     return q;
   };
-  const exportRow = h('div', { class: 'row no-print' },
+  // The spreadsheet is for the office (managers and Front desk); the Crew's screen is for the work (2026.11.20).
+  const exportRow = ctx.me && ctx.me.role === 'staff' ? null : h('div', { class: 'row no-print' },
     button('Download spreadsheet', () => { const q = filters(); if (contacts.checked) q.set('contacts', '1'); return download(`/ops/work-orders/export?${q}`, `work-orders-${todayStr()}.csv`); }, { small: true }),
     isManager() ? h('label', { class: 'check', title: 'Logged with your name' }, contacts, ' Include contact details (logged)') : null,
     h('span', { class: 'muted small' }, 'Work orders are public records. The spreadsheet leaves out residents’ house numbers and their own words.'));
   clear(box).append(h('div', { class: 'week-filter', role: 'group', 'aria-label': 'Filters' }, priority, who, source,
-    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, exportRow);
+    status === 'open' ? h('label', { class: 'check' }, overdue, ' Overdue only') : null), body, ...(exportRow ? [exportRow] : []));
   async function load() {
     const q = filters();
     const { data } = await get(`/ops/work-orders?${q}`);
@@ -123,7 +124,9 @@ async function openOrder(id, pick, done) {
   const act = (status, text, kind) => button(text, () => setStatus(w, status), { small: true, kind });
   const mapSlot = h('div');
   if (w.map_feature_id) miniMap({ geometry: w.feature_geometry, points: w.feature_points, lat: w.feature_lat, lng: w.feature_lng }, { label: 'Where it is on the map' }).then((el) => mapSlot.append(el));
-  const dlg = formDialog(w.title, h('div', { class: 'stack' },
+  // One way to close: the dialog's own Close (it is not a form, so no Cancel and Save). Cancel job and Delete sit apart
+  // from the work buttons, and both ask first (2026.11.20).
+  const dlg = dialog(w.title, h('div', { class: 'stack' },
     h('div', { class: 'row between' }, h('p', null, state(STATUS_TEXT[w.status] || label(w.status), w.status === 'done' ? 'good' : 'neutral'), ' ', state(label(w.priority), PRIORITY_TONE[w.priority])), shareButton('work_order', w.id)),
     w.description ? h('p', null, w.description) : null,
     h('dl', { class: 'facts' },
@@ -146,10 +149,10 @@ async function openOrder(id, pick, done) {
       w.status === 'open' || w.status === 'waiting_parts' ? act('in_progress', 'Start work', 'primary') : null,
       w.status === 'in_progress' ? act('waiting_parts', 'Waiting for parts') : null,
       open ? act('done', 'Mark done', 'primary') : act('open', 'Reopen'),
-      open ? act('cancelled', 'Cancel job') : null,
-      open && isManager() ? button('Edit', () => { dlg.close(); editOrder(w, pick, done); }, { small: true }) : null,
-      isManager() ? button('Delete', () => confirmDialog('Delete work order', 'This removes the job and its notes. To keep the record, cancel it instead.', 'Delete', async () => { await del(`/ops/work-orders/${id}`); dlg.close(); await done(); }, { danger: true }), { small: true }) : null)),
-  async () => {}, { submitText: 'Close' });
+      open && isManager() ? button('Edit', () => { dlg.close(); editOrder(w, pick, done); }, { small: true }) : null),
+    open || isManager() ? h('div', { class: 'row wrap wo-danger' },
+      open ? button('Cancel job', () => confirmDialog('Cancel this job?', 'It stays on the record as canceled, with its notes. You can reopen it later.', 'Cancel job', () => setStatus(w, 'cancelled'), { danger: true, noText: 'Keep the job' }), { small: true }) : null,
+      isManager() ? button('Delete', () => confirmDialog('Delete work order', 'This removes the job and its notes. To keep the record, cancel it instead.', 'Delete', async () => { await del(`/ops/work-orders/${id}`); dlg.close(); await done(); }, { danger: true }), { small: true }) : null) : null));
 
   function setStatus(order, status) {
     if (status !== 'done') {

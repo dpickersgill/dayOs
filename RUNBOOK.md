@@ -34,6 +34,8 @@
 
 `SEED_PASSWORD=<at least 12 characters> node db/demo-municipal.js demo-borough` makes Riverbend Borough (made up) with every municipal app on, free of charge, and prints the login (username `owner`; also `manager`, `crew1` to `crew4`, `frontdesk`, all with SEED_PASSWORD). Run it against the database you mean (DB_NAME). It is safe to run again: nothing is added twice. To start over, close and delete the tenant in the console, or use db/reset.js on a test database. Each municipal app adds its sample data in its own file in `db/demo-municipal/`, run in name order (base, assets, requests, bulk pickup, street notices, buildings). Running it again also turns every municipal add-on back on. The borough has sample response targets (Requests, Settings), so the repair record shows requests that met them and requests that did not.
 
+After 2026.11.20 the demo borough's requests are numbered R-1001 on in the order they were reported, and most valves have their turns to close (`db/demo-municipal/70-polish.js`). Existing municipalities get the Public works truck pre-trip the next time anyone opens Assets and fleet; nothing to set up. Request numbering needs no setup either: a municipality's first new request after the release is R-1001 (or the next free number).
+
 ## Public pages for a municipality
 
 Every municipal public page is `https://<app address>/<page>/<web name>`, with no sign-in. Link them from the municipality's website.

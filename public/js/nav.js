@@ -410,6 +410,24 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
     const panel = h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Jump to a page' }, h('div', { class: 'palette-top' }, icon('search', 18), box), list, foot);
     const overlay = h('div', { class: 'overlay palette-overlay' }, panel);
     let shown = []; let at = 0;
+    // Records as well as pages (2026.11.20): map items, assets, work orders, requests and people, from /jump, a moment
+    // after typing stops. Only what this person's role and apps open comes back.
+    const RECORD_ICON = { feature: 'assets', asset: 'assets', work_order: 'works', request: 'requests', person: 'workforce' };
+    let found = { q: '', items: [] }; let wanted = ''; let timer = null;
+    const fetchRecords = (q) => {
+      clearTimeout(timer);
+      if (q.length < 2 || found.q === q) return;
+      wanted = q;
+      timer = setTimeout(async () => {
+        try {
+          const { get } = await import('./api.js');
+          const r = await get(`/jump?q=${encodeURIComponent(q)}`);
+          if (wanted !== q || !overlay.isConnected) return;
+          found = { q, items: (r.data || []).map((x) => ({ id: `rec-${x.href}`, title: x.title, hint: x.hint, icon: RECORD_ICON[x.type] || 'search', words: '', record: true, run: () => { location.hash = x.href; } })) };
+          paint();
+        } catch (_) { /* pages still work without the records */ }
+      }, 250);
+    };
 
     // Pages inside apps (the tabs of row 1 and row 2), with the app's name, only those this person may open.
     const appName = (k) => byKey.get(k) || k;
@@ -441,7 +459,9 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
         rows = [...(rec.length ? [{ heading: 'Recent' }, ...rec] : []), { heading: rec.length ? 'Everything' : 'Pages and commands' }, ...rest];
       } else {
         const hits = all.map((i) => [i, score(i, q)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).map(([i]) => i);
-        rows = hits.length ? hits : [{ none: true }];
+        const records = found.q === q ? found.items : [];
+        rows = hits.length || records.length ? [...hits, ...(records.length ? [{ heading: 'Records' }, ...records] : [])] : [{ none: true }];
+        fetchRecords(q);
       }
       shown = rows.filter((r) => !r.heading && !r.none);
       if (at >= shown.length) at = 0;
@@ -449,7 +469,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
       let n = -1;
       for (const r of rows) {
         if (r.heading) { list.append(h('li', { class: 'palette-heading', role: 'presentation' }, r.heading)); continue; }
-        if (r.none) { list.append(h('li', { class: 'palette-none', role: 'presentation' }, `Nothing matches "${box.value.trim()}". Try a page name like Sell or Patrol.`)); continue; }
+        if (r.none) { list.append(h('li', { class: 'palette-none', role: 'presentation' }, `Nothing matches "${box.value.trim()}". ${isMuni() ? 'Try a page name like Work orders or Requests, a tag like V-114, or a request number.' : 'Try a page name like Sell or Patrol.'}`)); continue; }
         n += 1;
         const idx = n;
         const li = h('li', { class: 'palette-item', role: 'option', id: `pal-${idx}`, 'aria-selected': String(idx === at) }, icon(r.icon, 18), h('span', { class: 'p-title' }, r.title, r.app ? h('span', { class: 'p-app' }, ` in ${r.app}`) : null), r.hint ? h('span', { class: 'p-hint' }, r.hint) : null);

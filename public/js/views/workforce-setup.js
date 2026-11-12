@@ -28,7 +28,7 @@ export async function drawSetup(box) {
     const { data } = await get('/workforce/certifications?limit=500');
     clear(certs).append(h('header', { class: 'spread' }, h('h2', null, 'Certification types'), button('Add certification', () => editCert(null, async () => { await drawCerts(); await drawPositions(); }), { small: true })),
       data.length ? table([{ head: 'Name', cell: (c) => c.name }, { head: '', actions: true, cell: (c) => button('Rename', () => editCert(c, async () => { await drawCerts(); await drawPositions(); }), { small: true, label: `Rename ${c.name}` }) }], data)
-        : empty('No certification types yet, such as Outdoor Emergency Care.'));
+        : empty(isMuni() ? 'No certification types yet, such as CDL Class B or Pennsylvania water operator.' : 'No certification types yet, such as Outdoor Emergency Care.'));
   }
   async function drawTemplates() {
     const { data } = await get('/workforce/shift-templates');

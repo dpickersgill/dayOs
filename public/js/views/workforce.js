@@ -27,7 +27,7 @@ export async function render(root, params = []) {
 export const settingsPages = {
   setup: { title: 'Positions, certifications and the time clock', render: (panel) => drawSetup(panel) },
   // Suggested positions and certifications for the mountain's attractions (zip guide, coaster operator), added in one step.
-  attractions: { title: 'Staff for attractions', render: async (panel) => (await import('./attractions.js')).drawStaffSuggestions(panel) },
+  attractions: { title: 'Staff for attractions', orgs: ['mountain'], render: async (panel) => (await import('./attractions.js')).drawStaffSuggestions(panel) },
 };
 
 // ---------------------------------------------------------------- the week
@@ -170,7 +170,7 @@ async function drawSchedule(box) {
     }
 
     clear(body).append(h('div', { class: 'sched-wide' }, grid), phone,
-      h('p', { class: 'muted small sched-key' }, 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime, and include a paid patroller\'s patrol shifts. Patrol is scheduled in Patrol and shown here read only.'));
+      h('p', { class: 'muted small sched-key' }, isMuni() ? 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime.' : 'A dashed outline is a draft that staff cannot see yet. Hours over 40 in a week are marked as overtime, and include a paid patroller\'s patrol shifts. Patrol is scheduled in Patrol and shown here read only.'));
   }
 
   await load();

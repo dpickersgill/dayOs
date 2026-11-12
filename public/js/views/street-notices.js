@@ -77,6 +77,16 @@ function areaRow(a = {}) {
 }
 
 const local = (s) => (s ? String(s).replace(' ', 'T').slice(0, 16) : '');
+const BLANK = /\{[a-z_ ]{1,30}\}/gi;
+/** What to do about the blanks left in a message, in plain words. */
+const blankHelp = (blanks) => [
+  blanks.includes('{until}') ? 'Set "Expected to end", or type over {until} (for example "we will text again when it is back").' : null,
+  blanks.includes('{start}') ? 'Set "Starts", or type over {start}.' : null,
+  blanks.includes('{streets}') ? 'Pick the streets, or type over {streets}.' : null,
+  blanks.some((b) => !['{until}', '{start}', '{streets}'].includes(b)) ? 'Type over the words in braces.' : null,
+].filter(Boolean).join(' ');
+/** A message with its blanks marked, so they stand out on the review screen. */
+const marked = (text) => String(text || '').split(/(\{[a-z_ ]{1,30}\})/gi).map((part, i) => (i % 2 ? h('mark', null, part) : part));
 const sayWhen = (v) => (v ? fmtDateTime(v) : '');
 
 async function editor(id) {
@@ -96,16 +106,24 @@ async function editor(id) {
   const operatorBox = h('div', { class: 'stack tight' }, h('p', { class: 'callout' }, setup.operator_rule), field('Issued by (certified operator)', operator, 'The app records who issued it. People decide; the app only sends what you write.'),
     setup.operators.length ? null : h('p', { class: 'muted' }, 'No certified operators are listed yet. A manager adds them in Street notices, Settings, Certified operators.'));
   const reach = h('p', { class: 'muted', 'aria-live': 'polite' });
-  const fill = button('Fill in streets and times', () => {
+  // {streets}, {start} and {until} come from the form: this button fills them in, and so does saving.
+  const fillIn = () => {
     const streets = [...areas.children].map((r) => r.words()).filter(Boolean).join(', ');
     for (const el of [sms, long]) el.value = el.value.replace(/\{streets\}/g, streets || '{streets}').replace(/\{start\}/g, starts.value ? sayWhen(starts.value) : '{start}').replace(/\{until\}/g, ends.value ? sayWhen(ends.value) : '{until}');
     sync();
-  }, { small: true });
+  };
+  const fill = button('Fill in streets and times', fillIn, { small: true });
+  const blanksOf = (el) => [...new Set(el.value.match(BLANK) || [])];
   const sync = () => {
     operatorBox.hidden = !typeOf(type.value).operator;
-    const blanks = [...new Set(`${sms.value} ${long.value}`.match(/\{[a-z_ ]+\}/gi) || [])];
-    counter.textContent = `${sms.value.length} of 320 characters. We add the municipality's name, the notice's page and "Reply STOP to stop texts".${blanks.length ? ` Fill in before sending: ${blanks.join(', ')}.` : ''}`;
+    const blanks = [...new Set([...blanksOf(sms), ...blanksOf(long)])];
+    counter.textContent = `${sms.value.length} of 320 characters. We add the municipality's name, the notice's page and "Reply STOP to stop texts".`;
+    // The blanks are pointed out at the box they are in, in words, while there are any.
+    for (const el of [sms, long]) { if (blanksOf(el).length) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); }
+    blankNote.hidden = !blanks.length;
+    blankNote.textContent = blanks.length ? `Still to fill in: ${blanks.join(', ')}. ${blankHelp(blanks)}` : '';
   };
+  const blankNote = h('p', { class: 'warn-note', role: 'status', hidden: true });
   let timer = null;
   const count = () => {
     clearTimeout(timer);
@@ -128,9 +146,13 @@ async function editor(id) {
     reach,
     h('div', { class: 'row' }, field('Starts', starts), field('Expected to end', ends, 'Optional')),
     operatorBox,
-    field('Text message', sms), counter, field('Longer version (email and the notice’s page)', long, 'Optional. Without it, the text is used.'), fill);
+    field('Text message', sms), counter, field('Longer version (email and the notice’s page)', long, 'Optional. Without it, the text is used.'), blankNote, fill);
   sync(); count();
   formDialog(id ? 'Edit notice' : 'New notice', fields, async () => {
+    // Saving fills in what the form knows; anything still in braces has to be typed over before the notice is saved.
+    fillIn();
+    const left = [...new Set([...blanksOf(sms), ...blanksOf(long)])];
+    if (left.length) { (blanksOf(sms).length ? sms : long).focus(); throw new Error(`Fill in ${left.join(', ')} before saving: see the note above.`); }
     const body = { type: type.value, title: title.value.trim(), sms_text: sms.value.trim(), body: long.value.trim() || null, areas: [...areas.children].map((r) => r.value()).filter(Boolean),
       starts_at: starts.value || null, ends_expected_at: ends.value || null, issued_by_user_id: typeOf(type.value).operator && operator.value ? Number(operator.value) : null };
     const saved = id ? await put(`/street-notices/${id}`, body) : await post('/street-notices', body);
@@ -158,8 +180,8 @@ async function detail(id) {
       n.starts_at || n.ends_expected_at ? h('p', null, [n.starts_at && `Starts ${sayWhen(n.starts_at)}`, n.ends_expected_at && `Expected to end ${sayWhen(n.ends_expected_at)}`].filter(Boolean).join('. ')) : null,
       n.held_note && n.status === 'draft' ? h('p', { class: 'warn-note' }, n.held_note) : null,
       n.issued_by_name ? h('p', null, h('strong', null, 'Issued by: '), n.issued_by_name, h('span', { class: 'muted' }, ' (certified operator)')) : null,
-      h('h3', null, 'Text message'), h('pre', { class: 'msg-body' }, n.sms_text),
-      n.body ? h('details', null, h('summary', null, 'Longer version'), h('pre', { class: 'msg-body' }, n.body)) : null,
+      h('h3', null, 'Text message'), h('pre', { class: 'msg-body' }, ...marked(n.sms_text)),
+      n.body ? h('details', { open: Boolean(n.blanks && n.blanks.length) }, h('summary', null, 'Longer version'), h('pre', { class: 'msg-body' }, ...marked(n.body))) : null,
       n.status !== 'draft' ? h('p', null, 'Residents follow it here: ', h('a', { href: n.public_link, target: '_blank', rel: 'noopener' }, n.public_link)) : null,
       n.work_order_id ? h('p', null, h('a', { href: `#/works/${n.work_order_id}` }, `Work order ${n.work_order_id}`)) : null,
       n.preview ? h('p', { class: 'muted' }, reachWords(n.preview)) : null,
@@ -173,7 +195,13 @@ async function detail(id) {
     if (!n.can_send) return null;
     const row = h('div', { class: 'row' });
     if (n.status === 'draft') {
-      row.append(button('Edit', () => { dlg.close(); editor(id); }, { small: true }), sendControls(), button('Delete draft', () => confirmDialog('Delete this draft?', 'It was never sent, so nothing is kept.', 'Delete', async () => { await del(`/street-notices/${id}`); toast('Deleted'); dlg.close(); await reload(); }, { danger: true }), { small: true }));
+      const blanks = n.blanks && n.blanks.length;
+      const edit = button('Edit', () => { dlg.close(); editor(id); }, { small: true, kind: blanks ? 'primary' : undefined });
+      const drop = button('Delete draft', () => confirmDialog('Delete this draft?', 'It was never sent, so nothing is kept.', 'Delete', async () => { await del(`/street-notices/${id}`); toast('Deleted'); dlg.close(); await reload(); }, { danger: true }), { small: true });
+      // Sending first, on its own; editing and deleting the draft below it, apart from Send.
+      return h('div', { class: 'stack' },
+        blanks ? h('p', { class: 'warn-note' }, `Fill in ${n.blanks.join(', ')} before sending. ${blankHelp(n.blanks)} Use Edit.`) : sendControls(),
+        h('div', { class: 'row notice-draft-actions' }, edit, drop));
     } else if (n.status === 'scheduled') {
       row.append(button('Unschedule', async () => { n = await post(`/street-notices/${id}/unschedule`); toast('Back to a draft'); draw(); await reload(); }, { small: true }));
     } else if (n.status === 'active') {
@@ -185,8 +213,8 @@ async function detail(id) {
   function sendControls() {
     const t = typeOf(n.type);
     const wo = h('input', { type: 'checkbox', id: `wo-${id}` });
-    const at = input({ type: 'datetime-local', min: nowInput(), 'aria-label': 'Send at' });
-    const box = h('div', { class: 'stack tight' });
+    const at = input({ type: 'datetime-local', min: nowInput(), id: `at-${id}` });
+    const box = h('section', { class: 'stack tight notice-send' });
     const go = async (when) => {
       if (n.blanks && n.blanks.length) { toast(`Fill in the blanks first: ${n.blanks.join(', ')}`, 'error'); return; }
       const reachText = n.preview ? reachWords(n.preview) : '';
@@ -198,7 +226,8 @@ async function detail(id) {
     };
     appendAll(box,
       t.work_order && setup.assets_on ? h('label', { class: 'check', for: `wo-${id}` }, wo, ' Also open a work order for the crew') : null,
-      h('div', { class: 'row' }, button('Send now', () => go(null), { kind: 'primary', small: true }), at, button('Schedule', () => { if (!at.value) { toast('Pick a day and time to schedule it', 'error'); return; } go(at.value); }, { small: true })));
+      h('div', { class: 'row' }, button('Send now', () => go(null), { kind: 'primary' })),
+      h('div', { class: 'notice-later' }, h('label', { for: `at-${id}` }, 'Or send it later'), h('div', { class: 'row' }, at, button('Schedule', () => { if (!at.value) { toast('Pick a day and time to schedule it', 'error'); at.focus(); return; } go(at.value); }))));
     return box;
   }
   function followUp(ending) {

@@ -92,6 +92,8 @@ const SIGNED = {
   'helpsms.js': { router: '/patrol' },
   // Municipal edition (muni release 1): a municipality's street list.
   'streets.js': { router: '/requests/streets' },
+  // 2026.11.20: Jump to finds records (test/m2-polish.test.js checks one municipality never finds another's).
+  'jump.js': { router: '/jump' },
   // Municipal edition (muni release 1): asset programs and asset photos, inside the Assets and fleet router.
   'assetprograms.js': { router: '/assets/programs' }, 'assetphotos.js': { router: '/assets/photos' },
   'utilities.js': { router: '/water' }, // the same Today card router is also mounted at /sewer and /stormwater

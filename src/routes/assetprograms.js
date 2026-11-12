@@ -156,7 +156,7 @@ router.post('/', manager, validate(z.object({ ...fields, targets: targetsSchema.
 async function targetsOf(conn, tenantId, programId, org) {
   const list = await rows(conn, `SELECT g.id, g.asset_id, g.map_feature_id, g.status, g.result, g.skip_reason, g.inspection_id, g.work_order_id, g.done_at,
       COALESCE(NULLIF(CONCAT(pe.first_name, ' ', pe.last_name), ' '), u.email, u.username) AS done_by_name,
-      f.kind AS f_kind, f.name AS f_name, f.tag AS f_tag, f.geometry AS f_geometry, f.lat AS f_lat, f.lng AS f_lng, f.points AS f_points, f.status AS f_status,
+      f.kind AS f_kind, f.name AS f_name, f.tag AS f_tag, f.geometry AS f_geometry, f.lat AS f_lat, f.lng AS f_lng, f.points AS f_points, f.status AS f_status, f.size AS f_size, f.turns_expected AS f_turns,
       a.name AS a_name, a.asset_tag AS a_tag, a.kind AS a_kind,
       (SELECT af.lat FROM map_features af WHERE af.tenant_id = g.tenant_id AND af.asset_id = g.asset_id ORDER BY af.id LIMIT 1) AS a_lat,
       (SELECT af.lng FROM map_features af WHERE af.tenant_id = g.tenant_id AND af.asset_id = g.asset_id ORDER BY af.id LIMIT 1) AS a_lng,
@@ -177,13 +177,14 @@ async function targetsOf(conn, tenantId, programId, org) {
       id: Number(g.id), type: isFeature ? 'feature' : 'asset', asset_id: g.asset_id === null ? null : Number(g.asset_id), map_feature_id: isFeature ? Number(g.map_feature_id) : null,
       name: isFeature ? (g.f_name || (g.f_tag ? `${k.label} ${g.f_tag}` : `${k.label} ${g.map_feature_id}`)) : g.a_name,
       tag: isFeature ? g.f_tag : g.a_tag, kind: isFeature ? g.f_kind : g.a_kind,
-      kind_label: isFeature ? k.label : (O.ASSET_KINDS.find((x) => x.value === g.a_kind) || { label: g.a_kind }).label,
+      kind_label: isFeature ? MF.labelFor(k, org) : (O.ASSET_KINDS.find((x) => x.value === g.a_kind) || { label: g.a_kind }).label,
       system: isFeature ? MF.systemFor(k, org) : null, geometry: isFeature ? g.f_geometry : null,
       points: isFeature && g.f_geometry !== 'point' ? JSON.parse(g.f_points) : null,
       lat: lat === null || lat === undefined ? null : Number(lat), lng: lng === null || lng === undefined ? null : Number(lng),
       status: g.status, result: g.result, skip_reason: g.skip_reason, inspection_id: g.inspection_id === null ? null : Number(g.inspection_id),
       work_order_id: g.work_order_id === null ? null : Number(g.work_order_id), work_order: g.work_order_id ? { id: Number(g.work_order_id), title: g.wo_title, status: g.wo_status } : null,
       done_at: g.done_at, done_by: g.done_by_name || null,
+      turns: isFeature ? MF.valveTurns({ kind: g.f_kind, size: g.f_size, turns_expected: g.f_turns }) : null, // a valve's turns to close, for the valve exercise
     };
   });
 }

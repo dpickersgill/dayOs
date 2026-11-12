@@ -5,7 +5,7 @@
 import { assetMapLink } from './asset-map.js';
 import { CONDITIONS, CRITICALITIES, OWNERSHIP, conditionText, criticalityText, riskState, scoreSelect, photoStrip, runHoursTable, miniMap, inspectDialog, inspectionRows } from './asset-bits.js';
 import { get, post, patch, del } from '../api.js';
-import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx } from '../ui.js';
+import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, fmtDateTime, label, errorBox, empty, isManager, todayStr, ctx, isMuni } from '../ui.js';
 import { qr } from '../barcode.js';
 import { shareButton } from '../share.js';
 
@@ -25,7 +25,7 @@ export const tagUrl = (tag) => `${location.origin}${location.pathname}#/assets/t
 
 /** Everything the asset forms choose from: types, checklists, places, lifts, other assets and vendors. */
 export async function fullMeta() {
-  const [m, locs, lifts, reg, vendors] = await Promise.all([get('/assets/meta'), get('/assets/locations'), get('/schedule/lifts?limit=500').catch(() => ({ data: [] })), get('/assets/register'), get('/assets/vendors')]);
+  const [m, locs, lifts, reg, vendors] = await Promise.all([get('/assets/meta'), get('/assets/locations'), isMuni() ? Promise.resolve({ data: [] }) : get('/schedule/lifts?limit=500').catch(() => ({ data: [] })), get('/assets/register'), get('/assets/vendors')]);
   return { ...m, locations: locs.data.filter((l) => l.active), lifts: lifts.data, assets: reg.data, vendors: vendors.data.filter((v) => v.active) };
 }
 

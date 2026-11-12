@@ -61,7 +61,7 @@ export async function drawMap(box, deep = '') {
     canEdit ? button('Draw an area', () => startAdd('area'), { small: true }) : null,
     h('a', { class: 'btn small', href: '/api/v1/assets/map/export.geojson', download: '' }, 'Download for GIS'));
   clear(box).append(h('div', { class: 'stack' },
-    h('p', { class: 'muted' }, 'Where the valves, hydrants, pumps and pipe runs are. Add them from the snow with your phone’s location, or tap the map. Switch to Satellite in the map’s corner to see the ground.'),
+    h('p', { class: 'muted' }, `Where the valves, hydrants, pumps and pipe runs are. Add them ${isMuni() ? 'on site' : 'from the snow'} with your phone’s location, or tap the map. Switch to Satellite in the map’s corner to see the ground.`),
     h('div', { class: 'row' }, search, colorBy, riskFilter, tools), banner,
     h('div', { class: 'park-layout' }, mapEl, h('div', { class: 'park-side' }, h('h3', null, 'Layers'), layersEl, h('h3', null, 'On the map'), listEl))));
 
@@ -297,7 +297,9 @@ export async function drawMap(box, deep = '') {
       field('Condition', scoreSelect('condition_score', CONDITIONS, f.condition_score), '1 is new, 5 is failed or failing'),
       field('Criticality', scoreSelect('criticality', CRITICALITIES, f.criticality), 'What happens if it fails: 1 little, 5 severe'),
       field('Owned by', select([['', 'Not set'], ...OWNERSHIP], f.ownership || '', { name: 'ownership' })),
-      field('Size', input({ name: 'size', value: f.size || '', maxlength: 40, placeholder: k.geometry === 'line' ? 'For example: 8 in' : '' })),
+      field('Size', input({ name: 'size', value: f.size || '', maxlength: 40, placeholder: k.geometry === 'line' || f.kind === 'valve' ? 'For example: 8 in' : '' })),
+      // A valve's turns to close fully, for the valve exercise; without it, the exercise estimates them from the size.
+      f.kind === 'valve' ? field('Turns to close fully', input({ name: 'turns_expected', type: 'number', min: 1, max: 500, step: 1, value: f.turns_expected ?? '' }), 'From the valve card or the last exercise. Leave empty and the valve exercise estimates it from the size (3 turns per inch plus 2).') : null,
       field('Material', input({ name: 'material', value: f.material || '', maxlength: 40, placeholder: k.geometry === 'line' ? 'For example: ductile iron, HDPE' : '' })),
       field('Depth (ft)', input({ name: 'depth_ft', type: 'number', step: '0.5', min: '0', value: f.depth_ft ?? '' })),
       field('Year installed', input({ name: 'installed_year', type: 'number', min: '1900', max: '2100', value: f.installed_year ?? '' })),
@@ -306,7 +308,8 @@ export async function drawMap(box, deep = '') {
       field('Notes', h('textarea', { name: 'notes', rows: 3, maxlength: 1000 }, f.notes || '')));
     formDialog(isNew ? `New ${k.label.toLowerCase()}` : `Edit ${title(f)}`, body, async (fd) => {
       const b = { kind: val(fd, 'kind'), name: val(fd, 'name'), tag: val(fd, 'tag'), size: val(fd, 'size'), material: val(fd, 'material'), depth_ft: num(fd, 'depth_ft'), installed_year: num(fd, 'installed_year'),
-        status: val(fd, 'status'), asset_id: num(fd, 'asset_id'), notes: val(fd, 'notes'), condition_score: num(fd, 'condition_score'), criticality: num(fd, 'criticality'), ownership: val(fd, 'ownership') };
+        status: val(fd, 'status'), asset_id: num(fd, 'asset_id'), notes: val(fd, 'notes'), condition_score: num(fd, 'condition_score'), criticality: num(fd, 'criticality'), ownership: val(fd, 'ownership'),
+        ...(f.kind === 'valve' ? { turns_expected: num(fd, 'turns_expected') } : {}) };
       let saved;
       if (isNew) saved = await post('/assets/map/features', { ...b, geometry: f.geometry, points: f.points, placed_how: f.placed_how, accuracy_m: f.accuracy_m });
       else saved = await patch(`/assets/map/features/${f.id}`, b);
@@ -354,7 +357,7 @@ export async function drawMap(box, deep = '') {
     try { f = await get(`/assets/map/features/${id}`); } catch (err) { fail(err); return; }
     const again = async () => { dlg.close(); await reload(false); await panel(id); };
     const facts = [
-      ['Kind', `${f.kind_label}, ${(sys[f.system] || sys.other || { label: '' }).label}`], ['Tag', f.tag], ['Size', f.size], ['Material', f.material],
+      ['Kind', `${f.kind_label}, ${(sys[f.system] || sys.other || { label: '' }).label}`], ['Tag', f.tag], ['Size', f.size], ['Turns to close', f.turns ? f.turns.words : null], ['Material', f.material],
       ['Depth', f.depth_ft != null ? `${f.depth_ft} ft` : null], ['Year installed', f.installed_year], ['Length or area', measure(f)],
       ['Status', f.status !== 'in_service' ? (STATUS.find((x) => x[0] === f.status) || [null, label(f.status)])[1] : null],
       ['Owned by', f.ownership ? (OWNERSHIP.find((o) => o[0] === f.ownership) || [null, f.ownership])[1] : null],
@@ -370,7 +373,7 @@ export async function drawMap(box, deep = '') {
       h('div', { class: 'row' }, riskState(f.risk) || h('span', { class: 'muted' }, 'Risk not scored'), openOrders.length ? state(`${openOrders.length} open work order${openOrders.length === 1 ? '' : 's'}`, 'warn') : null,
         f.last_inspection ? h('span', { class: 'muted small' }, `Last inspected ${fmtDateTime(f.last_inspection.done_at)}: ${f.last_inspection.result === 'pass' ? 'passed' : 'failed'}`) : h('span', { class: 'muted small' }, 'Never inspected')),
       canEdit ? h('div', { class: 'row asset-actions' },
-        button('Inspect', async () => { meta = meta || await get('/assets/meta'); inspectDialog({ type: 'feature', kind: f.kind, id, name: title(f) }, meta.templates, { photoPath: `/assets/map/features/${id}/photos`, save: (b) => post(`/assets/map/features/${id}/inspections`, b), done: again }); }, { kind: 'primary' }),
+        button('Inspect', async () => { meta = meta || await get('/assets/meta'); inspectDialog({ type: 'feature', kind: f.kind, id, name: title(f), turns: f.turns }, meta.templates, { photoPath: `/assets/map/features/${id}/photos`, save: (b) => post(`/assets/map/features/${id}/inspections`, b), done: again }); }, { kind: 'primary' }),
         button('Open a work order', () => woDialog(f, again)),
         button('Edit', () => { dlg.close(); details(features.find((x) => x.id === id) || f); })) : null,
       h('div', { class: 'form' }, h('label', null, 'Condition ', cond), h('label', null, 'Criticality ', crit)),

@@ -38,6 +38,7 @@ const fields = {
   material: nullable(z.string().trim().max(40)),
   depth_ft: nullable(z.number().min(0).max(999)),
   installed_year: nullable(z.number().int().min(1900).max(2100)),
+  turns_expected: nullable(z.number().int().min(1).max(500)), // a valve's turns to close fully (2026.11.20)
   status: z.enum(['in_service', 'out_of_service', 'abandoned', 'planned']).optional(),
   notes: nullable(z.string().trim().max(1000)),
   asset_id: nullable(z.number().int().positive()),
@@ -47,7 +48,7 @@ const fields = {
   criticality: score,
   ownership: nullable(z.enum(['own', 'authority', 'private', 'state', 'other'])),
 };
-const EDIT = ['name', 'tag', 'size', 'material', 'depth_ft', 'installed_year', 'status', 'notes', 'asset_id', 'accuracy_m', 'placed_how', 'condition_score', 'criticality', 'ownership'];
+const EDIT = ['name', 'tag', 'size', 'material', 'depth_ft', 'installed_year', 'turns_expected', 'status', 'notes', 'asset_id', 'accuracy_m', 'placed_how', 'condition_score', 'criticality', 'ownership'];
 
 // Each feature with its open work orders and when it was last inspected (for the map's markers and the panel).
 const SQL = `SELECT f.*, a.name AS asset_name, a.asset_tag,
@@ -111,11 +112,11 @@ router.post('/features', validate(z.object(fields)), async (req, res) => {
   const [lat, lng] = MF.anchorOf(geometry, clean.points);
   let r;
   try {
-    [r] = await pool.query(`INSERT INTO map_features (tenant_id, kind, geometry, name, tag, points, lat, lng, size, material, depth_ft, installed_year, status, notes, asset_id, accuracy_m, placed_how, created_by, condition_score, criticality, ownership)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [r] = await pool.query(`INSERT INTO map_features (tenant_id, kind, geometry, name, tag, points, lat, lng, size, material, depth_ft, installed_year, status, notes, asset_id, accuracy_m, placed_how, created_by, condition_score, criticality, ownership, turns_expected)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [t, b.kind, geometry, blank(b.name) ?? null, blank(b.tag) ?? null, JSON.stringify(clean.points), lat, lng, blank(b.size) ?? null, blank(b.material) ?? null, b.depth_ft ?? null,
       b.installed_year ?? null, b.status || 'in_service', blank(b.notes) ?? null, b.asset_id ?? null, b.accuracy_m ?? null, b.placed_how || 'map', req.auth.userId || null,
-      b.condition_score ?? null, b.criticality ?? null, b.ownership ?? null]);
+      b.condition_score ?? null, b.criticality ?? null, b.ownership ?? null, b.kind === 'valve' ? (b.turns_expected ?? null) : null]);
   } catch (err) { dupTag(err); }
   await audit(pool, req, 'create', 'map_features', r.insertId, { kind: b.kind, points: clean.points.length, how: b.placed_how || 'map' });
   res.status(201).json(MF.shape(await one(pool, `${SQL} AND f.id = ?`, [t, r.insertId]), org));

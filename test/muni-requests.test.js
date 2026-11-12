@@ -465,7 +465,7 @@ test('response standards: the math in plain words, by category and street class'
   const m = Q.measure('Fixed', '2026-11-02 08:00:00', '2026-11-03 15:00:00', 48, '2026-11-05 00:00:00', tz);
   assert.equal(m.words, 'Fixed in 31 hours, target 2 days'); assert.equal(m.met, true); assert.equal(m.hours, 31);
   const late = Q.measure('Fixed', '2026-11-02 08:00:00', null, 48, '2026-11-04 20:00:00', tz);
-  assert.equal(late.words, 'Open 60 hours, 12 hours past the 2-day target'); assert.equal(late.met, false);
+  assert.equal(late.words, 'Open 2.5 days, 12 hours past the target of 2 days'); assert.equal(late.met, false); // 2026.11.20: days from 48 hours on
   const dst = Q.measure('Fixed', '2026-10-31 12:00:00', '2026-11-01 12:00:00', 24, '2026-11-02 00:00:00', tz);
   assert.equal(dst.hours, 25, 'the night the clocks go back is an hour longer');
   assert.equal(dst.met, false);

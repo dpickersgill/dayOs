@@ -80,7 +80,7 @@ export async function miniMap(f, { label = 'Where it is' } = {}) {
 }
 
 /**
- * The inspection sheet for an asset or a map item. target: { name, kind, type: 'asset'|'feature', id, hours?, miles? }.
+ * The inspection sheet for an asset or a map item. target: { name, kind, type: 'asset'|'feature', id, hours?, miles?, turns? }.
  * templates: the checklists (from /assets/meta). save(body) sends it (the asset's, the map item's or a program target's
  * address); photoPath is where a photo for an item goes. The checklist made for this kind is picked first.
  */
@@ -102,16 +102,19 @@ export function inspectDialog(target, templates, { save, photoPath, done, title,
   const sendPhoto = async (file) => (await sendBytes('POST', `${photoPath}?file_name=${encodeURIComponent(file.name || 'photo.jpg')}`, file)).id;
   const drawItems = () => {
     const t = active.find((x) => String(x.id) === chooser.value);
-    sheet = answerSheet(t.items, resultChips, { photo: sendPhoto });
+    // A map item's record answers what it can (a valve's turns to close); an asset's checklist is asked as it is.
+    sheet = answerSheet(t.items, resultChips, { photo: sendPhoto, record: target.type === 'feature' ? { turns: target.turns || null } : undefined });
     clear(box).append(sheet.el);
     allPass.hidden = !sheet.hasPassItems;
     if (t.sets_condition) box.append(h('p', { class: 'muted small' }, 'The condition score you give here becomes its condition.'));
+    // A checklist that reads the odometer asks for the miles there, so the separate miles box is not asked twice.
+    if (miles) miles.hidden = t.items.some((i) => i.key === 'odometer');
   };
   chooser.addEventListener('change', drawItems);
-  drawItems();
   const n1 = (v) => Math.round(Number(v) * 10) / 10;
   const hours = meters ? h('input', { type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Hours now', placeholder: target.hours ? String(n1(target.hours)) : 'Hours now' }) : null;
   const miles = meters ? h('input', { type: 'number', step: '0.1', min: 0, inputmode: 'decimal', 'aria-label': 'Miles now', placeholder: target.miles !== null && target.miles !== undefined ? String(n1(target.miles)) : 'Miles now' }) : null;
+  drawItems();
   const note = h('input', { maxlength: 500, 'aria-label': 'Note', placeholder: 'Anything else (optional)' });
   const saveBtn = h('button', { type: 'button', class: 'btn primary big', 'data-act': 'save-inspection' }, 'Save inspection');
   const dlg = dialog(title || `Inspect: ${target.name}`, h('div', { class: 'stack ins-sheet' }, h('div', { class: 'row' }, chooser, allPass), box, meters ? h('div', { class: 'row tight' }, hours, miles) : null, note, err, h('div', { class: 'footer row' }, saveBtn)), { wide: true });
@@ -131,7 +134,7 @@ export function inspectDialog(target, templates, { save, photoPath, done, title,
       if (meters) { body.hours = hours.value === '' ? null : Number(hours.value); body.miles = miles.value === '' ? null : Number(miles.value); }
       const r = await save(body);
       dlg.close();
-      toast(r.result === 'pass' ? 'Inspection passed' : 'Inspection failed: a work order was opened', r.result === 'pass' ? 'ok' : 'warn');
+      toast(r.result === 'pass' ? 'Inspection passed' : r.out_of_service ? `Inspection failed: ${target.name} is out of service and a work order was opened` : 'Inspection failed: a work order was opened', r.result === 'pass' ? 'ok' : 'warn');
       if (done) await done(r);
     } catch (e) { err.append(errorBox(e)); saveBtn.disabled = false; }
   });
