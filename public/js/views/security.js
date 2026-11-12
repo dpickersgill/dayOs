@@ -2,7 +2,7 @@
 // the devices you have used; for managers, this mountain's shared terminals; for the owner, the patrol two-step rule.
 
 import { get, post, put, patch, del } from '../api.js';
-import { h, clear, ctx, isManager, table, state, input, field, button, toast, formDialog, confirmDialog, errorBox, empty, fmtInstant, fmtInstantTime } from '../ui.js';
+import { h, clear, ctx, isManager, table, state, input, field, button, toast, formDialog, confirmDialog, errorBox, empty, fmtInstant, fmtInstantTime, isMuni } from '../ui.js';
 import * as passkey from '../passkey.js';
 import { readTerminal, saveTerminal } from '../terminal.js';
 import { refreshDeviceKey } from '../outbox.js';
@@ -62,7 +62,7 @@ export function pinPanel(sec) {
   };
   function draw() {
     clear(box).append(h('h2', null, 'PIN for shared terminals'),
-      h('p', null, 'At the ticket window, rental counter or other shared computers a manager has set up, switch in with your username and PIN instead of your password. Keep it to yourself: everything you do there is recorded as you.'),
+      h('p', null, isMuni() ? 'At the front desk or other shared computers a manager has set up, switch in with your username and PIN instead of your password. Keep it to yourself: everything you do there is recorded as you.' : 'At the ticket window, rental counter or other shared computers a manager has set up, switch in with your username and PIN instead of your password. Keep it to yourself: everything you do there is recorded as you.'),
       h('p', null, sec.pin_set ? state('Set', 'good') : h('span', { class: 'muted' }, 'Not set')),
       h('div', { class: 'row' }, button(sec.pin_set ? 'Change PIN' : 'Set a PIN', set, { small: !!sec.pin_set, kind: sec.pin_set ? undefined : 'primary' }),
         sec.pin_set ? button('Remove PIN', () => confirmDialog('Remove your PIN?', 'You will sign in to shared terminals with your password until you set a new one.', 'Remove', async () => { await del('/auth/pin'); sec.pin_set = false; draw(); }), { small: true }) : null));

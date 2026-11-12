@@ -434,7 +434,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {} }) {
 
     // Pages inside apps (the tabs of row 1 and row 2), with the app's name, only those this person may open.
     const appName = (k) => byKey.get(k) || k;
-    const subs = () => subPagesFor(viewKeys, { manager: isManager(), role: ctx.me.role, school: ctx.me.school_access, patrol: patrolInfo }).map((p) => ({
+    const subs = () => subPagesFor(viewKeys, { manager: isManager(), role: ctx.me.role, school: ctx.me.school_access, patrol: patrolInfo, muni: isMuni() }).map((p) => ({
       id: `sub-${p.href}`, title: p.title, app: appName(p.app), hint: location.hash === p.href ? 'You are here' : '', icon: p.app, words: `${p.title} ${appName(p.app)} ${p.words}`, run: () => { location.hash = p.href; },
     }));
     const everything = () => [

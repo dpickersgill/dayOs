@@ -179,11 +179,12 @@ export async function costsSection(w, refresh) {
     c.downtime_hours ? li(`Out of service ${hoursText(c.downtime_hours)}`, null, null) : null,
   ].filter(Boolean);
   const open = !['cancelled'].includes(w.status);
-  clear(box).append(
+  // Element.append() would write a null as the word "null": leave the total out when there are no lines.
+  clear(box).append(...[
     h('div', { class: 'spread' }, h('h3', null, 'Costs'), open ? button('Add costs', () => addCosts(w, c, refresh), { small: true }) : null),
     lines.length ? h('ul', { class: 'plain rows' }, lines) : h('p', { class: 'muted' }, 'No hours or materials recorded yet.'),
     lines.length ? h('p', { class: 'wo-total' }, h('b', null, `${hoursText(c.labor_hours)} labor`), c.equipment_hours ? `, ${hoursText(c.equipment_hours)} equipment` : '',
-      see && c.total_cents !== null ? h('span', null, ' · ', h('b', null, money(c.total_cents)), h('span', { class: 'muted small' }, ` (labor ${money(c.labor_cents)}, equipment ${money(c.equipment_cents)}, parts and materials ${money(c.parts_cents + c.materials_cents)}${c.vendor_cost_cents ? `, outside ${money(c.vendor_cost_cents)}` : ''})`)) : null) : null);
+      see && c.total_cents !== null ? h('span', null, ' · ', h('b', null, money(c.total_cents)), h('span', { class: 'muted small' }, ` (labor ${money(c.labor_cents)}, equipment ${money(c.equipment_cents)}, parts and materials ${money(c.parts_cents + c.materials_cents)}${c.vendor_cost_cents ? `, outside ${money(c.vendor_cost_cents)}` : ''})`)) : null) : null].filter(Boolean));
   return box;
 }
 

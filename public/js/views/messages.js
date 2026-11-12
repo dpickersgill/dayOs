@@ -5,7 +5,8 @@ import { h, clear, table, state, input, select, field, button, toast, fail, form
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Messages')),
-    tabs([['sent', 'Sent', list], ['auto', 'Automatic reminders', auto]], 'sent'));
+    // The automatic reminders are about a ski area's rentals and passes: a municipality has none (2026.11.20).
+    tabs([['sent', 'Sent', list], ...(isMuni() ? [] : [['auto', 'Automatic reminders', auto]])], 'sent'));
 }
 
 const CHANNELS = [['email', 'Email'], ['sms', 'Text message']];

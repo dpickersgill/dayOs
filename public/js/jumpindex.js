@@ -111,7 +111,7 @@ export const SUB_PAGES = [
   ['workforce', 'Staff list', '#/workforce?tab=staff', 'staff people employees'],
   ['catalog', 'Guest types', '#/catalog?tab=types', 'guest types ages'],
   ['catalog', 'Promo codes', '#/catalog?tab=promos', 'promo discount code'],
-  ['messages', 'Automatic reminders', '#/messages?tab=auto', 'automatic reminders'],
+  ['messages', 'Automatic reminders', '#/messages?tab=auto', 'automatic reminders', (w) => !w.muni], // a ski area's rental and pass reminders
 ];
 
 /**

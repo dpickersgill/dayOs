@@ -53,12 +53,16 @@ async function mustExist(conn, table, tenantId, id, what) {
 /** A checklist as the screens use it. */
 const tplOut = (t) => ({ ...t, kinds: t.kinds ? t.kinds.split(',') : [], map_kinds: t.map_kinds ? t.map_kinds.split(',') : [], items: JSON.parse(t.items), sets_condition: Boolean(t.sets_condition), active: Boolean(t.active) });
 
+const MUNI_HIDDEN_KINDS = ['groomer', 'snowmobile', 'lift_component', 'snow_gun'];
 router.get('/meta', async (req, res) => {
   await A.ensureSettings(pool, req.auth.tenantId);
   const { org, on } = await require('../lib/modules').stateOf(req.auth.tenantId);
   const templates = await rows(pool, 'SELECT id, name, kinds, map_kinds, items, active, sets_condition, pack FROM inspection_templates WHERE tenant_id = ? ORDER BY name', [req.auth.tenantId]);
   res.json({
-    kinds: O.ASSET_KINDS, categories: A.CATEGORIES,
+    // A municipality has no lifts, groomers or snow guns (2026.11.20): those kinds are left out, and the snowmaking
+    // category (where a pump or compressor sits) is named for what it holds.
+    kinds: org === 'municipality' ? O.ASSET_KINDS.filter((k) => !MUNI_HIDDEN_KINDS.includes(k.value)) : O.ASSET_KINDS,
+    categories: org === 'municipality' ? A.CATEGORIES.filter((c) => c.value !== 'lift').map((c) => (c.value === 'snowmaking' ? { ...c, label: 'Pumps and compressors' } : c)) : A.CATEGORIES,
     fuel_types: ['diesel', 'gasoline', 'propane', 'electric', 'other', 'none'],
     templates: templates.map(tplOut),
     // Condition, criticality and risk (muni release 1), and the map kinds a checklist can be for.
