@@ -115,10 +115,11 @@ async function drawOrders(box, status, pick) {
     for (const id of [...picked]) if (!data.some((w) => w.id === id)) picked.delete(id);
     drawBar();
     const pickBox = (w) => { const c = h('input', { type: 'checkbox', class: 'wo-pick', 'aria-label': `Pick ${w.title}`, checked: picked.has(w.id) }); c.addEventListener('change', () => { if (c.checked) picked.add(w.id); else picked.delete(w.id); drawBar(); }); return c; };
-    const allBox = h('input', { type: 'checkbox', class: 'wo-pick', 'aria-label': 'Pick all shown' });
+    const allBox = h('input', { type: 'checkbox', class: 'wo-pick' });
     allBox.addEventListener('change', () => { for (const w of data) { if (allBox.checked) picked.add(w.id); else picked.delete(w.id); } body.querySelectorAll('tbody input.wo-pick').forEach((x) => { x.checked = allBox.checked; }); drawBar(); });
+    if (bulk) body.append(h('label', { class: 'check small' }, allBox, ' Pick all shown, to assign them at once'));
     body.append(table([
-      ...(bulk ? [{ head: allBox, cell: pickBox }] : []),
+      ...(bulk ? [{ head: 'Pick', cell: pickBox }] : []),
       { head: 'Priority', cell: (w) => state(label(w.priority), PRIORITY_TONE[w.priority]) },
       { head: 'Job', cell: (w) => h('span', { class: 'stack tight' }, h('strong', null, w.title), h('span', { class: 'muted small' }, [w.asset, w.feature_tag || w.feature_name, w.location].filter(Boolean).join(', '))) },
       { head: 'Assigned to', cell: (w) => w.assignee || h('span', { class: 'muted' }, 'Nobody yet') },

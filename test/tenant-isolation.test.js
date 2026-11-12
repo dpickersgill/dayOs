@@ -95,6 +95,7 @@ const SIGNED = {
   // Municipal edition (muni release 1): asset programs and asset photos, inside the Assets and fleet router.
   'assetprograms.js': { router: '/assets/programs' }, 'assetphotos.js': { router: '/assets/photos' },
   'utilities.js': { router: '/water' }, // the same Today card router is also mounted at /sewer and /stormwater
+  'crew.js': { router: '/workforce', works: '/ops' }, // 2026.11.20: crew board, on call, overtime; assigning work orders and their map
   'requests.js': { router: '/requests' }, // muni release 1: resident requests (test/muni-requests.test.js sweeps two municipalities)
   // Municipal edition (muni release 1): bulk trash pickup (Trash and recycling).
   'bulkpickup.js': { router: '/solid-waste' },
