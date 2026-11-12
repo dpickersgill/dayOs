@@ -107,6 +107,10 @@ const SIGNED = {
   'streetnotices.js': { router: '/street-notices' },
   // muni release 1: Buildings (the life-safety calendar and binder).
   'buildings.js': { router: '/buildings' },
+  // 2026.11.20 (utilities): main breaks, Chapter 94, MS4 and illicit discharge cases, the water customer list and door
+  // hangers, the bulk pickup route order, repeat callers and duplicates.
+  'mainbreaks.js': { router: '/water' }, 'chapter94.js': { router: '/sewer' }, 'ms4.js': { router: '/stormwater' },
+  'serviceaddresses.js': { router: '/street-notices' }, 'bulkroute.js': { router: '/solid-waste' }, 'requestchecks.js': { router: '/requests/checks' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },

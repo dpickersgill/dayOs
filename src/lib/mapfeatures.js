@@ -188,6 +188,8 @@ function shape(f, org) {
     turns_expected: f.turns_expected === null || f.turns_expected === undefined ? null : Number(f.turns_expected), turns: valveTurns(f),
     condition_score: num(f.condition_score), criticality: num(f.criticality), ownership: f.ownership || null, risk: riskOf(f.condition_score, f.criticality),
     open_orders: f.open_orders === undefined ? undefined : Number(f.open_orders || 0), last_inspected: f.last_inspected === undefined ? undefined : f.last_inspected,
+    // The street it is on (2026.11.20), when set.
+    street_id: f.street_id === null || f.street_id === undefined ? null : Number(f.street_id), street: f.street_name || null,
   };
 }
 

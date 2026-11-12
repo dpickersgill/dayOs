@@ -10,6 +10,7 @@ import { get, post, patch, del, download } from '../api.js';
 import { shareButton } from '../share.js';
 import { miniMap } from './asset-bits.js';
 import { costPickers, markDone, costsSection, booksFacts, booksFields, booksBody, doneRange, doneTotals } from './works-costs.js';
+import { featurePicker } from './utility-bits.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam, money, errorBox } from '../ui.js';
 
@@ -146,6 +147,8 @@ function orderFields(pick, w = {}) {
     field('What needs doing', input({ name: 'title', required: true, maxlength: 150, value: w.title || '', placeholder: 'Patch pothole' })),
     field('Priority', select(PRIORITIES, w.priority || 'normal', { name: 'priority' })),
     pick.assets.length ? field('Asset', select([['', 'None'], ...pick.assets.map((a) => [a.id, a.asset_tag ? `${a.name} (${a.asset_tag})` : a.name])], w.asset_id || '', { name: 'asset_id' }), 'The truck, pump or other equipment, if there is one') : null,
+    // Any map item: a main, valve, hydrant, service line, sewer line or manhole (2026.11.20, utility-bits.js).
+    assetsOn() ? h('div', { class: 'wide' }, field('On the map', featurePicker({ value: w.map_feature_id ? { id: w.map_feature_id, label: [w.feature_kind_label, w.feature_tag || w.feature_name].filter(Boolean).join(' ') } : null }), 'The main, valve, hydrant, manhole or other item on the map, if there is one')) : null,
     field('Where', input({ name: 'location', maxlength: 120, value: w.location || '', placeholder: 'Mill Street at 3rd Avenue' })),
     pick.staff.length ? field('Assigned to', select([['', 'Nobody yet'], ...pick.staff.map((s) => [s.id, staffName(s)])], w.assigned_staff_id || '', { name: 'assigned_staff_id' })) : null,
     field('Due', input({ name: 'due_date', type: 'date', value: w.due_date ? String(w.due_date).slice(0, 10) : '' })),
@@ -156,6 +159,7 @@ const orderBody = (fd, pick, w = {}) => ({
   title: val(fd, 'title'), priority: val(fd, 'priority'), location: val(fd, 'location'), due_date: val(fd, 'due_date'), description: val(fd, 'description'),
   ...(pick.assets.length ? { asset_id: num(fd, 'asset_id') } : {}), ...(pick.staff.length ? { assigned_staff_id: num(fd, 'assigned_staff_id') } : {}),
   ...(pick.books ? booksBody(fd, pick.books, w) : {}),
+  ...(fd.has('map_feature_id') ? { map_feature_id: num(fd, 'map_feature_id') } : {}),
 });
 
 function addOrder(pick, done) {

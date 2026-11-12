@@ -103,8 +103,11 @@ async function record(conn, req, target, body, { programId = null, recordMeter =
     await conn.query('INSERT INTO station_run_hours (tenant_id, asset_id, map_feature_id, inspection_id, item_key, label, hours, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [t, target.type === 'asset' ? target.id : null, target.type === 'feature' ? target.id : null, id, i.key, i.label.slice(0, 150), i.value, at]);
   }
+  // A storm outfall's screening (2026.11.20, lib/stormwater.js): a failure sets its condition to at least Poor, and a
+  // suspected illicit discharge opens a case on the outfall (or adds to the one open).
+  const storm = await require('./stormwater').afterScreening(conn, req, target, items, id, failed.length > 0, at);
   await audit(conn, req, 'inspect', target.type === 'asset' ? 'ops_assets' : 'map_features', target.id, { inspection_id: id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, ...(programId ? { program_id: programId } : {}), ...(score !== null ? { condition_score: score } : {}) });
-  return { id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, condition_score: score, ...(stopped ? { out_of_service: true } : {}) };
+  return { id, result: failed.length ? 'fail' : 'pass', work_order_id: woId, condition_score: score ?? (storm && storm.condition_score) ?? null, ...(storm && storm.case_id ? { case_id: storm.case_id } : {}), ...(stopped ? { out_of_service: true } : {}) };
 }
 
 /**

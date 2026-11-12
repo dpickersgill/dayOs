@@ -1100,6 +1100,46 @@ The Buildings add-on (`buildings`, paths `/buildings`, view `#/buildings`) is th
 
 ### Demo
 - `db/demo-municipal/90-money.js` (runs last): Streets charges Liquid Fuels, labor rates for the crew, equipment rates and purchase prices on the fleet, 16 parts with prices, a year of fuel, costs on the other files' finished work orders, and about 370 costed work orders over the last year across every department and fund (plowing, potholes, paving with a contractor, main breaks, jetting, leaf collection, fleet repairs). Run twice, nothing doubles.
+## Municipal edition: utilities (release 2026.11.20)
+
+### Main breaks (Water add-on; `src/routes/mainbreaks.js`, view `water`, `#/water`)
+- A break is recorded on its water main (a drinking water line on the map): when, where on the main (text and an optional GPS break point), cause (age, corrosion, frost, ground movement, pressure, joint, hit by a contractor, not known, other), pipe material and size (default from the main), customers out of water, when the water went off and came back, a boil water flag with its street notice, the repair and when, notes.
+- The valves to shut: every mapped valve within 150 m of the break point (or the main's middle), those on the main's own line (within 15 m) or on the same street first, then nearest first. Each valve operated keeps when it was closed, opened again and its turns.
+- Recording a break opens an urgent work order on the main ("Main break: ..."); the crew, equipment and materials on it are the break's cost.
+- Each main keeps its break history (Water, Mains tab, and the main's panel on the map with a Record a main break button). More than 2 breaks in the last 5 years raises the main's condition to at least 4 (Poor), audited; a person can lower it again.
+- Customers out starts from the count of water customer addresses on the street. Breaks export as a spreadsheet (no resident is named on a break). Crew and managers record breaks; a manager deletes one entered by mistake; Front desk has no Water screen.
+
+### Work orders on any map item
+- The work order form has an "On the map" picker: any main, valve, hydrant, service line, sewer line, manhole or other map item, found by tag, kind word ("hydrant", "manhole", "main") or street (`GET /assets/map/search`).
+- Map items have a Street (`map_features.street_id`), set in the map's details form, shown on the panel and used by search and by a break's valve list.
+
+### The water customer list (`src/routes/serviceaddresses.js`, `src/lib/serviceaddresses.js`, Street notices, Water customers tab)
+- Managers import the service addresses from the billing system as a CSV: street and house number (or one "service address" column; St, Ave, Rd and the like are read in full), unit, account number, phone, email. Re-imports match on the account number (kept in the match key only as a keyed hash) or on street, number and unit. "This file is the whole list" ends addresses not in the file and removes their phones and emails at once.
+- Kept apart from the alert sign-ups. A phone or email is stored only when the manager ticks the consent attestation and says how the customers agreed; the import, the attestation and the manager are recorded (Imports) and in the audit log, with no address, phone or email in it. Without it the file's phones and emails are not stored.
+- A phone that texted STOP, or an email that used the stop link, stays stopped (the import is not a new yes). Each kept contact is on the alert address list, so STOP and the stop link reach it; emails to a customer say why they came and carry the stop link.
+- Water outage, boil water and sewer notices reach the list (other notice types do not). The preview reads "Reaches N signed-up residents, M service addresses with consent, K addresses to notify by door hanger". A phone or email the sign-ups already reach gets one message. Follow-ups go to the same customers, checked again for STOP and for still being on the list with consent.
+- Door hanger list (`GET /street-notices/:id/door-hangers`, printable and CSV): the customer addresses a notice does not reach by text or email, and not covered by a sign-up at that address. Addresses only: no name, account, phone or email.
+- Crew see counts; managers and Front desk see an address's phone and email; managers import or remove the whole list. Personal data register: `service_addresses` (erasing blanks the phone, email and account number). Ended addresses are deleted by the daily retention run after 13 months.
+
+### Chapter 94 and overflows (Sewer add-on; `src/routes/chapter94.js`, view `sewer`, `#/sewer`)
+- For each pump station: run hours by month (from the hour meters read on its rounds) x each pump's rated flow in gpm (entered by a manager, `map_features.pump_gpm`) = estimated flow in gallons and MGD. The system by month, the year's total and average daily flow, the peak month and the peak over the average. The screen and the file say it is an estimate from run time, not a metered flow.
+- New connections (EDUs) and the 5-year projection per year; sanitary sewer overflows (place, start and end, gallons, cause, reached a stream, when DEP was told). Printable summary and a spreadsheet (columns in RUNBOOK.md).
+
+### MS4 and illicit discharge cases (Stormwater add-on; `src/routes/ms4.js`, `src/lib/stormwater.js`, view `stormwater`, `#/stormwater`)
+- The permit year (July 1 to June 30) by the six minimum control measures: education and involvement activities (date, audience, people reached), outfall screenings done against those required (default: every outfall) with a map (screened, failed, not yet), illicit discharge cases, construction and post-construction BMP inspections (and the inspections done on basins and rain gardens), yard inspections and staff training sign-in. Permit number and screenings required are manager settings.
+- Annual report pack: printable, and a spreadsheet (measure, section, date, record, what, audience, people, result, map item, notes); training attendance is counted, not named.
+- A failed outfall screening sets the outfall's condition to at least 4 (Poor), so its risk shows it. Answering yes to "Suspected illicit discharge" opens a case (IDD-YYYY-NN) linked to the outfall and the screening; a later failed screening adds to the open case. A case keeps its log (source tracing, upstream inspections, samples, notices sent, notes), suspected source, responsible party, and a resolution required to resolve or close it.
+
+### Bulk pickup driving order (`src/routes/bulkroute.js`, `src/lib/bulkroute.js`, Bulk pickup, Route order tab)
+- Per collection weekday, a manager orders the streets (drag, or Up and Down) and sets house numbers going up or down on each. The Collection day stop list follows it; a street with stops that is not in the route comes last, with a note naming it. Without a route, by street name as before.
+
+### Repeat callers and duplicates (`src/routes/requestchecks.js`)
+- On New request: open requests of the same category on the same block (the same hundred of house numbers on the street, or the street when no number), and open work orders there (made from such a request, or crew jobs whose title names the category), in words: "Open: R-1042 pothole at 111 Market Street, reported 2 days ago". Choose Add as new, Link as duplicate, or Link to work order (completing the work order then marks the request fixed and tells the resident).
+- An open request shows the same check, with Link as duplicate, for reports that came in from the public page.
+- Typing a caller's phone or email shows their earlier requests: Front desk and managers only, never public or exported; each lookup is audited without the phone or email.
+
+### Demo
+- `db/demo-municipal/70-utilities.js`: streets on map items, four main breaks (Main Street's cast iron main has 3 in 5 years, one open break on Bridge Street), 200 customer addresses (fictional 555-01xx phones and example.com emails, imported with consent), rated flows, connections and two overflows, ten clean outfall screenings and OF-07's case, a permit year of MS4 records, the Monday route order, and an open pothole work order at 111 Market Street.
 
 ## Engineering notes
 

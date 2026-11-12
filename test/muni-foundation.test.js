@@ -389,21 +389,22 @@ test('db/demo-municipal.js builds Riverbend Borough, and running it again adds n
   assert.match(out, new RegExp(`Login: tenant=${demo}`));
   const [[t]] = await pool.query('SELECT id, name, org_type, timezone FROM tenants WHERE slug = ?', [demo]);
   assert.deepEqual([t.name, t.org_type, t.timezone], ['Riverbend Borough', 'municipality', 'America/New_York']);
+  // Only the foundation's own rows (db/demo-municipal/00-base.js), found by the usernames, names and titles that file
+  // makes, so another demo file adding staff, streets, assets or work orders never changes these numbers (2026.11.20).
+  const { ROWS } = require('../db/demo-municipal/00-base.js');
   const counts = async () => {
+    const among = async (sql, list) => Number((await pool.query(sql.replace('(?)', `(${list.map(() => '?').join(', ')})`), [t.id, ...list]))[0][0].n);
     const one = async (sql) => Number((await pool.query(sql, [t.id]))[0][0].n);
+    const logins = ROWS.PEOPLE.map((p) => p[0]);
     return {
-      users: await one('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?'),
-      crew: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'staff'"),
-      desk: await one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'counter'"),
-      streets: await one('SELECT COUNT(*) AS n FROM streets WHERE tenant_id = ?'),
-      // The foundation's own rows (db/demo-municipal/00-base.js): each feature's demo file adds its own, counted by its own test.
-      // Left out here: the Buildings demo's equipment and plans, and work orders on map items, from programs, resident
-      // requests, street notices and building deficiencies.
-      assets: await one("SELECT COUNT(*) AS n FROM ops_assets a WHERE a.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM asset_locations l JOIN buildings b ON b.tenant_id = l.tenant_id AND (b.location_id = l.id OR b.location_id = l.parent_id) WHERE l.tenant_id = a.tenant_id AND l.id = a.location_id)"),
-      plans: await one('SELECT COUNT(*) AS n FROM pm_tasks m WHERE m.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM building_plans p WHERE p.tenant_id = m.tenant_id AND p.pm_task_id = m.id)'),
-      open: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status NOT IN ('done','cancelled') AND w.map_feature_id IS NULL AND w.program_id IS NULL AND w.request_id IS NULL AND w.source NOT IN ('request','program','notice') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id)"),
-      done: await one("SELECT COUNT(*) AS n FROM work_orders w WHERE w.tenant_id = ? AND w.status = 'done' AND w.map_feature_id IS NULL AND w.program_id IS NULL AND w.request_id IS NULL AND w.source NOT IN ('request','program','notice') AND NOT EXISTS (SELECT 1 FROM building_deficiencies d WHERE d.tenant_id = w.tenant_id AND d.work_order_id = w.id) "
-        + "AND NOT EXISTS (SELECT 1 FROM work_order_labor l WHERE l.tenant_id = w.tenant_id AND l.work_order_id = w.id AND l.note LIKE 'demo-money:%')"), // 2026.11.20: the year of costed jobs (90-money.js)
+      users: await among('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND username IN (?)', logins),
+      crew: await among("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'staff' AND username IN (?)", logins),
+      desk: await among("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'counter' AND username IN (?)", logins),
+      streets: await among('SELECT COUNT(DISTINCT name) AS n FROM streets WHERE tenant_id = ? AND name IN (?)', ROWS.STREETS.map((x) => x[0])),
+      assets: await among('SELECT COUNT(DISTINCT name) AS n FROM ops_assets WHERE tenant_id = ? AND name IN (?)', ROWS.FLEET.map((x) => x[0])),
+      plans: await among('SELECT COUNT(DISTINCT name) AS n FROM pm_tasks WHERE tenant_id = ? AND name IN (?)', ROWS.PLANS.map((x) => x[0])),
+      open: await among("SELECT COUNT(DISTINCT title) AS n FROM work_orders WHERE tenant_id = ? AND status NOT IN ('done','cancelled') AND title IN (?)", ROWS.OPEN.map((x) => x[0])),
+      done: await among("SELECT COUNT(DISTINCT title) AS n FROM work_orders WHERE tenant_id = ? AND status = 'done' AND title IN (?)", ROWS.DONE.map((x) => x[0])),
       // 2026.11.20 (db/demo-municipal/90-money.js): the costed jobs and their lines, so a second run is seen not to double them.
       money: await one("SELECT COUNT(*) AS n FROM work_order_labor WHERE tenant_id = ?"),
     };

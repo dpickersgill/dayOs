@@ -3,6 +3,7 @@
 // Managers send (and the Crew logins a manager picks in Settings); Front desk sees the notices and the sign-up list.
 // The app records who issued a boil water advisory; it never suggests issuing one.
 import { get, post, put, del, download } from '../api.js';
+import { customersTab, doorHangers } from './service-addresses.js';
 import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, appendAll, fmtDateTime, fmtInstant, empty, errorBox, loading, isManager, nowInput } from '../ui.js';
 
 let setup = null;
@@ -10,16 +11,21 @@ const loadSetup = async () => { setup = await get('/street-notices/setup'); retu
 const typeOf = (key) => setup.types.find((t) => t.key === key) || setup.types[0];
 const STATUS = { draft: ['Draft', 'neutral'], scheduled: ['Scheduled', 'warn'], active: ['Out now', 'bad'], ended: ['Ended', 'good'], cancelled: ['Cancelled', 'neutral'] };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-const reachWords = (p) => (p.texts || p.emails
-  ? `Reaches ${plural(p.residents, 'resident', 'residents')}: ${plural(p.texts, 'text', 'texts')} and ${plural(p.emails, 'email', 'emails')}.`
-  : 'No one signed up for alerts on these streets yet.')
+// A water or sewer notice also reaches the water customer list (2026.11.20): the signed-up residents, the service
+// addresses with consent for texts or emails, and the rest, to notify by door hanger or mail.
+const reachWords = (p) => (p.customers
+  ? `Reaches ${plural(p.residents, 'signed-up resident', 'signed-up residents')}, ${plural(p.service_addresses, 'service address', 'service addresses')} with consent, ${plural(p.door_hangers, 'address', 'addresses')} to notify by door hanger: ${plural(p.texts, 'text', 'texts')} and ${plural(p.emails, 'email', 'emails')}.`
+  : p.texts || p.emails
+    ? `Reaches ${plural(p.residents, 'resident', 'residents')}: ${plural(p.texts, 'text', 'texts')} and ${plural(p.emails, 'email', 'emails')}.`
+    : 'No one signed up for alerts on these streets yet.')
   + (p.opted_out ? ` ${plural(p.opted_out, 'address', 'addresses')} said stop and will be skipped.` : '')
   + (p.no_number ? ` ${plural(p.no_number, 'sign-up has', 'sign-ups have')} no house number, so ${p.no_number === 1 ? 'it is' : 'they are'} included in any range on the street.` : '')
   + (p.held_until ? ` It is past 9 PM, so texts wait until 8 AM (${fmtInstant(p.held_until)}).` : '');
 
 export async function render(root) {
   try { await loadSetup(); } catch (err) { root.append(errorBox(err)); return; }
-  const items = [['active', 'Out now', (b) => list(b, 'active')], ['drafts', 'Drafts and scheduled', (b) => list(b, 'drafts')], ['ended', 'Ended', (b) => list(b, 'ended')], ['residents', 'Residents signed up', residents]];
+  const items = [['active', 'Out now', (b) => list(b, 'active')], ['drafts', 'Drafts and scheduled', (b) => list(b, 'drafts')], ['ended', 'Ended', (b) => list(b, 'ended')], ['residents', 'Residents signed up', residents],
+    ['customers', 'Water customers', customersTab]]; // 2026.11.20: the service address list (service-addresses.js)
   if (setup.is_manager) items.push(['settings', 'Settings', settings]);
   const head = h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Street notices'),
     h('p', { class: 'muted' }, 'Texts and emails to residents on the streets a water break, a closure or a schedule change affects.')),
@@ -185,6 +191,7 @@ async function detail(id) {
       n.status !== 'draft' ? h('p', null, 'Residents follow it here: ', h('a', { href: n.public_link, target: '_blank', rel: 'noopener' }, n.public_link)) : null,
       n.work_order_id ? h('p', null, h('a', { href: `#/works/${n.work_order_id}` }, `Work order ${n.work_order_id}`)) : null,
       n.preview ? h('p', { class: 'muted' }, reachWords(n.preview)) : null,
+      (n.preview ? n.preview.door_hangers : ['water_outage', 'boil_water', 'sewer'].includes(n.type)) ? h('p', null, button('Door hanger list', () => doorHangers(id), { small: true })) : null,
       n.status === 'scheduled' ? h('p', null, `Goes out ${fmtInstant((n.updates.find((u) => u.kind === 'first' && u.status === 'scheduled') || {}).send_at)}.`) : null,
       n.updates.some((u) => u.status !== 'scheduled' && u.status !== 'cancelled') ? h('section', null, h('h3', null, 'What was sent'), h('ul', { class: 'plain' },
         n.updates.filter((u) => u.status !== 'scheduled' && u.status !== 'cancelled').map((u) => h('li', null, h('strong', null, `${{ first: 'Notice', update: 'Update', ended: 'Ended' }[u.kind]}, ${fmtInstant(u.queued_at || u.created_at)}: `), u.kind === 'first' ? '' : `"${u.sms_text}" `, sumWords(u.summary))))) : null,

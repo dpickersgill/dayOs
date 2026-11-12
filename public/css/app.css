@@ -4341,3 +4341,33 @@ dl.facts dd { margin: 0; }
   .binder-section h2 { break-after: avoid; page-break-after: avoid; }
   .back, .page-head.no-print, .week-filter.no-print { display: none !important; }
 }
+
+/* ---------- utilities (2026.11.20): map item picker, route order, door hangers, utilities screens ---------- */
+.feature-picker .row input[type=search] { flex: 1; min-width: 0; }
+.picker-list { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; margin: 0; }
+.picker-list .btn { width: 100%; justify-content: flex-start; text-align: left; white-space: normal; }
+.intake-checks .warn-note { font-weight: 400; }
+.intake-checks .warn-note strong { font-weight: 700; }
+.route-list { list-style: decimal; padding-left: 28px; margin: 0; display: grid; gap: 6px; }
+.route-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.route-row[draggable="true"] { cursor: grab; }
+.route-row.dragging { opacity: 0.5; }
+.route-row.drop-here { border-color: var(--ink); box-shadow: inset 0 2px 0 var(--ink); }
+.route-grip { color: var(--quiet); }
+.route-rest li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .route-row { grid-template-columns: auto minmax(0, 1fr); }
+  .route-row select, .route-row .row { grid-column: 1 / -1; }
+}
+.door-list { columns: 2; column-gap: 24px; }
+.door-list li { break-inside: avoid; padding: 2px 0; }
+@media (max-width: 700px) { .door-list { columns: 1; } }
+.util-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.util-figures .figure { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.util-figures .figure strong { font-size: 1.4rem; }
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.mcm { break-inside: avoid; }
+@media print { .util-map { display: none; } .table-scroll { overflow: visible; } }
+.valve-times { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 7em; gap: 8px; padding-left: 28px; }
+.valve-times label { display: grid; gap: 2px; }
+@media (max-width: 700px) { .valve-times { grid-template-columns: minmax(0, 1fr); padding-left: 0; } }

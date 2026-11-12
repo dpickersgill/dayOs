@@ -129,6 +129,11 @@ const REGISTRY = [
   { table: 'alert_signups', by: { email: ['email'], phone: ['phone'] }, erase: 'delete' },
   { table: 'alert_addresses', by: { email: ['addr'], phone: ['addr'] }, erase: { keep: 'Kept so street alerts never go to this phone or email again after it said stop.' } },
   { table: 'street_notice_deliveries', by: { email: ['to_addr'], phone: ['to_addr'] }, erase: { set: { to_addr: null } } },
+  // The water customer list (2026.11.20, lib/serviceaddresses.js): a service address from the billing system, with a phone
+  // or email only when the import attested consent. Erasing removes the phone, email and account number; the address
+  // stays on the door hanger list (a house on the street, no one's name). A later import from the billing system can bring
+  // the account back: tell the person to ask the billing office too.
+  { table: 'service_addresses', by: { email: ['email'], phone: ['phone'] }, erase: { set: { phone: null, email: null, contact_ok: 0, account_number: null } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
   { table: 'users', by: { person: ['person_id'] }, erase: { keep: 'Sign-ins are not anonymised here.' }, columns: ['id', 'email', 'username', 'role', 'active', 'created_at', 'access_ends_on'] },

@@ -155,3 +155,5 @@ module.exports = async function base(conn, T, { passwordHash, slug, today, addDa
   }
   log(`${wos} new work order${wos === 1 ? '' : 's'}`);
 };
+// What this file makes, so a test can count its own rows apart from the other demo files' (2026.11.20).
+module.exports.ROWS = { PEOPLE, STREETS, FLEET, PLANS, OPEN, DONE };

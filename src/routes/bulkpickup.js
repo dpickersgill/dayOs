@@ -185,7 +185,9 @@ router.get('/day', anyone, async (req, res) => {
   const cal = await B.calendar(pool, t.id, s, t.timezone, { days: 42 });
   if (!date) date = (cal.find((d) => !d.skipped) || { date: today }).date;
   const list = await rows(pool, `${FULL} WHERE b.tenant_id = ? AND b.collection_date = ? AND b.status = 'booked' ${STOP_ORDER}`, [t.id, date]);
-  const stops = await listShaped(req, list);
+  // In driving order when a manager set the route for this weekday (lib/bulkroute.js, 2026.11.20); by street name otherwise.
+  const route = await require('../lib/bulkroute').order(pool, t.id, require('../lib/util').weekdayOf(date), list);
+  const stops = await listShaped(req, route.stops);
   const bySize = new Map();
   for (const st of stops) for (const i of st.items) bySize.set(i.name, (bySize.get(i.name) || 0) + i.quantity);
   const skip = await one(pool, 'SELECT note FROM bulk_skip_dates WHERE tenant_id = ? AND on_date = ?', [t.id, date]);
@@ -195,6 +197,7 @@ router.get('/day', anyone, async (req, res) => {
     cutoff_at: B.cutoffOf(s, date), curb_by: s.curb_by, stops, sizes: [...bySize].map(([name, quantity]) => ({ name, quantity })),
     outcomes: { picked_up: count('picked_up'), not_out: count('not_out'), not_accepted: count('not_accepted'), left: stops.filter((x) => !x.outcome).length },
     days: cal.map((d) => ({ date: d.date, booked: d.booked, skipped: d.skipped })),
+    route: { set: route.routed, new_streets: route.new_streets },
   });
 });
 

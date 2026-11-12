@@ -1,11 +1,13 @@
 // Bulk pickup (muni release 1, the Trash and recycling app). Residents book and pay online at /bulk-pickup/<slug>;
 // here staff work with those bookings.
-//   Collection day   the stop list for a day, by street then house number, with counts by size. On a phone the crew taps
+//   Collection day   the stop list for a day, in the route's driving order (or by street name), with counts by size. On a phone the crew taps
 //                    Picked up, Not out or Not accepted (a photo is required for the last two). Print view for the office.
+//   Route order      the order streets are driven on each collection weekday, and which way house numbers go (managers set it).
 //   Bookings         search and filter; add a phone or walk-in booking; open one to take payment, cancel or decide a refund.
 //   Settings         collection days, cutoff, stops a day, item sizes and prices, payment options, rules, holidays (managers).
 //   Report           bookings, items, money and the not-out rate by month, and the spreadsheet (managers).
 import { get, post, put, del, download, sendBytes, fetchBlob } from '../api.js';
+import { routeTab } from './bulk-route.js';
 import { h, clear, appendAll, ctx, money, state, button, field, input, select, toast, fail, formDialog, dialog, confirmDialog, empty, errorBox, loading, tabs, table, isManager, can, fmtDay, fmtDate, fmtDateTime, fmtInstant, hashParam, toCents, centsToInput, closeAllDialogs } from '../ui.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -22,7 +24,7 @@ const payState = (b) => (b.status === 'cancelled' || b.status === 'expired' ? st
 
 export async function render(root) {
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Bulk pickup'), h('p', { class: 'muted' }, 'Bulk trash pickups residents book online or by phone, and the crew’s stop list.')));
-  const items = [['day', 'Collection day', dayTab], ['bookings', 'Bookings', bookingsTab]];
+  const items = [['day', 'Collection day', dayTab], ['bookings', 'Bookings', bookingsTab], ['route', 'Route order', routeTab]]; // route: 2026.11.20 (bulk-route.js)
   if (isManager()) items.push(['settings', 'Settings', settingsTab], ['report', 'Report', reportTab]);
   root.append(tabs(items, hashParam('tab') || 'day'));
 }
@@ -51,6 +53,9 @@ async function dayTab(panel) {
         h('div', { class: 'row' }, pick, other),
         h('div', { class: 'week-actions' }, views, mode === 'list' ? button('Print', () => window.print()) : null)),
       d.skipped ? h('p', { class: 'set-note' }, `No pickup this day${d.skip_note ? `: ${d.skip_note}` : ''}.`) : null,
+      // The stops follow the route order a manager set for this weekday (2026.11.20); a street not in it comes last.
+      d.route && d.route.set && d.route.new_streets.length ? h('p', { class: 'set-note' }, `Not in the route order yet, so at the end: ${d.route.new_streets.join(', ')}.`, isManager() ? [' ', h('a', { href: `#/bulk?tab=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Add to the route')] : null) : null,
+      d.route && !d.route.set && d.stops.length && isManager() ? h('p', { class: 'muted small no-print' }, 'Stops are by street name. ', h('a', { href: `#/bulk?tab=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Set the driving order')) : null,
       !d.collection_day && !d.stops.length ? h('p', { class: 'muted' }, `${fmtDay(d.date)} is not a collection day.`) : null,
       h('div', { class: 'figures' },
         figure(d.stops.length, `of ${d.capacity} stops`), figure(o.picked_up, 'picked up'), figure(o.not_out, 'not out'), figure(o.not_accepted, 'not accepted'), figure(o.left, 'to go')),

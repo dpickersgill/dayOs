@@ -22,7 +22,7 @@ export const GROUPS = [
 // A municipality's All apps (muni release 1): residents, public works and the back office. The ski groups never show there.
 export const MUNI_GROUPS = [
   ['Residents', 'residents', ['requests', 'notices', 'bulk']],
-  ['Public works', 'works', ['works', 'assets', 'assetprograms', 'buildings', 'monthreport']],
+  ['Public works', 'works', ['works', 'assets', 'assetprograms', 'buildings', 'monthreport', 'water', 'sewer', 'stormwater']],
   ['Back office', 'office', ['workforce', 'messages', 'documents']],
 ];
 /** The groups of All apps for this person's tenant. */
@@ -84,7 +84,10 @@ const ALSO = {
   // The municipal edition's apps (muni release 1).
   requests: 'resident report pothole streetlight complaint service request 311 call', notices: 'street notice text alert water main break boil residents affected',
   works: 'work orders jobs repairs crew service plans preventive maintenance recurring', assetprograms: 'programs hydrant flushing valve exercising inspections many assets',
-  monthreport: 'monthly report council month totals cost hours department fund liquid fuels ms-965 response times', bulk: 'bulk trash pickup furniture appliance large item booking', buildings: 'building inspections life safety fire extinguisher sprinkler alarm elevator boiler backflow generator playground binder certificate vendor round calendar',
+  monthreport: 'monthly report council month totals cost hours department fund liquid fuels ms-965 response times',
+  water: 'water main break valve shut customers out boil water repair history', sewer: 'sewer chapter 94 ch94 flow pump station run hours gpm mgd edu connections overflow sso dep',
+  stormwater: 'stormwater ms4 permit outfall screening illicit discharge idde case minimum control measures education construction bmp good housekeeping training annual report',
+  bulk: 'bulk trash pickup furniture appliance large item booking route order', buildings: 'building inspections life safety fire extinguisher sprinkler alarm elevator boiler backflow generator playground binder certificate vendor round calendar',
 };
 const RECENT_KEY = 'so.recent';
 

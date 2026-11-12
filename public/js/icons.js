@@ -55,6 +55,10 @@ const PATHS = {
   bulk: 'M2 6h12v10H2zM14 9h4l3 3v4h-7M6 18.5a1.5 1.5 0 1 0 0 .01M17 18.5a1.5 1.5 0 1 0 0 .01',
   buildings: 'M4 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4',
   streets: 'M8 3 5 21M16 3l3 18M12 4v3M12 10v3M12 16v3',
+  // 2026.11.20: the utilities screens.
+  water: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z',
+  sewer: 'M3 8h18v8H3zM7 8V5M17 8V5M7 16v3M17 16v3M10 12h4',
+  stormwater: 'M7 14a4 4 0 0 1 .5-8 5 5 0 0 1 9.5 1.5A3.5 3.5 0 0 1 17 14zM8 17l-1 3M12 17l-1 3M16 17l-1 3',
 };
 
 export function icon(name, size = 20) {
