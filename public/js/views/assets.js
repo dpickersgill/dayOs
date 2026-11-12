@@ -16,6 +16,7 @@ import { drawMap } from './asset-map.js';
 import { h, clear, state, button, toast, formDialog, dialog, confirmDialog, field, input, select, val, num, money, toCents, centsToInput, fmtDate, label, empty, table, tabs, isManager, errorBox, isMuni } from '../ui.js';
 import { renderAsset, renderLabels, assetDialog, fullMeta, STATUS, SERVICE, workOrderSheet, fmtDay, leftText } from './asset-page.js';
 import { riskState, conditionText, criticalityText } from './asset-bits.js';
+import { booksSettings } from './books-settings.js';
 
 const PAPER = { expired: 'bad', soon: 'warn' };
 const PO_STATE = { draft: ['Draft', 'neutral'], ordered: ['Ordered', 'warn'], partial: ['Part received', 'warn'], received: ['Received', 'good'], cancelled: ['Canceled', 'neutral'] };
@@ -326,8 +327,9 @@ async function poSheet(id, vendors, parts, done) {
 // ---------------------------------------------------------------- costs (managers)
 async function drawCosts(box) {
   const { data, settings } = await get('/assets/lifecycle');
+  data.sort((x, y) => (y.total || 0) - (x.total || 0) || x.name.localeCompare(y.name)); // what costs most first
   clear(box).append(h('div', { class: 'stack' },
-    h('div', { class: 'spread' }, h('p', { class: 'muted' }, `Labor at ${money(settings.labor_rate_cents)} an hour, parts at cost, outside work and fuel. Book value is straight-line over the useful life, down to salvage. A replacement is flagged when the last 12 months of upkeep pass ${settings.replace_pct}% of book value, or the asset is past its life.`),
+    h('div', { class: 'spread' }, h('p', { class: 'muted' }, `Labor at each person's rate (else ${money(settings.labor_rate_cents)} an hour), parts and materials at cost, outside work and fuel. Book value is straight-line over the useful life, down to salvage. A replacement is flagged when the last 12 months of upkeep pass ${settings.replace_pct}% of book value, or the asset is past its life.`),
       button('Download spreadsheet', () => download('/assets/lifecycle?format=csv', 'asset-costs.csv'), { small: true })),
     data.length ? table([
       { head: 'Asset', cell: (a) => h('span', { class: 'stack tight' }, assetLink(a.id, h('strong', null, a.name)), h('span', { class: 'muted small' }, a.tag)) },
@@ -354,6 +356,8 @@ async function drawSettings(box) {
     h('section', { class: 'panel stack' }, h('h2', null, 'Shop rules'),
       h('div', { class: 'form' }, field('Shop labor rate, per hour ($)', rate, 'Applied to time logged from now on'), field('Flag a replacement when a year of upkeep passes this % of book value', pct), field('Warn this many days before papers run out', warn)),
       h('div', { class: 'row' }, button('Save', async () => { const c = toCents(rate.value); if (c === null) throw new Error('The labor rate must be an amount'); await put('/assets/settings', { labor_rate_cents: c, replace_pct: Number(pct.value), expiry_warn_days: Number(warn.value) }); toast('Saved'); }, { kind: 'primary', small: true }))),
+    // A municipality's departments, funds and each person's labor rate (2026.11.20, books-settings.js).
+    isMuni() ? booksSettings() : null,
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Places'), button('Add a place', () => locDialog(null, locs.data, again), { small: true })),
       locs.data.length ? h('ul', { class: 'plain rows' }, locs.data.map((l) => h('li', { class: 'spread' }, h('span', null, h('b', null, l.name), h('span', { class: 'muted small' }, ` ${label(l.kind)}${l.parent ? `, in ${l.parent}` : ''} · ${l.assets} asset${Number(l.assets) === 1 ? '' : 's'}${l.active ? '' : ' · not in use'}`)), button('Edit', () => locDialog(l, locs.data, again), { small: true, label: `Edit ${l.name}` })))) : h('p', { class: 'muted' }, 'Add the shop, the yard, each lodge and lift terminal.')),
     h('section', { class: 'panel stack' }, h('div', { class: 'spread' }, h('h2', null, 'Vendors'), button('Add a vendor', () => vendorDialog(null, again), { small: true })),

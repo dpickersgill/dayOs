@@ -16,6 +16,7 @@ const { notFound, bad, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const O = require('../lib/ops');
 const A = require('../lib/assets');
+const W = require('../lib/workcosts');
 const MF = require('../lib/mapfeatures');
 const AI = require('../lib/assetinspect');
 const maintenance = require('./maintenance');
@@ -30,6 +31,9 @@ router.use('/map', require('./assetmap'));
 // Programs: one job over many assets or map features (routes/assetprograms.js), and photos (routes/assetphotos.js).
 router.use('/programs', require('./assetprograms'));
 router.use('/photos', photos);
+// Departments, funds and labor rates, equipment and materials on work orders, Mark done with costs, and the monthly
+// report (2026.11.20, routes/workmoney.js).
+router.use(require('./workmoney'));
 
 const tzOf = async (conn, tenantId) => (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
 const nullable = (s) => s.nullable().optional();
@@ -39,7 +43,7 @@ const isManager = (req) => ['owner', 'manager'].includes(req.auth.role);
 // Stock is kept to 2 decimal places; a finer quantity would round in the count but not in its history.
 const qty2 = (schema) => schema.refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6, 'Up to 2 decimal places');
 // Asset prices are a manager's business; the crew sees everything else.
-const hidePrices = (req, a) => (isManager(req) ? a : { ...a, purchase_cents: undefined, salvage_cents: undefined });
+const hidePrices = (req, a) => (isManager(req) ? a : { ...a, purchase_cents: undefined, salvage_cents: undefined, hourly_rate_cents: undefined });
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 
 async function mustExist(conn, table, tenantId, id, what) {
@@ -152,15 +156,19 @@ const assetFields = {
   ownership: nullable(z.enum(['own', 'authority', 'private', 'state', 'other'])),
   material: nullable(z.string().trim().max(40)), size: nullable(z.string().trim().max(40)), installed_year: nullable(z.number().int().min(1800).max(2100)),
   hours: z.number().min(0).max(9999999).optional(), miles: z.number().min(0).max(99999999).optional(),
+  // A municipality's department and fund for the asset, and what an hour of it costs a job (2026.11.20, lib/workcosts.js).
+  department_id: nullable(z.number().int().positive()), fund_id: nullable(z.number().int().positive()), hourly_rate_cents: nullable(money.max(10000000)),
 };
 const COLS = Object.keys(assetFields).filter((k) => !['hours', 'miles'].includes(k));
-const MONEY_COLS = ['purchase_cents', 'salvage_cents', 'useful_life_years'];
+const MONEY_COLS = ['purchase_cents', 'salvage_cents', 'useful_life_years', 'hourly_rate_cents', 'department_id', 'fund_id'];
 
 async function checkLinks(conn, req, b, selfId) {
   const t = req.auth.tenantId;
   await mustExist(conn, 'asset_locations', t, b.location_id, 'Location');
   await mustExist(conn, 'lifts', t, b.lift_id, 'Lift');
   await mustExist(conn, 'vendors', t, b.vendor_id, 'Vendor');
+  await mustExist(conn, 'departments', t, b.department_id, 'Department');
+  await mustExist(conn, 'funds', t, b.fund_id, 'Fund');
   if (b.parent_id) {
     await mustExist(conn, 'ops_assets', t, b.parent_id, 'Parent asset');
     // A part cannot sit inside itself, directly or further down.
@@ -169,7 +177,7 @@ async function checkLinks(conn, req, b, selfId) {
       p = (await one(conn, 'SELECT parent_id FROM ops_assets WHERE tenant_id = ? AND id = ?', [t, p]) || {}).parent_id;
     }
   }
-  if (!isManager(req) && MONEY_COLS.some((k) => b[k] !== undefined)) throw forbidden('Only a manager changes purchase cost, salvage value and useful life');
+  if (!isManager(req) && MONEY_COLS.some((k) => b[k] !== undefined)) throw forbidden('Only a manager changes purchase cost, salvage value, useful life, the hourly rate, department and fund');
 }
 
 const LIST_SQL = `SELECT a.*, loc.name AS location, par.name AS parent, par.asset_tag AS parent_tag, l.name AS lift, v.name AS vendor,
@@ -192,7 +200,7 @@ async function plans(conn, tenantId, today, assetId) {
 const RANK = { overdue: 0, soon: 1, never: 2, ok: 3 };
 
 function shape(a, today, warn) {
-  const out = { ...a, category: A.categoryOf(a), hours: Number(a.hours), miles: num(a.miles), open_orders: Number(a.open_orders || 0),
+  const out = { ...a, category: A.categoryOf(a), hours: Number(a.hours), miles: num(a.miles), open_orders: Number(a.open_orders || 0), suggested_rate_cents: W.suggestedRate(a),
     condition_score: num(a.condition_score), criticality: num(a.criticality), risk: MF.riskOf(a.condition_score, a.criticality) };
   for (const k of ['purchased_on', 'warranty_expires', 'registration_expires', 'insurance_expires', 'inspection_expires', 'retired_on']) out[k] = A.ymd(a[k]);
   out.papers = A.papers(out, today, warn);
@@ -259,7 +267,7 @@ router.get('/register/:id', async (req, res) => {
   res.json({
     ...a,
     on_map: Number(onMap.n), photos: pics, run_hours: hours.pumps.length ? hours : null,
-    ...(see ? {} : { purchase_cents: undefined, salvage_cents: undefined }),
+    ...(see ? {} : { purchase_cents: undefined, salvage_cents: undefined, hourly_rate_cents: undefined }),
     children, meters, fuel: fuel.map((f) => ({ ...f, gallons: Number(f.gallons) })),
     // opened_at is UTC; the day it was opened is given on the mountain's clock.
     work_orders: orders.map((w) => ({ ...w, opened_on: localDay(w.opened_at, tz), labor_cents: Math.round(Number(w.labor_cents)), parts_cents: Math.round(Number(w.parts_cents)) })),
@@ -546,50 +554,17 @@ async function orderFor(conn, req, id) {
  * at what they cost when issued. Returns still work on a canceled order, so parts never get stuck on it.
  */
 router.post('/work-orders/:id/parts', validate(z.object({ part_id: z.number().int().positive(), qty: qty2(z.number().min(-100000).max(100000)).refine((v) => v !== 0, 'Give a quantity'), note: nullable(z.string().max(255)) })), async (req, res) => {
-  const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
-  await tx(async (conn) => {
-    const w = await orderFor(conn, req, id);
-    if (w.status === 'cancelled' && b.qty > 0) throw conflict('This work order was canceled');
-    const p = await one(conn, 'SELECT id, name, qty_on_hand, unit_cost_cents, unit FROM parts WHERE tenant_id = ? AND id = ? FOR UPDATE', [t, b.part_id]);
-    if (!p) throw notFound('Part');
-    if (b.qty > 0 && Number(p.qty_on_hand) < b.qty) throw bad(`Only ${Number(p.qty_on_hand)} ${p.unit} of ${p.name} on hand`);
-    let cost = p.unit_cost_cents;
-    if (b.qty < 0) {
-      const used = await one(conn, "SELECT COALESCE(SUM(-qty), 0) AS n, SUM(-qty * unit_cost_cents) AS c FROM part_moves WHERE tenant_id = ? AND work_order_id = ? AND part_id = ? AND kind IN ('issue','return')", [t, id, p.id]);
-      if (-b.qty > Number(used.n)) throw bad(`Only ${Number(used.n)} ${p.unit} were used on this work order`);
-      cost = Math.round(Number(used.c) / Number(used.n));
-    }
-    await conn.query('UPDATE parts SET qty_on_hand = qty_on_hand - ? WHERE tenant_id = ? AND id = ?', [b.qty, t, p.id]);
-    await conn.query('INSERT INTO part_moves (tenant_id, part_id, kind, qty, unit_cost_cents, work_order_id, asset_id, note, user_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, p.id, b.qty > 0 ? 'issue' : 'return', -b.qty, cost, id, w.asset_id, b.note ?? null, req.auth.userId, nowIn(await tzOf(conn, t))]);
-  });
+  await tx((conn) => W.issuePart(conn, req, paramId(req), req.body));
   res.status(201).json({ ok: true });
 });
 
+// Labor at the person's own rate when they have one (Settings, Labor rates), else the shop labor rate (lib/workcosts.js).
 router.post('/work-orders/:id/labor', validate(z.object({ staff_id: nullable(z.number().int().positive()), worker: nullable(z.string().max(100)), hours: z.number().positive().max(200), worked_on: nullable(dateStr), note: nullable(z.string().max(255)) })), async (req, res) => {
-  const t = req.auth.tenantId; const id = paramId(req); const b = req.body;
-  const out = await tx(async (conn) => {
-    if ((await orderFor(conn, req, id)).status === 'cancelled') throw conflict('This work order was canceled');
-    await mustExist(conn, 'staff', t, b.staff_id, 'Staff member');
-    const s = await A.ensureSettings(conn, t);
-    const [r] = await conn.query('INSERT INTO work_order_labor (tenant_id, work_order_id, staff_id, worker, hours, rate_cents, worked_on, note, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [t, id, b.staff_id ?? null, b.worker ?? null, b.hours, s.labor_rate_cents, b.worked_on || todayIn(await tzOf(conn, t)), b.note ?? null, req.auth.userId]);
-    // Keep the work order's own hour total in step, for screens that only show that.
-    await conn.query('UPDATE work_orders SET labor_hours = (SELECT SUM(hours) FROM work_order_labor WHERE tenant_id = ? AND work_order_id = ?) WHERE tenant_id = ? AND id = ?', [t, id, t, id]);
-    return r.insertId;
-  });
-  res.status(201).json({ id: out });
+  const id = await tx((conn) => W.addLabor(conn, req, paramId(req), req.body));
+  res.status(201).json({ id });
 });
 router.delete('/work-orders/:id/labor/:rowId', async (req, res) => {
-  const t = req.auth.tenantId; const id = paramId(req);
-  await tx(async (conn) => {
-    const row = await one(conn, 'SELECT user_id FROM work_order_labor WHERE tenant_id = ? AND work_order_id = ? AND id = ?', [t, id, paramId(req, 'rowId')]);
-    if (!row) throw notFound('Labor entry');
-    if (row.user_id !== req.auth.userId && !isManager(req)) throw forbidden('Only the person who logged it, or a manager, can remove it');
-    await conn.query('DELETE FROM work_order_labor WHERE tenant_id = ? AND id = ?', [t, paramId(req, 'rowId')]);
-    await conn.query('UPDATE work_orders SET labor_hours = (SELECT SUM(hours) FROM work_order_labor WHERE tenant_id = ? AND work_order_id = ?) WHERE tenant_id = ? AND id = ?', [t, id, t, id]);
-    await audit(conn, req, 'remove_labor', 'work_orders', id, { row: paramId(req, 'rowId') });
-  });
+  await tx((conn) => W.removeLine(conn, req, paramId(req), 'labor', paramId(req, 'rowId')));
   res.status(204).end();
 });
 
@@ -617,20 +592,38 @@ router.patch('/work-orders/:id/costs', validate(z.object({ vendor_id: nullable(z
   res.json({ ok: true });
 });
 
+/**
+ * Everything a work order has cost: labor, equipment, parts from stock, one-off materials and outside work. Labor costed
+ * at a person's own rate is pay: only a manager sees its rate and cost (the crew sees the hours).
+ */
 router.get('/work-orders/:id/costs', async (req, res) => {
   const t = req.auth.tenantId; const id = paramId(req);
   const w = await one(pool, 'SELECT w.id, w.asset_id, w.vendor_id, v.name AS vendor, w.vendor_cost_cents, w.meter_hours, w.meter_miles, w.downtime_hours, w.pm_task_id FROM work_orders w LEFT JOIN vendors v ON v.tenant_id = w.tenant_id AND v.id = w.vendor_id WHERE w.tenant_id = ? AND w.id = ?', [t, id]);
   if (!w) throw notFound('Work order');
-  const [labor, parts] = await Promise.all([
+  const [labor, parts, equipment, materials] = await Promise.all([
     rows(pool, `SELECT l.*, COALESCE(NULLIF(CONCAT(p.first_name, ' ', p.last_name), ' '), l.worker) AS who FROM work_order_labor l LEFT JOIN staff s ON s.tenant_id = l.tenant_id AND s.id = l.staff_id
       LEFT JOIN people p ON p.tenant_id = s.tenant_id AND p.id = s.person_id WHERE l.tenant_id = ? AND l.work_order_id = ? ORDER BY l.worked_on, l.id`, [t, id]),
     rows(pool, `SELECT m.part_id, p.sku, p.name, p.unit, SUM(-m.qty) AS qty, SUM(-m.qty * m.unit_cost_cents) AS cost FROM part_moves m JOIN parts p ON p.tenant_id = m.tenant_id AND p.id = m.part_id
       WHERE m.tenant_id = ? AND m.work_order_id = ? AND m.kind IN ('issue','return') GROUP BY m.part_id, p.sku, p.name, p.unit HAVING SUM(-m.qty) <> 0 ORDER BY p.name`, [t, id]),
+    rows(pool, `SELECT e.id, e.asset_id, a.name AS asset, a.asset_tag, e.hours, e.rate_cents, e.used_on, e.note, e.user_id FROM work_order_equipment e JOIN ops_assets a ON a.tenant_id = e.tenant_id AND a.id = e.asset_id
+      WHERE e.tenant_id = ? AND e.work_order_id = ? ORDER BY e.used_on, e.id`, [t, id]),
+    rows(pool, 'SELECT id, description, qty, unit, unit_cost_cents, used_on, user_id FROM work_order_materials WHERE tenant_id = ? AND work_order_id = ? ORDER BY used_on, id', [t, id]),
   ]);
-  const laborCents = Math.round(labor.reduce((s, l) => s + Number(l.hours) * Number(l.rate_cents), 0));
+  const see = isManager(req);
+  const cents = (h, r) => Math.round(Number(h) * Number(r));
+  const laborCents = labor.reduce((s, l) => s + cents(l.hours, l.rate_cents), 0);
   const partsCents = Math.round(parts.reduce((s, p) => s + Number(p.cost), 0));
-  res.json({ ...w, labor: labor.map((l) => ({ ...l, hours: Number(l.hours), worked_on: A.ymd(l.worked_on), mine: l.user_id === req.auth.userId })), parts: parts.map((p) => ({ ...p, qty: Number(p.qty), cost: Math.round(Number(p.cost)) })),
-    labor_cents: laborCents, parts_cents: partsCents, total_cents: laborCents + partsCents + Number(w.vendor_cost_cents || 0) });
+  const equipmentCents = equipment.reduce((s, e) => s + cents(e.hours, e.rate_cents), 0);
+  const materialsCents = materials.reduce((s, m) => s + cents(m.qty, m.unit_cost_cents), 0);
+  const hidden = !see && labor.some((l) => l.personal);
+  res.json({ ...w,
+    labor: labor.map((l) => ({ ...l, hours: Number(l.hours), worked_on: A.ymd(l.worked_on), mine: l.user_id === req.auth.userId, personal: Boolean(l.personal), ...(l.personal && !see ? { rate_cents: null } : {}) })),
+    parts: parts.map((p) => ({ ...p, qty: Number(p.qty), cost: Math.round(Number(p.cost)) })),
+    equipment: equipment.map((e) => ({ ...e, hours: Number(e.hours), used_on: A.ymd(e.used_on), cost: cents(e.hours, e.rate_cents), mine: e.user_id === req.auth.userId })),
+    materials: materials.map((m) => ({ ...m, qty: Number(m.qty), used_on: A.ymd(m.used_on), cost: cents(m.qty, m.unit_cost_cents), mine: m.user_id === req.auth.userId })),
+    labor_hours: labor.reduce((s, l) => s + Number(l.hours), 0), equipment_hours: equipment.reduce((s, e) => s + Number(e.hours), 0),
+    labor_cents: hidden ? null : laborCents, parts_cents: partsCents, equipment_cents: equipmentCents, materials_cents: materialsCents,
+    total_cents: hidden ? null : laborCents + partsCents + equipmentCents + materialsCents + Number(w.vendor_cost_cents || 0) });
 });
 
 // ---------------------------------------------------------------- purchase orders
@@ -797,7 +790,8 @@ router.get('/overview', async (req, res) => {
         (SELECT COALESCE(SUM(l.hours * l.rate_cents), 0) FROM work_order_labor l WHERE l.tenant_id = ? AND l.worked_on >= ?) AS labor_month,
         (SELECT COALESCE(SUM(-m.qty * m.unit_cost_cents), 0) FROM part_moves m WHERE m.tenant_id = ? AND m.kind IN ('issue','return') AND m.at >= ?) AS parts_month,
         (SELECT COALESCE(SUM(vendor_cost_cents), 0) FROM work_orders WHERE tenant_id = ? AND status <> 'cancelled' AND IF(completed_at IS NULL, opened_at >= ?, completed_at >= ?)) AS vendor_month,
-        (SELECT COALESCE(SUM(cost_cents), 0) FROM asset_fuel WHERE tenant_id = ? AND filled_at >= ?) AS fuel_month`, [t, monthStart, t, monthStart, t, dayRange(await tzOf(pool, t), monthStart)[0], monthStart, t, monthStart]),
+        (SELECT COALESCE(SUM(cost_cents), 0) FROM asset_fuel WHERE tenant_id = ? AND filled_at >= ?) AS fuel_month,
+        (SELECT COALESCE(SUM(qty * unit_cost_cents), 0) FROM work_order_materials WHERE tenant_id = ? AND used_on >= ?) AS materials_month`, [t, monthStart, t, monthStart, t, dayRange(await tzOf(pool, t), monthStart)[0], monthStart, t, monthStart, t, monthStart]),
   ]);
   const costMap = await A.costs(pool, t, assets.map((a) => a.id), since);
   const lc = assets.map((a) => ({ a, c: costMap.get(a.id), l: A.lifecycle(a, costMap.get(a.id), today, s.replace_pct) }));
@@ -810,7 +804,7 @@ router.get('/overview', async (req, res) => {
     service_due: pm.filter((p) => p.state === 'overdue' || p.state === 'soon').sort((x, y) => RANK[x.state] - RANK[y.state]).slice(0, 30),
     papers_due: assets.flatMap((a) => a.papers.filter((p) => p.state === 'expired' || p.state === 'soon').map((p) => ({ asset_id: a.id, asset: a.name, tag: a.asset_tag, ...p }))).sort((x, y) => x.on.localeCompare(y.on)),
     low_stock: low.map((p) => ({ ...p, qty_on_hand: Number(p.qty_on_hand), reorder_point: Number(p.reorder_point) })),
-    spend_month_cents: isManager(req) ? Math.round(Number(spend.labor_month) + Number(spend.parts_month) + Number(spend.vendor_month) + Number(spend.fuel_month)) : null,
+    spend_month_cents: isManager(req) ? Math.round(Number(spend.labor_month) + Number(spend.parts_month) + Number(spend.vendor_month) + Number(spend.fuel_month) + Number(spend.materials_month)) : null,
     replace: isManager(req) ? lc.filter((x) => x.l.replace).map((x) => ({ id: x.a.id, name: x.a.name, tag: x.a.asset_tag, reasons: x.l.reasons })) : [],
     top_cost: isManager(req) ? lc.filter((x) => x.c.maintenance_12 > 0).sort((x, y) => y.c.maintenance_12 - x.c.maintenance_12).slice(0, 5).map((x) => ({ id: x.a.id, name: x.a.name, tag: x.a.asset_tag, maintenance_12: x.c.maintenance_12 })) : [],
   });

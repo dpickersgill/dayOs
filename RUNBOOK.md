@@ -36,6 +36,14 @@
 
 After 2026.11.20 the demo borough's requests are numbered R-1001 on in the order they were reported, and most valves have their turns to close (`db/demo-municipal/70-polish.js`). Existing municipalities get the Public works truck pre-trip the next time anyone opens Assets and fleet; nothing to set up. Request numbering needs no setup either: a municipality's first new request after the release is R-1001 (or the next free number).
 
+## Costs, departments and funds for a municipality (2026.11.20)
+
+- Nothing to turn on: departments and funds are made the first time a manager opens Assets and fleet or a work order. Ask the municipality which fund pays for road work (often Liquid Fuels) and set the Streets department's default fund to it (Assets and fleet, Settings, Departments). Tick Liquid Fuels on that fund.
+- Labor rates: under Assets and fleet, Settings, Labor rates, the manager types each person's cost an hour. Without one, the shop labor rate is used. Rates are only seen by managers and owners.
+- Equipment: set the hourly rate on each truck and machine (Edit, Job costs). Blank uses a suggested rate for its type.
+- Existing work orders are given a department, fund and street automatically the first time the list is read after the upgrade; work orders done before costs were recorded show their hours with no cost.
+- The monthly report is under Public works, Monthly report (managers and owners). If a council member asks why a cost is on a street, open the work order and check its street and fund.
+
 ## Public pages for a municipality
 
 Every municipal public page is `https://<app address>/<page>/<web name>`, with no sign-in. Link them from the municipality's website.
