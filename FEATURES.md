@@ -1142,6 +1142,44 @@ The Buildings add-on (`buildings`, paths `/buildings`, view `#/buildings`) is th
 ### Demo
 - `db/demo-municipal/70-utilities.js`: streets on map items, four main breaks (Main Street's cast iron main has 3 in 5 years, one open break on Bridge Street), 200 customer addresses (fictional 555-01xx phones and example.com emails, imported with consent), rated flows, connections and two overflows, ten clean outfall screenings and OF-07's case, a permit year of MS4 records, the Monday route order, and an open pothole work order at 111 Market Street.
 
+## Navigation: counts beside apps, and + New (release 2026.11.21, workstream "counts")
+
+### Counts (`GET /api/v1/nav/counts`, `src/lib/navcounts.js`, `src/routes/nav.js`, `public/js/navcounts.js`)
+One number beside an app in the menu, only when something there waits on the person signed in, and nothing at zero. Each number comes from the same function its Today card reads (`src/lib/waiting.js`; a crew member's from `src/lib/crewday.js` `myWork`), so the menu and Today cannot disagree. The answer is `{ counts: { <view key>: { n, says, alert? } } }`: `says` is what a screen reader hears after the number, `alert` shows it red.
+
+| App (view key) | Counts | Who sees it | The same number on |
+|---|---|---|---|
+| Requests (`requests`), municipality | new requests nobody has decided on (`says: new`) | front desk, owners and managers | Today, New requests |
+| Work orders (`works`), municipality | overdue work orders (`says: overdue`, red) | owners and managers: all; crew: only those assigned to them | Today, Overdue work orders; My work today, Overdue |
+| Patrol (`patrol`) | my open cases (drafts on cases I responded to) plus, for whoever reviews, reports waiting for review (`to sign off`, `to review`, or `to sign off or review`; red once a report has waited over 72 hours) | patrollers with access to cases; the review group (with no group: the access levels that approve) | Patrol's home page: My open cases, Waiting for review |
+| Lessons (`school`) | online lesson requests waiting for an answer (`to answer`) | counter, school supervisors and directors, owners and managers | Today, Lessons tile |
+| Rentals (`rentals`) | reservations held for pickup today (`to hand out`) | counter, owners and managers | Today, Rentals tile |
+
+Inbox keeps its own unread count (`/inbox/unread`). Only apps that are on for the tenant and that the person may open are counted; a ski area never gets a municipal count, or the other way round; every query is for the caller's tenant and uses an index starting with `tenant_id`. Not counted on purpose: the Online shop (will-call is a search, and no order there waits to be handed out), a ski area's work orders (its Today counts open and urgent ones, not overdue), and anything Today marks "Needs a look". Add a count only where a Today card already defines it: put the query in `src/lib/waiting.js`, have the card call it, then add the line in `navcounts.js`.
+
+The page asks when the app opens, every 60 seconds while it is in view, and after a move to another page or tab (at most once every 10 seconds). The timed checks are polls (`x-poll: 1`), so they do not keep a session open. It calls `frame.setBadge(key, n, { says, alert })` and clears a count that went to zero.
+
+### + New (`GET /api/v1/nav/new`, `public/js/newmenu.js`)
+The top bar's + New button (the round + on a phone) and Jump to ("New work order") list what the person may create. The server answers `{ items: [ids] }` with the rule each create route applies and the app on, so the menu never offers a form the server would refuse; the page knows each item's words and address.
+
+| Item (id) | Opens | Who |
+|---|---|---|
+| Work order (`work_order`) | municipality `#/works?new=1`; ski area `#/conditions?tab=maint&new=1` | municipality: crew, owners, managers (Assets and fleet on); ski area: staff, patrol, owners, managers (Lifts and trails on) |
+| Request (`request`) | `#/requests?new=1` | crew, front desk, owners, managers |
+| Street notice (`street_notice`) | `#/notices?new=1` | owners, managers, and a Crew lead a manager allowed to send notices |
+| Bulk pickup booking (`bulk_booking`) | `#/bulk?tab=bookings&new=1` | front desk, owners, managers (Trash and recycling on) |
+| Main break (`main_break`) | `#/water?new=1` | crew, owners, managers (Water on) |
+| Sale (`sale`) | `#/sell` | counter, owners, managers |
+| Lesson booking (`lesson`) | `#/sell?tab=lessons` | counter, owners, managers, a ski school director (Sell and Ski school on) |
+| Rental (`rental`) | `#/sell?tab=rentals` | counter, owners, managers (Sell and Rentals on) |
+| Patrol case (`incident`) | `#/patrol/now?new=1` | patrol access levels that write cases |
+| Found item (`lost_item`) | `#/lostfound?new=1` | counter, staff, owners, managers |
+| Customer (`customer`) | `#/people?new=1` | counter, instructors, owners, managers |
+| Message (`message`) | `#/messages?new=1` | owners and managers (Messages on), ski area and municipality |
+| Calendar event (`calendar_event`) | `#/calendar?new=1` | owners and managers; a ski school director or patrol lead for their own team |
+
+`?new=1`: a page says how to open its form with `whenNew(root, open)` (`public/js/newmenu.js`). The form opens when the address carries the mark, and the mark comes off the address, so a reload or Back does not open it again. It also works when the page is already on screen (the router does not draw a page again for a change to its query). Tests: `test/nav-counts.test.js` (HTTP for every role, and the two client modules in jsdom).
+
 ## Municipal edition: how the four 2026.11.20 workstreams fit together
 
 - **Today's Water, Sewer and Stormwater work order cards** count the open work orders charged to that department (the department whose kind is water, sewer or stormwater) and open `#/works?department_id=<id>`, the same list. Without such a department (retired, or renamed to another kind), they count the work orders on the system's map items and open `#/works?system=` as before.

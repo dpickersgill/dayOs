@@ -579,6 +579,14 @@ If Twilio's debugger shows error 11200 with a 403, the Request URL is not exactl
 Limits (Cloud Run settings, rarely changed): `HELP_SMS_CALL_CAP` (texts out per call, default 20) and
 `HELP_SMS_HOURLY_CAP` (texts out per mountain per hour, default 300). Past either, the call's timeline says to call the guest.
 
+## Menu counts and + New (release 2026.11.21)
+
+- A number beside an app in the menu is worked out by `GET /api/v1/nav/counts` from the same functions Today's cards use (`src/lib/waiting.js`). If someone reports that the menu and Today disagree, compare that request's answer with the card for the same person: they read one function, so a difference means one of them was changed to count on its own. Put the counting back in `src/lib/waiting.js`.
+- A count is missing: check that the app is on for the tenant (console, Apps), that the person's role may open the app, and, for crew, that their login is linked to a staff record (Settings, Team and logins). A crew member counts only work orders assigned to that staff record.
+- Each open page asks once a minute while it is in view (one cheap request, a handful of indexed counts). These are polls and do not keep a session open. There is no switch to turn them off; an app turned off stops being counted at once.
+- + New offers only what `GET /api/v1/nav/new` lists. An item is missing: the app is off, or the role may not create it (Street notice needs a manager, or a Crew lead named in Street notices, Settings; Patrol case needs a patrol access level that writes cases).
+- Nothing to migrate for either. The release's one data step (`db/steps/nav-counts.js`) is the forecast fix: it removes forecast snapshots written for municipalities.
+
 ## Utilities (release 2026.11.20)
 
 ### Water customer list
