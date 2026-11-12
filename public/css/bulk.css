@@ -37,3 +37,7 @@
   .bulk-facts { grid-template-columns: 1fr; }
   .bulk-facts dd { margin-bottom: 6px; }
 }
+
+/* The yearly recycling form (/hauler-report, 2026.11.22): the four DEP / county columns, two by two on a phone. */
+.hr-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+@media (min-width: 720px) { .hr-cols { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

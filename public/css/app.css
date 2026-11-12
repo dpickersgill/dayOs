@@ -4498,3 +4498,14 @@ dl.facts dd { margin: 0; }
   .pins-row .btn.small, .pins-foot .btn.small { min-height: 44px; }
 }
 /* nav pins: end */
+
+/* ---------- Trash and recycling: tonnage by month (2026.11.22, views/trash-tonnage.js) ---------- */
+.tn-bar { display: flex; min-width: 120px; height: 12px; border-radius: var(--radius-xs); overflow: hidden; background: var(--panel-alt); }
+.tn-bar span { display: block; height: 100%; }
+.tn-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--quiet); }
+.tn-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.tn-trash { background: var(--quiet); }
+.tn-recycling { background: var(--prog-todo); }
+.tn-yard { background: var(--open); }
+.tn-food { background: var(--hold); }
+.tn-other { background: var(--line-strong); }

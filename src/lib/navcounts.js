@@ -64,6 +64,12 @@ async function countsFor(req) {
       const mine = await require('./crewday').myWork(t, a.staffId, todayIn(tz));
       put('works', mine.filter((w) => w.overdue).length, 'overdue', true);
     }
+    // Trash and recycling (2026.11.22): cart requests waiting for a delivery day, for the front desk and managers (Today:
+    // "Cart requests waiting", lib/carts.js waitingCount). Added to any count the app already has.
+    if (on.has('solidwaste') && has(a, 'counter')) {
+      const n = await require('./carts').waitingCount(pool, t);
+      if (n > 0) out.bulk = out.bulk ? { ...out.bulk, n: out.bulk.n + n, says: 'waiting' } : { n, says: 'cart requests waiting' };
+    }
     return out;
   }
   // A ski area.
@@ -104,6 +110,8 @@ async function creatable(req) {
     add('request', on.has('requests') && has(a, 'staff', 'counter')); // routes/requests.js: taken for a resident
     add('street_notice', on.has('requests') && has(a, 'staff') && await require('../routes/streetnotices').canSend(req)); // managers, and a crew lead a manager allowed
     add('bulk_booking', on.has('solidwaste') && has(a, 'counter')); // routes/bulkpickup.js office
+    add('cart_request', on.has('solidwaste') && has(a, 'counter')); // routes/carts.js office (2026.11.22)
+    add('weigh_ticket', on.has('solidwaste') && has(a, 'counter')); // routes/tonnage.js office (2026.11.22)
     add('main_break', on.has('water') && has(a, 'staff')); // routes/mainbreaks.js
     add('message', on.has('messages') && isMgr(a));
     return out;

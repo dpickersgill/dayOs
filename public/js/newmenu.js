@@ -20,6 +20,8 @@ const ITEMS = {
   request: { label: 'Request', href: 'requests?new=1', app: 'requests', words: 'resident report pothole phone complaint' },
   street_notice: { label: 'Street notice', href: 'notices?new=1', app: 'notices', words: 'alert text residents closure boil water outage' },
   bulk_booking: { label: 'Bulk pickup booking', href: 'bulk?tab=bookings&new=1', app: 'bulk', words: 'trash pickup book' },
+  cart_request: { label: 'Cart request', href: 'bulk?tab=carts&new=1', app: 'bulk', words: 'cart trash recycling can bin toter stolen replacement' }, // 2026.11.22
+  weigh_ticket: { label: 'Weigh ticket', href: 'bulk?tab=tonnage&new=1', app: 'bulk', words: 'tonnage landfill scale ticket tons transfer station' }, // 2026.11.22
   main_break: { label: 'Main break', href: 'water?new=1', app: 'water', words: 'water leak break record' },
   // A ski area
   sale: { label: 'Sale', href: 'sell', app: 'sell', words: 'ticket pass sell order' },

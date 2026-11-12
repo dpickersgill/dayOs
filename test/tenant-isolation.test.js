@@ -113,6 +113,8 @@ const SIGNED = {
   // hangers, the bulk pickup route order, repeat callers and duplicates.
   'mainbreaks.js': { router: '/water' }, 'chapter94.js': { router: '/sewer' }, 'ms4.js': { router: '/stormwater' },
   'serviceaddresses.js': { router: '/street-notices' }, 'bulkroute.js': { router: '/solid-waste' }, 'requestchecks.js': { router: '/requests/checks' },
+  // 2026.11.22 (Trash and recycling): carts, weigh tickets and tonnage, the annual recycling report (test/trash-tonnage.test.js sweeps two municipalities).
+  'carts.js': { router: '/solid-waste' }, 'tonnage.js': { router: '/solid-waste' }, 'recyclingreport.js': { router: '/solid-waste' },
 };
 const PUBLIC = {
   'assistant.js': { publicRouter: '/public' }, 'availability.js': { publicRouter: '/public' }, 'dispatch.js': { publicRouter: '/public' }, 'family.js': { publicRouter: '/public' },
@@ -129,6 +131,8 @@ const PUBLIC = {
   'requests.js': { publicRouter: '/public' }, // muni release 1: the report page and its status links, keyed by the web address and the request's token
   'streets.js': { publicRouter: '/public' }, // muni release 1: a municipality's street names, keyed by its web address
   'bulkpickup.js': { publicRouter: '/public' }, // muni release 1: the bulk pickup page and a resident's booking link
+  'carts.js': { publicRouter: '/public' }, // 2026.11.22: the cart request page and a resident's request link, keyed by the web address and the request's token
+  'recyclingreport.js': { publicRouter: '/public' }, // 2026.11.22: a reporter's yearly form, keyed by the web address and its own link (stored hashed)
   'streetnotices.js': { publicRouter: '/public' }, // muni release 1: alert sign-ups, a notice's page and the manage link, keyed by the municipality's web address and a signed link
 };
 // Whole files, or single routers inside a file ('file.js:name'), left out of the sweep, and why.

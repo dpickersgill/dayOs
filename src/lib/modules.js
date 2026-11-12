@@ -168,6 +168,9 @@ function moduleGate(req, _res, next) {
   })().then(() => next(), next);
 }
 
+// PHASE 1 STUB (workstream "tonnage"): workstream "schedule" adds these words to PUBLIC above; this line goes in phase 2.
+Object.assign(PUBLIC, { 'cart-request': PUBLIC['cart-request'] || 'solidwaste', 'hauler-report': PUBLIC['hauler-report'] || 'solidwaste' });
+
 // Public words with no app of their own that a municipality keeps (none yet: its pages are all in PUBLIC above).
 const MUNI_OPEN = [];
 

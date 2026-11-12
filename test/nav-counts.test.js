@@ -309,9 +309,9 @@ test('a ski area gets no municipal counts, a municipality no ski ones, and anoth
 
 // ---------------------------------------------------------------- + New
 test('+ New for a municipality: what each person may create, and the server agrees', async () => {
-  assert.deepEqual(await newItems(A.token), ['work_order', 'request', 'street_notice', 'bulk_booking', 'main_break', 'message']);
-  assert.deepEqual(await newItems(P.mgr.token), ['work_order', 'request', 'street_notice', 'bulk_booking', 'main_break', 'message']);
-  assert.deepEqual(await newItems(P.desk.token), ['request', 'bulk_booking']);
+  assert.deepEqual(await newItems(A.token), ['work_order', 'request', 'street_notice', 'bulk_booking', 'cart_request', 'weigh_ticket', 'main_break', 'message']);
+  assert.deepEqual(await newItems(P.mgr.token), ['work_order', 'request', 'street_notice', 'bulk_booking', 'cart_request', 'weigh_ticket', 'main_break', 'message']);
+  assert.deepEqual(await newItems(P.desk.token), ['request', 'bulk_booking', 'cart_request', 'weigh_ticket']);
   assert.deepEqual(await newItems(P.luis.token), ['work_order', 'request', 'main_break']);
   // What is left out is what the server refuses.
   is(await api('POST', '/ops/work-orders', { token: P.desk.token, body: { title: 'Desk cannot' } }), 403);
@@ -464,7 +464,7 @@ test('the + New module: this person\'s items with their addresses, and a command
   // The front desk: no Work order (it cannot open Work orders), no Street notice.
   const desk = fakeFrame();
   await (await as(P.desk.token)).menu.start(desk);
-  assert.deepEqual(desk.items.map((i) => i.id), ['request', 'bulk_booking']);
+  assert.deepEqual(desk.items.map((i) => i.id), ['request', 'bulk_booking', 'cart_request', 'weigh_ticket']);
   assert.equal(desk.items[1].href, 'bulk?tab=bookings&new=1');
   // A ski area's work order goes to Mountain status, Maintenance; its own items have their addresses.
   const owner = fakeFrame();

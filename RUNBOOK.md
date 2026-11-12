@@ -56,6 +56,8 @@ Every municipal public page is `https://<app address>/<page>/<web name>`, with n
 | Open requests | `/open-requests/<web name>` | The map of open requests and those fixed in the last 30 days. Off until a manager turns it on. | Resident requests |
 | Street alerts | `/alerts/<web name>` | Sign up for texts and emails about a street. `/alerts/<web name>/<code>` is one notice; `/alerts/<web name>/manage/<token>` is a resident's own choices. | Resident requests |
 | Bulk pickup | `/bulk-pickup/<web name>` | Book and pay for a bulk trash pickup. `?booking=<token>` is one booking. | Trash and recycling |
+| Cart request | `/cart-request/<web name>` | Ask for a new, extra, replacement or stolen cart, and pay a fee. `?request=<token>` is one request. | Trash and recycling |
+| Recycling report form | `/hauler-report/<web name>/<link>` | A hauler's or business's yearly recycling numbers. Only from the link emailed to them; it ends when the report is closed. | Trash and recycling |
 
 Each page reads its data from `/api/v1/public/<web name>/<page>` (`report`, `open-requests`, `alerts`, `bulk-pickup`, and `streets` for the street names). A ski area, or a municipality with the app off, gets "Page not found" there. To check a new municipality: open each address, then `curl -s https://<app address>/api/v1/public/<web name>/streets` should list its streets.
 
@@ -98,6 +100,15 @@ Work orders are public records in Pennsylvania. Work orders, Download spreadshee
 **Linking the page from the municipal website.** The page is `https://<app address>/bulk-pickup/<web name>` (Bulk pickup, Settings shows it with Copy link). Put it on the website's trash or public works page as "Book a bulk pickup online", and in the newsletter and on the trash calendar. It works on a phone and needs no login. A QR code on the bulk pickup flyer at the office works too. Turning off "Residents can book online" leaves the page up with a call-us message.
 
 **Before turning it on.** Import the street list (Settings, Streets), check collection days, cutoff, stops a day, sizes and prices, and the rules, and add the year's holidays under Days with no pickup. Residents who said yes get a reminder the afternoon before; Twilio and Postmark must be set up for texts and emails (as for the rest of the app).
+
+## Carts, tonnage and the recycling report for a municipality (Trash and recycling, 2026.11.22)
+
+- Upgrading needs `npm run migrate` (`db/steps/trash-tonnage.js`: the cart, weigh ticket and recycling report tables).
+- Cart fees are paid on the municipality's own Stripe account, as for bulk pickup (see above; `metadata.kind = 'cart'`, the same Connect webhook). A refund Stripe did not take shows in `card_returns` (kind `cart`) as failed and is retried by the daily job. Unpaid card pages are let go after a day by the daily job (`cart_pages`).
+- Link `/cart-request/<web name>` from the municipality's trash page once a manager has set the cart sizes (Trash and recycling, Carts, Sizes and fees). Until then the page says to call the office.
+- The daily job's `recycling_report` stage opens each municipality's report in December, reminds reporters January 15, and sends the last reminder on the follow-up day (February 1). Each runs once. Report emails go through Postmark; a reporter without email is typed in by the office.
+- A reporter says the link does not open: the report may be closed, or a newer link was sent. A manager presses Get a link on that reporter's row and gives them the new one.
+- Tipping fees and cost per ton are for owners and managers only (`lib/nomoney.js`). The front desk enters tickets without fees; the facility's fee per ton fills them in.
 
 ## Street alert texts for a municipality (which number sends)
 
