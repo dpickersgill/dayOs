@@ -8,4 +8,6 @@
 // fix/help-review: dispatch_calls.flood_pending_at (a held flood alert), after dispatch_alert_state.
 // 2026.11.19 (municipal edition): the last table the municipal steps make is building_documents (db/steps/muni-buildings.js,
 // after the foundation, assets, requests, bulk pickup and street notices steps); the step after it only rewords a plan.
-module.exports = { LATEST: { table: 'building_documents', column: 'document_id' } };
+// 2026.11.20: the last step that leaves something to check is oncall_rotations.department_id (db/steps/m2-release.js,
+// after the polish, money, crew and utilities steps); the step after it only moves typed department names to it.
+module.exports = { LATEST: { table: 'oncall_rotations', column: 'department_id' } };

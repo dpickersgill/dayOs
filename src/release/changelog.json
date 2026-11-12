@@ -1,6 +1,143 @@
 {
   "releases": [
     {
+      "version": "2026.11.20",
+      "date": "2026-11-12",
+      "title": "Municipal edition: costs and the monthly report, the crew board, on call, main breaks, Chapter 94 and MS4",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "assets",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff"
+          ],
+          "text": "Work orders: what a job cost. Mark done records each person's hours, the equipment used, parts from stock, other materials and the outside vendor's bill, all at once; Add costs does the same while the job is open. Every work order is charged to a department and a fund (Streets, Water, Sewer and the rest; General, Liquid Fuels and the rest), filled in from its asset, map item or request, and a manager can change them. The crew sees hours only; costs and rates are a manager's. The Done tab has dates and totals, and Assets and fleet, Costs shows real numbers.",
+          "help": "muni-job-costs"
+        },
+        {
+          "kind": "new",
+          "app": "assets",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "Monthly report, for the manager and council: one month of public works on a page to print or download. Work orders opened and done, hours and cost by department and fund, requests made safe and fixed within target, the busiest streets, programs, bulk pickup, street notices, building checks, the fleet, the largest jobs with photos, and the Liquid Fuels fund by street for the year, for the MS-965. No resident's name, phone, email or house number is in it.",
+          "help": "muni-month-report"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "Today by role. Managers see the crew board first (who is in, who is off, who is on call, and each person's work for today), then the few things that need action. The crew sees My work today: their work orders, programs, stops and rounds, the time clock and whether they are on call. The front desk sees new requests, today's bulk pickups, street notices and who is on call. The Water, Sewer and Stormwater cards open that department's work orders, and a manager can assign several work orders at once or see them on a map.",
+          "help": "muni-today"
+        },
+        {
+          "kind": "new",
+          "app": "workforce",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "On call and overtime, in Staff and schedule. Each department has a rotation, a week each by default, with swaps and holidays; a water or sewer request reported after hours sends the person on call a phone alert. Overtime shows hours over 40 a week and call-outs, with a spreadsheet. Certifications come ready for public works: CDL, DOT medical card, water and wastewater operator, flagger and more, with reminders before they run out.",
+          "help": "muni-oncall"
+        },
+        {
+          "kind": "new",
+          "app": "water",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff"
+          ],
+          "text": "Water: record a main break with its cause, the valves shut (the mapped valves within 150 m on the same street are suggested), customers out and boil water, and each main keeps its break history; more than 2 breaks in 5 years raises its condition. Import your water customer list from the billing system, and a street notice reaches every service address on the streets you pick: by text or email where you confirmed consent, and on a printed door-hanger list for the rest.",
+          "help": "muni-main-breaks"
+        },
+        {
+          "kind": "new",
+          "app": "sewer",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff"
+          ],
+          "text": "Sewer, Chapter 94: each pump station's run hours by month times its rated flow, the annual totals and peak month, new connections and the overflows, printed or downloaded in a layout close to DEP's spreadsheet for your engineer. The flow is an estimate from run time, and the page says so.",
+          "help": "muni-chapter-94"
+        },
+        {
+          "kind": "new",
+          "app": "stormwater",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff"
+          ],
+          "text": "Stormwater, MS4: the permit year (July 1 to June 30) by the six minimum control measures, with outfall screenings done against those required and an annual report pack for your engineer. A failed screening with a suspected illicit discharge opens a case to trace the source, and lowers the outfall's condition so its risk shows it.",
+          "help": "muni-ms4"
+        },
+        {
+          "kind": "improved",
+          "app": "requests",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "Requests: new requests are numbered in order (R-1001, R-1002...), while the resident's status link stays private. Taking a request warns when the same address already has an open request or work order of that kind, and the front desk can find a caller's earlier requests by phone or email. Targets read in hours under 48 and in days after, the same everywhere, and a street notice cannot be sent with a blank left in it.",
+          "help": "muni-repeat-callers"
+        },
+        {
+          "kind": "improved",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "Bulk pickup: a manager sets the driving order of the streets for each collection day, and which way the house numbers run on each street. The stop list follows it, and a new street goes to the end until it is placed.",
+          "help": "bulk-staff"
+        },
+        {
+          "kind": "improved",
+          "app": "assets",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "Work orders and Assets and fleet: a work order can be on any map item (a main, valve, hydrant or manhole), found by tag or street. The work order has one Close, and Cancel job asks first. A valve keeps its turns to close. Trucks get a public works pre-trip with air brakes, plow mount and the odometer, and a failed brake, steering, light or tire check takes the truck out of service. Jump to finds hydrants, valves, work orders, requests, On call and Overtime. The owner turns add-ons on and off in Settings, Apps and add-ons.",
+          "help": "muni-work-orders"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "who": null,
+          "text": "The Add a passkey offer no longer opens every time you sign in: Not now puts it off for 30 days, and on a phone it never interrupts a work order, a request or an inspection. This is the same for ski areas and municipalities.",
+          "help": "passkey-leaders"
+        }
+      ]
+    },
+    {
       "version": "2026.11.19",
       "date": "2026-11-11",
       "title": "Municipal edition: public works, resident requests, bulk pickup, street notices and buildings",
