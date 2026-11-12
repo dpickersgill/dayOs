@@ -10,4 +10,6 @@
 // after the foundation, assets, requests, bulk pickup and street notices steps); the step after it only rewords a plan.
 // 2026.11.20: the last step that leaves something to check is oncall_rotations.department_id (db/steps/m2-release.js,
 // after the polish, money, crew and utilities steps); the step after it only moves typed department names to it.
-module.exports = { LATEST: { table: 'oncall_rotations', column: 'department_id' } };
+// 2026.11.21: the last step that leaves something to check is user_nav.bar (db/steps/nav-pins.js); the step after it
+// (db/steps/nav-counts.js) only removes forecast rows written for municipalities.
+module.exports = { LATEST: { table: 'user_nav', column: 'bar' } };

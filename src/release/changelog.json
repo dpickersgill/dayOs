@@ -1,6 +1,100 @@
 {
   "releases": [
     {
+      "version": "2026.11.21",
+      "date": "2026-11-12",
+      "title": "A new menu: everything in one list, your own pins, and a bar across the top",
+      "notes": [
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "A new menu. Everything you can open is in one list, in sections, with Today, Inbox, Calendar and My shifts at the top. Settings, Help and What's new, the theme and Sign out are under your name at the bottom. A bar across the top says where you are and holds Jump to, + New, Ask, Inbox and Help. Collapse the menu to icons with the arrow or Ctrl+\\ (it starts that way on screens narrower than 1280 pixels). On a phone, Menu shows everything as tiles, with your account at the bottom.",
+          "help": "getting-around"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "who": [],
+          "text": "Pinned, at the top of your menu, is yours. Press the star at the top of any page to pin it, with the tab and filters you have open. Right-click an app in the menu (press and hold on a phone) to pin or unpin it. Press Edit to drag pins into your order, rename them, choose the four on your phone's bottom bar, or go back to your role's menu. Up to 12, and they follow you to every device. A computer where people sign in with a PIN always shows the role's pins.",
+          "help": "pins"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "orgs": [
+            "mountain"
+          ],
+          "who": [],
+          "text": "A number beside an app shows only when something there is waiting on you, and it is the same number your screen shows: your open patrol cases and reports to review, lesson requests to answer, and rental reservations to hand out today.",
+          "help": "menu-counts"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "A number beside an app shows only when something there is waiting on you, and it is the same number Today shows: new requests for the front desk and managers, and overdue work orders in red (the crew see only their own).",
+          "help": "menu-counts-muni"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "orgs": [
+            "mountain"
+          ],
+          "who": [],
+          "text": "+ New, at the top of every page (the round + on a phone), lists what you can start: a sale, a lesson booking, a rental, a patrol case, a found item, a customer, a work order, a message or a calendar event, each opening its form ready to fill in. In Jump to, type new.",
+          "help": "new-menu"
+        },
+        {
+          "kind": "new",
+          "app": null,
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "+ New, at the top of every page (the round + on a phone), lists what you can start: a work order, a request taken for a resident, a street notice, a bulk pickup booking or a main break, each opening its form ready to fill in. In Jump to, type new.",
+          "help": "new-menu-muni"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "orgs": [
+            "mountain"
+          ],
+          "who": [
+            "owner"
+          ],
+          "text": "On the hill is now Mountain. Settings, Team and logins, Menus for each role now sets each role's starting pins: people can change their own, and your changes reach everyone who has not.",
+          "help": "role-menus"
+        },
+        {
+          "kind": "improved",
+          "app": null,
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "Water, Sewer and Stormwater have their own section in the menu, Utilities.",
+          "help": "getting-around"
+        },
+        {
+          "kind": "fixed",
+          "app": null,
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "owner"
+          ],
+          "text": "Ski forecast data is no longer collected for municipalities, and what was collected is removed."
+        }
+      ]
+    },
+    {
       "version": "2026.11.20",
       "date": "2026-11-12",
       "title": "Municipal edition: costs and the monthly report, the crew board, on call, main breaks, Chapter 94 and MS4",

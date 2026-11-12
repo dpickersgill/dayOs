@@ -598,6 +598,7 @@ Each person's pins (the top of their menu, and their phone bar) are in `user_nav
 - **At the counter the menu is not theirs.** On a shared computer (signed in by PIN) everyone gets their role's starting pins and nothing can be saved. That is on purpose.
 - **Saving is refused with "read only".** A tenant whose subscription has lapsed is read only, and that includes pins. They work again once it is paid.
 - A row holds at most 12 pins and 4 bar entries, a few hundred bytes. Rows go with the login (`ON DELETE CASCADE`) and with the tenant's data when a closed tenant is emptied.
+
 ## Menu counts and + New (release 2026.11.21)
 
 - A number beside an app in the menu is worked out by `GET /api/v1/nav/counts` from the same functions Today's cards use (`src/lib/waiting.js`). If someone reports that the menu and Today disagree, compare that request's answer with the card for the same person: they read one function, so a difference means one of them was changed to count on its own. Put the counting back in `src/lib/waiting.js`.
