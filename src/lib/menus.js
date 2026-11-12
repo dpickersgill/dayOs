@@ -225,4 +225,180 @@ const muniMenuFor = (role) => (MUNI_STANDARD[role] ? copy(MUNI_STANDARD[role]) :
 /** The kinds of work a person's positions stand for, in order, without repeats: ['park'], ['lifts', 'grooming']. */
 const kindsOf = (positions) => [...new Set((positions || []).map(positionKind).filter(Boolean))];
 
-module.exports = { APPS, KEYS, HOME, ALWAYS, ROLE_APPS, ROLES, STANDARD, LINKS, DIRECTOR, POSITION_ROLES, POSITION_APPS, KIND_MENUS, isPositionKey, canOpen, positionKind, standardFor, withoutHome, withAlways, check, parse, menuFor, rowFor, linksIn, kindsOf, MUNI_ROLES, MUNI_STANDARD, muniMenuFor };
+// ---------------------------------------------------------------- pins (2026.11.21)
+// A person's pins: the top of their menu, under "Pinned". With nothing saved they are the role's menu above (its apps and
+// shortcuts, in order), so an owner's change to a role's menu keeps reaching everyone who has not made their own. A person
+// can pin any page they may open, reorder, rename and reset; their list is kept in user_nav (routes/menav.js).
+//   a pin: { id, label, href, app, icon? }   href: a page address without the leading "#/" ("patrol/cases?tab=records")
+//                                            app: the view it belongs to, always the first part of href
+
+// Every page of the app by its view key, with its name: the menus' apps, a municipality's, and the pages every menu has.
+const VIEW_NAMES = {
+  ...APPS, brief: 'Morning brief', settings: 'Settings', help: 'Help', area: 'Summary',
+  requests: 'Requests', notices: 'Street notices', works: 'Work orders', assetprograms: 'Programs', bulk: 'Bulk pickup', buildings: 'Buildings',
+  monthreport: 'Monthly report', water: 'Water', sewer: 'Sewer', stormwater: 'Stormwater',
+};
+// Who may open each view: the same rules as VIEWS in public/js/main.js (test/nav-pins.test.js checks every view there
+// has a rule here). w: { role, onPatrol, schoolAccess }.
+const isManagerRole = (w) => w.role === 'owner' || w.role === 'manager';
+const roleCan = (w, ...roles) => isManagerRole(w) || roles.includes(w.role) || (roles.includes('patrol') && Boolean(w.onPatrol));
+const schoolDirector = (w) => isManagerRole(w) || (w.role === 'instructor' && w.schoolAccess === 'director');
+const anyone = () => true;
+const notArea = (w) => w.role !== 'area';
+const VIEW_RULES = {
+  dashboard: anyone, inbox: anyone, brief: notArea, sell: (w) => roleCan(w, 'counter') || schoolDirector(w), gate: (w) => roleCan(w, 'counter', 'staff'),
+  conditions: anyone, park: anyone, assets: (w) => roleCan(w, 'staff'), documents: anyone, rentals: (w) => roleCan(w, 'counter'),
+  school: (w) => roleCan(w, 'instructor', 'counter'), programs: (w) => roleCan(w, 'instructor', 'counter'),
+  // An instructor's own page; everyone else who may open it is sent to Lessons, so it is a page of its own only for them.
+  availability: (w) => w.role === 'instructor',
+  patrol: (w) => roleCan(w, 'patrol'), people: (w) => roleCan(w, 'counter', 'instructor'), waivers: (w) => roleCan(w, 'counter', 'instructor'),
+  lostfound: (w) => roleCan(w, 'counter', 'staff'), shop: (w) => roleCan(w, 'counter'), catalog: schoolDirector,
+  messages: isManagerRole, money: isManagerRole, workforce: isManagerRole, myshifts: anyone, calendar: notArea, settings: anyone, help: anyone,
+  area: (w) => w.role === 'area',
+  requests: (w) => roleCan(w, 'counter', 'staff'), notices: (w) => roleCan(w, 'counter', 'staff'), works: (w) => roleCan(w, 'staff'),
+  assetprograms: (w) => roleCan(w, 'staff'), bulk: (w) => roleCan(w, 'counter', 'staff'), buildings: (w) => roleCan(w, 'counter', 'staff'),
+  monthreport: isManagerRole, water: (w) => roleCan(w, 'staff'), sewer: (w) => roleCan(w, 'staff'), stormwater: (w) => roleCan(w, 'staff'),
+};
+// A view whose app (lib/modules.js) has another name; every other view's key is its app's key. These are a
+// municipality's views and never show for a ski area (main.js VIEW_MODULE).
+const VIEW_MODULE = { requests: 'requests', notices: 'requests', works: 'assets', assetprograms: 'assets', bulk: 'solidwaste', buildings: 'buildings', monthreport: 'assets', water: 'water', sewer: 'sewer', stormwater: 'stormwater' };
+// The views a municipality may have at all, and the pages no tenant can turn off (main.js MUNI_VIEWS and ALWAYS).
+const MUNI_VIEWS = ['dashboard', 'inbox', 'myshifts', 'requests', 'notices', 'bulk', 'works', 'assets', 'assetprograms', 'buildings', 'monthreport', 'workforce', 'messages', 'documents', 'settings', 'help', 'water', 'sewer', 'stormwater'];
+const NEVER_OFF = ['dashboard', 'brief', 'calendar', 'inbox', 'people', 'waivers', 'lostfound', 'myshifts', 'settings', 'help', 'area'];
+
+/**
+ * The views this person may open now, as the page works it out (main.js visibleViews): their role, the apps that are on
+ * for the tenant, and the kind of tenant. who: { role, org: 'mountain' | 'municipality', modules: [app keys that are on],
+ * onPatrol, schoolAccess }. A pin can only point into one of these.
+ */
+function viewsFor(who) {
+  const w = who || {};
+  const on = new Set(w.modules || []);
+  const appOn = (k) => NEVER_OFF.includes(k) || on.has(VIEW_MODULE[k] || k);
+  const may = (k) => VIEW_RULES[k](w);
+  if (w.org === 'municipality') {
+    return MUNI_VIEWS.filter((k) => (k !== 'myshifts' || on.has('workforce')) && (VIEW_MODULE[k] ? on.has(VIEW_MODULE[k]) : appOn(k)) && may(k));
+  }
+  if (w.role === 'area') return ['area', 'settings', 'help'];
+  // A patrol on its own (Patrol on, none of the front-desk or mountain apps) has no customers, waivers or day board.
+  const patrolOnly = on.has('patrol') && !['sell', 'conditions', 'rentals', 'school'].some((k) => on.has(k));
+  const hide = patrolOnly ? ['dashboard', 'people', 'waivers', 'lostfound', 'myshifts'] : [];
+  return Object.keys(VIEW_RULES).filter((k) => !hide.includes(k) && !VIEW_MODULE[k] && appOn(k) && may(k));
+}
+
+const PIN_MAX = 12;
+const PIN_LABEL_MAX = 40;
+const PIN_HREF_MAX = 200;
+const BAR_MAX = 4;
+// A page address: an app, then path parts, then a query. Nothing that could leave the app: no scheme, no "//", no "#",
+// no spaces, and (checked apart) no ".." part.
+const PIN_HREF = /^[a-z0-9-]+(\/[A-Za-z0-9_.-]+)*(\?[A-Za-z0-9_=&%.,:+-]*)?$/;
+const PIN_ID = /^[A-Za-z0-9_.:-]{1,40}$/;
+const PIN_ICON = /^[a-z0-9-]{1,30}$/;
+/** The app a page address belongs to: its first part. */
+const appOfHref = (href) => String(href).split(/[/?]/)[0];
+/** Is this a page address a pin may hold? (Its form only; whether the person may open its app is checked apart.) */
+function goodHref(href) {
+  if (typeof href !== 'string' || href.length > PIN_HREF_MAX || !PIN_HREF.test(href)) return false;
+  return !href.split('?')[0].split('/').some((part) => /^\.+$/.test(part));
+}
+
+/**
+ * A role's starting pins from its menu: each app, and each shortcut with its page address and label, in the menu's
+ * order; only what the person may open (may: viewsFor). menu: menuFor() or muniMenuFor(); null gives none.
+ */
+function startingPins(menu, may) {
+  if (!menu || !Array.isArray(menu.apps)) return [];
+  const out = [];
+  for (const k of [...new Set(menu.apps)]) {
+    const l = LINKS[k];
+    const app = l ? l.app : k;
+    if (!may.includes(app) || HOME.includes(k)) continue;
+    out.push(l ? { id: k, label: l.label, href: l.href, app, icon: l.icon } : { id: k, label: VIEW_NAMES[k] || k, href: k, app });
+    if (out.length === PIN_MAX) break;
+  }
+  return out;
+}
+
+/** One pin as it is kept and sent, or null when it is not a pin at all (a stored row is read through this too). */
+function cleanPin(p) {
+  if (!p || typeof p !== 'object') return null;
+  const label = typeof p.label === 'string' ? p.label.trim() : '';
+  if (!PIN_ID.test(String(p.id || '')) || !label || label.length > PIN_LABEL_MAX || !goodHref(p.href)) return null;
+  const pin = { id: String(p.id), label, href: p.href, app: appOfHref(p.href) };
+  if (typeof p.icon === 'string' && PIN_ICON.test(p.icon)) pin.icon = p.icon;
+  return pin;
+}
+
+/**
+ * Checks what a person asks to save. Returns { pins, bar } as kept (bar: the page addresses on the phone bar, or null
+ * for the standard bar), or a plain-words problem. Every pin must point into an app the person may open (may), no two
+ * pins share an id or a page, and each of the bar's four is one of the pins or a Home page.
+ */
+function checkNav(body, may) {
+  const list = body && Array.isArray(body.pins) ? body.pins : null;
+  if (!list) return { problem: 'Send your pins as a list' };
+  if (list.length > PIN_MAX) return { problem: `You can have up to ${PIN_MAX} pins. Unpin one to add another.` };
+  const pins = [];
+  for (const raw of list) {
+    const label = raw && typeof raw.label === 'string' ? raw.label.trim() : '';
+    if (!label) return { problem: 'Every pin needs a name' };
+    if (label.length > PIN_LABEL_MAX) return { problem: `A pin's name can be up to ${PIN_LABEL_MAX} characters` };
+    if (!raw || !goodHref(raw.href)) return { problem: `"${label}" does not point to a page in Verdynt/OS, so it cannot be pinned` };
+    const app = appOfHref(raw.href);
+    if (raw.app !== undefined && raw.app !== app) return { problem: `"${label}" names one app and points to another. Pin the page again.` };
+    if (!may.includes(app)) return { problem: `You cannot open ${VIEW_NAMES[app] || 'that page'}, so it cannot be pinned` };
+    const pin = cleanPin(raw);
+    if (!pin) return { problem: `"${label}" is not a pin. Pin the page again.` };
+    if (pins.some((x) => x.id === pin.id)) return { problem: 'Two pins have the same id. Reload the page and try again.' };
+    if (pins.some((x) => x.href === pin.href)) return { problem: `"${label}" is pinned twice. Take one of them out.` };
+    pins.push(pin);
+  }
+  let bar = null;
+  if (body.bar !== undefined && body.bar !== null) {
+    if (!Array.isArray(body.bar)) return { problem: 'Send the phone bar as a list' };
+    if (body.bar.length > BAR_MAX) return { problem: `The phone bar holds up to ${BAR_MAX} pages` };
+    bar = [];
+    for (const b of body.bar) {
+      const href = typeof b === 'string' ? b : b && b.href;
+      const known = pins.some((x) => x.href === href) || (HOME.includes(href) && may.includes(href));
+      if (!known) return { problem: 'The phone bar can hold your pins and Today, Inbox, Calendar and My shifts. Pin a page first to put it on the bar.' };
+      if (bar.includes(href)) return { problem: 'A page can be on the phone bar once' };
+      bar.push(href);
+    }
+  }
+  return { pins, bar };
+}
+
+/** A JSON column's value (a string on MariaDB, a value on MySQL), or null. */
+function fromJson(raw) {
+  if (typeof raw !== 'string') return raw === undefined ? null : raw;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+/**
+ * What a person's menu shows. row: their user_nav row ({ pins, bar }) or null; standard: their role's starting pins;
+ * may: viewsFor(). Returns { pins, bar, custom }: their own pins without those whose app they can no longer open (a role
+ * change, an app turned off; such a pin is dropped for good the next time they save), or the role's when they have made
+ * none. bar: [{ label, href, app, icon? }] for the phone bar, or null for the standard bar.
+ */
+function navFrom(row, standard, may) {
+  if (!row) return { pins: standard, bar: null, custom: false };
+  const stored = fromJson(row.pins);
+  const pins = (Array.isArray(stored) ? stored : []).map(cleanPin).filter((p) => p && may.includes(p.app)).slice(0, PIN_MAX);
+  const hrefs = fromJson(row.bar);
+  let bar = null;
+  if (Array.isArray(hrefs)) {
+    bar = [];
+    for (const href of hrefs.slice(0, BAR_MAX)) {
+      const pin = pins.find((p) => p.href === href);
+      if (pin) bar.push({ label: pin.label, href: pin.href, app: pin.app, ...(pin.icon ? { icon: pin.icon } : {}) });
+      else if (HOME.includes(href) && may.includes(href)) bar.push({ label: VIEW_NAMES[href], href, app: href });
+    }
+  }
+  return { pins, bar, custom: true };
+}
+
+module.exports = { APPS, KEYS, HOME, ALWAYS, ROLE_APPS, ROLES, STANDARD, LINKS, DIRECTOR, POSITION_ROLES, POSITION_APPS, KIND_MENUS, isPositionKey, canOpen, positionKind, standardFor, withoutHome, withAlways, check, parse, menuFor, rowFor, linksIn, kindsOf, MUNI_ROLES, MUNI_STANDARD, muniMenuFor,
+  VIEW_NAMES, VIEW_RULES, viewsFor, PIN_MAX, PIN_LABEL_MAX, PIN_HREF_MAX, BAR_MAX, PIN_HREF, goodHref, appOfHref, startingPins, checkNav, navFrom };
+
