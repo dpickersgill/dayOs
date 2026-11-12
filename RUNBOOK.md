@@ -623,3 +623,15 @@ Each person's pins (the top of their menu, and their phone bar) are in `user_nav
 
 ### Migration
 Step file `db/steps/m2-utilities.js` (map_features.street_id and pump_gpm, main_breaks, main_break_valves, service_address_imports, service_addresses, street_notice_deliveries.resident_id NULL and service_address_id, sewer_ch94_years, sewer_overflows, ms4_settings, ms4_activities, idd_cases, idd_case_entries, bulk_route_order). Additive and idempotent.
+
+## Trash and recycling: the collection schedule (release 2026.11.22)
+- Migration: `db/steps/trash-schedule.js` (the shared collection tables, reminder log, education log, the Missed pickup
+  rename by code, billing rows). Safe to run twice.
+- Demo: `node db/demo-municipal.js demo-borough` runs `45-collection.js` (four zones, federal holidays 2026 and 2027,
+  leaf collection in November, 24 reminder sign-ups). Nothing is sent.
+- Reminders run in the 5-minute guests job (`POST /api/v1/internal/jobs/guests`, `collection_reminders` in its reply).
+  A resident says no reminder came: check the sign-up is active with the trash topic, its phone or email confirmed and
+  not stopped, and the calendar published; `collection_reminder_sends` has a row per phone or email per day (status
+  sent, failed or opted_out).
+- The calendar page shows "not published yet" until a manager presses Finish setup (Schedule, Setup).
+- A municipality's lookup limit is `COLLECTION_LOOKUP_LIMIT` (60 per 10 minutes per address and municipality).

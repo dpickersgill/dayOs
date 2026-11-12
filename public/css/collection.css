@@ -48,6 +48,8 @@
 .coll .field label { font-weight: 700; }
 .coll select, .coll input:not([type='checkbox']) { width: 100%; min-height: 48px; font-size: 1rem; }
 .coll .btn { min-height: 48px; }
+.coll .bulk-step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin: 12px 0; }
+.coll > .muted:first-child { margin: 0 0 2px; }
 .coll-notice { border: 1px solid var(--line-strong); border-left: 6px solid var(--accent-line); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; margin: 10px 0; }
 .coll-notice h2 { margin: 0 0 4px; font-size: 1.05rem; }
 .coll-next { display: grid; gap: 10px; margin: 8px 0 14px; }

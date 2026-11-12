@@ -1222,6 +1222,47 @@ The top bar's + New button (the round + on a phone) and Jump to ("New work order
 - **Shared counter computers.** A session opened by PIN on a shared computer always gets the role's starting pins and cannot save (the server refuses with a plain message; the star, Edit and the row menu are not offered there). The person's own pins are untouched and show on their own devices.
 - **The ski area's read-only login** has no pins and keeps its one page.
 
+## Municipal edition: Trash and recycling, the collection schedule (release 2026.11.22, workstream "schedule")
+The Trash and recycling app (view key `bulk`, menu name "Trash and recycling", phone bar "Trash") now covers regular
+collection, not only bulk pickup. Add-ons: `solidwaste` ($1,800 a year, unchanged) and two new ones that require it,
+`collectionroutes` "Collection routes" and `hauler` "Hauler oversight" ($1,200 a year each; routes check them with
+`lib/collection.js` `requireAddon`).
+- **Setup** (Schedule tab, managers): who collects (own crew, one contracted hauler with its phone for residents,
+  licensed private haulers), the holiday rule (shift, skip, none), the reminder hour, "what residents are told", the
+  recycling ordinance's materials; streams (weekly, every other week from a date, monthly on the same numbered weekday;
+  a season; what goes in and what does not); zones with a weekday per stream; each zone's streets, whole or by
+  house-number range and odd/even side; streets "not collected". **Finish setup** publishes the calendar and is refused
+  (409, `setup_incomplete`, with the list) until every active street is in a zone or marked not collected, there is a
+  stream, and every active zone has a day.
+- **The schedule rules** (`src/lib/collection.js`): frequency and anchor, season, the holiday rule ("shift": a holiday
+  on or before the day in the same Monday-to-Saturday week moves it one day later), then changes (moved or canceled, for
+  some or all zones; the newest for a day wins). Dates are calendar days in the municipality's time zone.
+- **Holidays, changes, seasonal collections**: the US federal holidays for a year in one press (observed dates); a day
+  moved or canceled for snow or weather drafts a "Trash schedule change" street notice aimed at those zones; leaf weeks,
+  Christmas trees and hazardous waste days with dates and zones.
+- **Calendar** (everyone): address lookup (zone and next day per stream) and four weeks day by day; a day's streets
+  in the zone's driving order (the bulk pickup route order).
+- **The public page** `/collection/<slug>`: street and house number -> zone and next dates, active trash and leaf
+  notices for that zone at the top, the year to print, an iCalendar feed (`/api/v1/public/<slug>/collection/calendar.ics
+  ?zone=&streams=`), what goes in each stream, holidays, links to bulk pickup and to report a missed pickup. It answers
+  only the zone and dates (nothing about residents); lookups and checks are limited to 60 per 10 minutes per address and
+  municipality (`COLLECTION_LOOKUP_LIMIT`).
+- **Reminders the night before**: sign up through the street alert sign-up with the streams wanted (code by text, link
+  by email, the same STOP rule); the 5-minute guests job sends from the reminder hour until 9 PM local, one per phone or
+  email a day (`collection_reminder_sends`, a keyed hash, no address), naming moved days.
+- **Zone-targeted street notices**: `collection_zone_ids` on a notice; its streets come from the zones.
+- **Missed pickups**: the "Missed trash or recycling" category is "Missed pickup" (code `missed`, renamed by its row)
+  and asks for the stream. The check (`pickupCheck`, public `/collection/check` and the signed-in twin) answers
+  not_collected, not_your_day (with the next date), not_yet (route progress with Collection routes on, else before 5
+  PM), skipped, done or ok_to_report (on the day after 5 PM or within two days after). Residents may send only done,
+  skipped and ok_to_report; staff may save anyway. A second miss at one address in 60 days goes to the managers'
+  "Missed pickups" Inbox conversation. + New "Missed pickup"; the menu count under `bulk` and the Today card read
+  `lib/waiting.js` `missedPickups`.
+- **Act 101 education log** with the printable mailer per zone; trash and leaf notices and each month's reminders are
+  added by themselves; it says when the next six-monthly reminder is due and whether a printed form went out this year.
+- The app's tabs: Calendar, Missed pickups, the bulk pickup tabs, Schedule, and add-on tabs registered through
+  `public/js/trashtabs.js` (`trash-routes.js`, `trash-tonnage.js`).
+
 ## Engineering notes
 
 ### PATCH keeps defaulted fields

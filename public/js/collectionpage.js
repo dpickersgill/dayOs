@@ -4,7 +4,7 @@
 // or a link by email), what goes in each stream, and links to book a bulk pickup or report a missed pickup.
 // The answers say only the zone and dates: nothing about who lives at an address. The address is kept on this device
 // only, so the page opens on it next time.
-import { h, clear } from './ui.js';
+import { h, clear, appendAll } from './ui.js';
 
 const slug = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
 const root = document.getElementById('coll');
@@ -38,7 +38,7 @@ async function main() {
   }
   document.title = `${page.municipality}: trash and recycling days`;
   if (!page.ready) {
-    root.append(h('p', { class: 'muted' }, page.municipality), h('h1', null, 'Trash and recycling days'), h('p', null, 'The calendar is not published yet.'), page.phone ? h('p', null, 'Call ', h('a', { href: `tel:${page.phone.replace(/[^0-9+]/g, '')}` }, page.phone), ' for your days.') : null);
+    root.append(...[h('p', { class: 'muted' }, page.municipality), h('h1', null, 'Trash and recycling days'), h('p', null, 'The calendar is not published yet.'), page.phone ? h('p', null, 'Call ', h('a', { href: `tel:${page.phone.replace(/[^0-9+]/g, '')}` }, page.phone), ' for your days.') : null].filter(Boolean));
     return;
   }
   const street = h('select', { id: 'c-street', required: '' }, h('option', { value: '' }, 'Choose your street'), page.streets.map((s) => h('option', { value: s.id }, s.name)));
@@ -49,13 +49,13 @@ async function main() {
   form.addEventListener('submit', (e) => { e.preventDefault(); clear(msg); if (!street.value) { msg.append(errorLine('Choose your street.')); street.focus(); return; } look(Number(street.value), house.value.trim()); });
   const kept = keep();
   if (kept && page.streets.some((s) => s.id === kept.street)) { street.value = String(kept.street); house.value = kept.no || ''; }
-  root.append(
+  root.append(...[
     h('p', { class: 'muted' }, page.municipality), h('h1', null, 'Trash and recycling days'),
     notices(page.notices),
     h('section', { class: 'bulk-step', 'aria-labelledby': 'c-find' }, h('h2', { id: 'c-find', style: 'margin-top:0' }, 'Find your days'), form),
     out, whatGoesIn(), upcoming(),
     page.hauler ? h('p', null, `Your trash is collected by ${page.hauler.name || 'our hauler'}.`, page.hauler.phone ? [' Missed pickup? Call ', h('a', { href: `tel:${page.hauler.phone.replace(/[^0-9+]/g, '')}` }, page.hauler.phone), '.'] : null) : null,
-    page.phone ? h('p', { class: 'muted small' }, 'Questions? Call ', h('a', { href: `tel:${page.phone.replace(/[^0-9+]/g, '')}` }, page.phone), '.') : null);
+    page.phone ? h('p', { class: 'muted small' }, 'Questions? Call ', h('a', { href: `tel:${page.phone.replace(/[^0-9+]/g, '')}` }, page.phone), '.') : null].flat().filter(Boolean));
   if (kept && street.value) look(Number(street.value), house.value.trim(), { quiet: true });
 }
 
@@ -70,7 +70,7 @@ async function look(streetId, no, { quiet = false } = {}) {
   if (!r.found || r.not_collected) { clear(out).append(h('p', { class: 'callout' }, r.message)); return; }
   keep({ street: streetId, no });
   const streams = new Map(page.streams.map((s) => [s.id, s]));
-  clear(out).append(
+  appendAll(clear(out),
     notices((r.notices || []).filter((n) => !page.notices.some((m) => m.title === n.title))),
     h('h2', { tabindex: '-1', id: 'c-yours' }, `Your days: ${r.zone.name}`),
     h('ul', { class: 'plain coll-next' }, r.next.map((x) => h('li', { style: `--chip:${x.color}` },
