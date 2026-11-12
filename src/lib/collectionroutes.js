@@ -49,6 +49,22 @@ const { bad, conflict, forbidden, notFound } = require('./errors');
 const { audit } = require('./audit');
 
 const C = require('./collection');
+/**
+ * The tonnage facility a driver's ticket names: the one with that name (any capitals), or, the first time a name is used,
+ * a new facility of the kind the stream suggests (trash to a landfill, recycling to a recycling processor, yard waste
+ * and food scraps to a compost site). The office can rename, merge or set its fee per ton in Tonnage afterwards.
+ */
+async function facilityFor(conn, t, name, streamId) {
+  const words = String(name || '').trim().slice(0, 120);
+  if (!words) return null;
+  const found = await one(conn, 'SELECT id FROM tonnage_facilities WHERE tenant_id = ? AND LOWER(name) = LOWER(?)', [t, words]);
+  if (found) return Number(found.id);
+  const s = streamId ? await one(conn, 'SELECT kind FROM collection_streams WHERE tenant_id = ? AND id = ?', [t, streamId]) : null;
+  const kind = { trash: 'landfill', recycling: 'recycling', yard: 'compost', food: 'compost' }[s && s.kind] || 'other';
+  const [ins] = await conn.query('INSERT INTO tonnage_facilities (tenant_id, name, kind) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)', [t, words, kind]);
+  return Number(ins.insertId);
+}
+
 /** tonnage's addTicket(conn, tenantId, ticket, { by }) when it is there; a stand-in that keeps nothing when it is not. */
 function addTicketFn() {
   try { const T = require('./tonnage'); if (typeof T.addTicket === 'function') return T.addTicket; } catch (err) { if (err.code !== 'MODULE_NOT_FOUND' || !String(err.message).startsWith("Cannot find module './tonnage'")) throw err; }
@@ -543,7 +559,8 @@ async function finish(req, id, b) {
     // Tickets: to the tonnage records, and the tipping fee onto the day's cost.
     for (const k of b.tickets || []) {
       if (k.client_ref && (await one(conn, 'SELECT id FROM collection_route_tickets WHERE tenant_id = ? AND client_ref = ?', [t, k.client_ref]))) continue;
-      const tid = await addTicket(conn, t, { ticket_date: date, asset_id: Number(truck), stream_id: k.stream_id || Number(r.stream_id), facility_id: k.facility_id || null, facility: k.facility, ticket_no: k.ticket_no || null, net_tons: k.net_tons, gross_lbs: k.gross_lbs ?? null, tare_lbs: k.tare_lbs ?? null, fee_cents: k.fee_cents || 0, route_id: Number(r.id), source: 'driver' }, { by: req.auth.userId });
+      const facilityId = k.facility_id || (await facilityFor(conn, t, k.facility, k.stream_id || r.stream_id));
+      const tid = await addTicket(conn, t, { on_date: date, truck_asset_id: Number(truck), zone_id: r.zone_id ? Number(r.zone_id) : null, stream_id: k.stream_id || Number(r.stream_id), facility_id: facilityId, ticket_no: k.ticket_no || null, net_tons: k.net_tons, gross_lb: k.gross_lbs ?? null, tare_lb: k.tare_lbs ?? null, fee_cents: k.fee_cents ?? null, source: 'driver' }, { by: req.auth.userId });
       await conn.query('INSERT INTO collection_route_tickets (tenant_id, route_id, ticket_id, facility, stream_id, ticket_no, net_tons, fee_cents, client_ref, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [t, r.id, tid && (tid.id || Number(tid)) ? Number(tid.id || tid) : null, k.facility, k.stream_id || r.stream_id, k.ticket_no || null, k.net_tons, k.fee_cents || 0, k.client_ref || null, req.auth.userId]);
       if (k.fee_cents) await W.addMaterial(conn, req, woId, { description: `Tipping fee: ${k.facility}${k.ticket_no ? `, ticket ${k.ticket_no}` : ''} (${Number(k.net_tons).toFixed(2)} tons)`.slice(0, 150), qty: 1, unit: 'ticket', unit_cost_cents: k.fee_cents, used_on: date });

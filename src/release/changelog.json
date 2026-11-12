@@ -1,6 +1,98 @@
 {
   "releases": [
     {
+      "version": "2026.11.22",
+      "date": "2026-11-12",
+      "title": "Trash and recycling: the whole collection, routes, carts and the recycling report",
+      "notes": [
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "counter",
+            "staff"
+          ],
+          "text": "Trash and recycling is now the whole collection, not only bulk pickup (the menu calls it Trash and recycling, and Trash on a phone). Set up who collects, the streams (trash, recycling, yard waste and any you add) with how often and in which season, zones built from your street list (whole streets or house-number ranges), holidays that push the rest of the week back a day, and seasonal collections such as leaves and Christmas trees. Setup can't be finished until every street is in a zone or marked not collected.",
+          "help": "collection-setup"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "counter",
+            "staff"
+          ],
+          "text": "A public collection calendar: residents type their address and see their next pickups, print the year, add it to their phone's calendar, and sign up for a reminder the night before. A moved or canceled day drafts a street notice to just those zones, and the calendar page shows it at the top.",
+          "help": "collection-residents"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "counter",
+            "staff"
+          ],
+          "text": "Missed pickups are checked against the schedule before they are sent: not your day (with the next date), the truck is still out, or, with Collection routes, the street was done or skipped and why. A second miss at one address in 60 days goes to managers. + New has Missed pickup.",
+          "help": "missed-pickups"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "counter",
+            "staff"
+          ],
+          "text": "Carts: residents ask for a new, extra, replacement or stolen cart online and pay any fee by card; the office sets a delivery day and the crew marks it delivered; carts at each address and in the yard.",
+          "help": "trash-carts"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "Tonnage and the annual recycling report (Act 101): weigh tickets with photos, a facility's or hauler's spreadsheet brought in, tons by month, stream, facility and zone, the recycling rate and pounds per household, a Trash and recycling section in the monthly report; haulers and businesses get their own link to report, with reminders and a follow-up list; the municipal report in the county's four columns with residue taken off; the Section 904 grant packet; and the Act 101 education log with a printable mailer.",
+          "help": "trash-recycling-report"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [
+            "staff",
+            "counter"
+          ],
+          "text": "Collection routes (a new add-on, $1,200 a year): the driver's route on a phone, street by street, Done or Skipped with a photo, working with no signal; go-backs; that day's bulk and cart stops on the same route; trucks with the pre-trip check and odometer; snow days that move the schedule and draft a notice, for trucks that also plow; each day's cost on the Sanitation fund, and plowing hours on Streets.",
+          "help": "routes-office"
+        },
+        {
+          "kind": "new",
+          "app": "solidwaste",
+          "orgs": [
+            "municipality"
+          ],
+          "who": [],
+          "text": "Hauler oversight (a new add-on, $1,200 a year): for a contracted hauler, missed pickups are sent to the hauler with a no-login link to mark them collected, timed against the contract, with a monthly scorecard.",
+          "help": "hauler-oversight"
+        }
+      ]
+    },
+    {
       "version": "2026.11.21",
       "date": "2026-11-12",
       "title": "A new menu: everything in one list, your own pins, and a bar across the top",

@@ -336,6 +336,10 @@ test('finishing costs the day on the Sanitation fund: crew hours, truck hours, t
   assert.ok(rep.body.by_fund.find((x) => x.name === 'Sanitation'), 'and the Sanitation fund');
   const [k] = await q('SELECT net_tons, fee_cents FROM collection_route_tickets WHERE tenant_id = ? AND route_id = ?', [A.id, nt.id]);
   assert.equal(Number(k.net_tons), 8.25);
+  // And the ticket is in the tonnage records (tonnage's addTicket), at a facility made from the name the driver typed.
+  const [w] = await q("SELECT w.net_lb, w.fee_cents, w.source, w.ticket_no, f.name AS facility, f.kind FROM weigh_tickets w JOIN tonnage_facilities f ON f.id = w.facility_id WHERE w.tenant_id = ? AND w.ticket_no = 'L-4411'", [A.id]);
+  assert.ok(w, 'the driver ticket reached tonnage');
+  assert.equal(Number(w.net_lb), 16500); assert.equal(Number(w.fee_cents), 57750); assert.equal(w.source, 'driver'); assert.equal(w.facility, 'Pottstown Landfill');
 });
 
 test('plowing hours go on Streets and the Liquid Fuels fund; a changeover is a work order on the truck', async () => {

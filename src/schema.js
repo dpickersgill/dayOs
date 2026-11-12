@@ -12,4 +12,5 @@
 // after the polish, money, crew and utilities steps); the step after it only moves typed department names to it.
 // 2026.11.21: the last step that leaves something to check is user_nav.bar (db/steps/nav-pins.js); the step after it
 // (db/steps/nav-counts.js) only removes forecast rows written for municipalities.
-module.exports = { LATEST: { table: 'user_nav', column: 'bar' } };
+// 2026.11.22: the last step is db/steps/trash-tonnage.js's recycling_report_lines (after trash-schedule and trash-routes).
+module.exports = { LATEST: { table: 'recycling_report_lines', column: 'res_dropoff' } };
