@@ -268,7 +268,8 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
   const usablePins = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.href && byKey.has(p.app) && !ACCOUNT.includes(p.app)).map((p) => ({ id: String(p.id || p.href), label: String(p.label || byKey.get(p.app)), href: bare(p.href), app: p.app, ...(p.icon ? { icon: p.icon } : {}) }));
 
   let pins = me.role === 'area' ? [] : nav && Array.isArray(nav.pins) ? usablePins(nav.pins) : plan.pins;
-  let bar = nav && Array.isArray(nav.bar) && nav.bar.length ? usablePins(nav.bar).slice(0, 4) : null; // null: the default
+  // The phone bar the person chose: an array (an empty one too: only Menu), or null for the default.
+  let bar = nav && Array.isArray(nav.bar) ? usablePins(nav.bar).slice(0, 4) : null;
   let pinsLive = false; // true once pins.js has called setPins: only then is there someone to answer Edit
   const barNow = () => bar || defaultBar({ start: plan.start, pins, home: plan.home, names: byKey });
 
@@ -413,6 +414,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     pinBox.hidden = !pins.length;
     editBtn.hidden = !(canEdit && pinsLive);
     drawBar();
+    redrawSheet();
     paintBadges('pins');
     mark();
   }
@@ -663,28 +665,41 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
    * The phone's Menu: a search box, Guest needs help, Home, Pinned, then every section as a grid, all open, and one
    * account row at the bottom.
    */
+  let menuSheet = null; // the phone Menu sheet while it is open: { box, close }
+  /** The Menu sheet's content. Drawn when it opens, and again when the pins change while it is open. */
+  function menuBody(close) {
+    const searchBox = h('button', { type: 'button', class: 'sheet-search' }, icon('search', 18), h('span', null, 'Jump to a page, record or action'));
+    searchBox.addEventListener('click', () => { close(false); openPalette(); });
+    const helpHere = sos ? h('button', { type: 'button', class: 'btn staff-help-btn sheet-help-here', 'data-act': 'staff-help' }, h('span', { class: 'sh-plus', 'aria-hidden': 'true' }, '+'), h('span', null, 'Guest needs help here')) : null;
+    if (helpHere) helpHere.addEventListener('click', () => { close(false); openStaffHelp(); });
+    const edit = canEdit && pinsLive ? h('button', { type: 'button', class: 'nav-edit', 'aria-label': 'Edit your pinned pages' }, 'Edit') : null;
+    if (edit) edit.addEventListener('click', () => { close(false); askEdit(false); });
+    const acct = h('button', { type: 'button', class: 'sheet-acct', 'aria-haspopup': 'dialog' }, avatar(), h('span', { class: 'who-text' }, h('b', null, shortName), h('span', null, `${roleText}. Settings, help, theme, sign out`)),
+      badges.get('help') && badges.get('help').n ? h('span', { class: 'nav-badge dot', role: 'img', 'aria-label': 'Something new in Help' }) : null, icon('chevron', 16));
+    acct.addEventListener('click', () => { endMovedNote(false); sheet('Account', 'acct-sheet', (shut) => h('div', { class: 'sheet-body sheet-rows' }, accountRows(() => { shut(false); close(false); }, false))); });
+    return h('div', { class: 'sheet-body' }, searchBox, helpHere,
+      plan.home.length ? h('div', { class: 'sheet-sec sheet-home' }, grid(plan.home.map(appItem), 'app')) : null,
+      pins.length ? h('div', { class: 'sheet-sec sheet-pins' }, h('div', { class: 'sheet-label' }, h('h3', null, 'Pinned'), edit), grid(pins, 'pin')) : null,
+      plan.sections.map((sec) => h('div', { class: 'sheet-sec', dataset: { section: sec.id } }, h('div', { class: 'sheet-label' }, h('h3', null, sec.name)), grid(sec.keys.map(appItem), 'app'))),
+      movedHereDue() ? movedHere('in-sheet') : null,
+      acct);
+  }
   function openSheet() {
     forget('sheet');
-    const s = sheet('Menu', 'phone-menu', (close) => {
-      const searchBox = h('button', { type: 'button', class: 'sheet-search' }, icon('search', 18), h('span', null, 'Jump to a page, record or action'));
-      searchBox.addEventListener('click', () => { close(false); openPalette(); });
-      const helpHere = sos ? h('button', { type: 'button', class: 'btn staff-help-btn sheet-help-here', 'data-act': 'staff-help' }, h('span', { class: 'sh-plus', 'aria-hidden': 'true' }, '+'), h('span', null, 'Guest needs help here')) : null;
-      if (helpHere) helpHere.addEventListener('click', () => { close(false); openStaffHelp(); });
-      const edit = canEdit && pinsLive ? h('button', { type: 'button', class: 'nav-edit', 'aria-label': 'Edit your pinned pages' }, 'Edit') : null;
-      if (edit) edit.addEventListener('click', () => { close(false); askEdit(false); });
-      const acct = h('button', { type: 'button', class: 'sheet-acct', 'aria-haspopup': 'dialog' }, avatar(), h('span', { class: 'who-text' }, h('b', null, shortName), h('span', null, `${roleText}. Settings, help, theme, sign out`)),
-        badges.get('help') && badges.get('help').n ? h('span', { class: 'nav-badge dot', role: 'img', 'aria-label': 'Something new in Help' }) : null, icon('chevron', 16));
-      acct.addEventListener('click', () => { endMovedNote(false); sheet('Account', 'acct-sheet', (shut) => h('div', { class: 'sheet-body sheet-rows' }, accountRows(() => { shut(false); close(false); }, false))); });
-      return h('div', { class: 'sheet-body' }, searchBox, helpHere,
-        plan.home.length ? h('div', { class: 'sheet-sec sheet-home' }, grid(plan.home.map(appItem), 'app')) : null,
-        pins.length ? h('div', { class: 'sheet-sec sheet-pins' }, h('div', { class: 'sheet-label' }, h('h3', null, 'Pinned'), edit), grid(pins, 'pin')) : null,
-        plan.sections.map((sec) => h('div', { class: 'sheet-sec', dataset: { section: sec.id } }, h('div', { class: 'sheet-label' }, h('h3', null, sec.name)), grid(sec.keys.map(appItem), 'app'))),
-        movedHereDue() ? movedHere('in-sheet') : null,
-        acct);
-    });
+    const s = sheet('Menu', 'phone-menu', menuBody);
+    menuSheet = s;
     paintBadges('sheet');
     mark();
     return s;
+  }
+  /** The pins changed while the Menu sheet is open (a tile pinned by a long press): draw its content again, in place. */
+  function redrawSheet() {
+    if (!menuSheet || !menuSheet.box.isConnected) { menuSheet = null; return; }
+    const old = menuSheet.box.querySelector(':scope > .sheet-body');
+    if (!old) return;
+    forget('sheet');
+    old.replaceWith(menuBody(menuSheet.close));
+    paintBadges('sheet');
   }
   more.addEventListener('click', openSheet);
 
@@ -893,8 +908,8 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
   function setPins(next, nextBar = null) {
     pinsLive = true;
     pins = me.role === 'area' ? [] : usablePins(next);
-    const chosen = usablePins(nextBar).slice(0, 4);
-    bar = chosen.length ? chosen : null;
+    // Only null (or nothing) means the default bar; an empty list is a choice: the bar holds Menu alone.
+    bar = Array.isArray(nextBar) ? usablePins(nextBar).slice(0, 4) : null;
     drawPins();
   }
   /**

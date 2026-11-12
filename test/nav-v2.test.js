@@ -654,6 +654,34 @@ test('the phone: the bar from the person\'s places, and the Menu sheet as open g
   await sleep(250);
 });
 
+test('setPins while the phone Menu sheet is open draws it again in place; an empty bar holds Menu alone, only null is the default', skip(), async () => {
+  const { frame, doc } = frameFor({ me: { role: 'manager', org_type: 'municipality' }, views: muniViewsFor('manager'), menu: menus.muniMenuFor('manager') });
+  frame.setPins([{ id: 'a', label: 'Requests', href: 'requests', app: 'requests' }], null);
+  frame.openSheet();
+  const box = doc.querySelector('.menu-sheet.phone-menu');
+  assert.deepEqual(texts(box, '.sheet-pins .sheet-item'), ['Requests']);
+  // a tile pinned by a long press, with the sheet still open
+  frame.setPins([{ id: 'a', label: 'Requests', href: 'requests', app: 'requests' }, { id: 'b', label: 'Sewer', href: 'sewer', app: 'sewer' }], null);
+  assert.equal(doc.querySelector('.menu-sheet.phone-menu'), box, 'the same sheet stays open');
+  assert.deepEqual(texts(box, '.sheet-pins .sheet-item'), ['Requests', 'Sewer'], 'the new pin shows at once');
+  assert.equal(box.querySelectorAll(':scope > .sheet-body').length, 1);
+  frame.setBadge('requests', 4, { says: 'new' });
+  assert.equal(box.querySelector('.sheet-pins .sheet-item[data-key=requests] .nav-badge').textContent, '4', 'the redrawn tiles still take counts');
+  frame.setPins([], null);
+  assert.equal(box.querySelector('.sheet-pins'), null, 'unpinning the last one takes Pinned away');
+  box.querySelector('.sheet-close').click();
+  frame.setPins([{ id: 'a', label: 'Requests', href: 'requests', app: 'requests' }], null);
+  assert.equal(doc.querySelector('.menu-sheet'), null, 'a closed sheet is not opened again');
+  // the bar: [] is a choice, null is the default
+  frame.setPins([{ id: 'a', label: 'Requests', href: 'requests', app: 'requests' }], []);
+  assert.deepEqual(texts(doc, '.tabbar .tab'), ['Menu'], 'an empty bar: Menu alone');
+  frame.setPins([{ id: 'a', label: 'Requests', href: 'requests', app: 'requests' }], null);
+  assert.deepEqual(texts(doc, '.tabbar .tab .tab-text'), ['Today', 'Requests', 'My shifts'], 'null: the default bar');
+  const saved = frameFor({ me: { role: 'manager', org_type: 'municipality' }, views: muniViewsFor('manager'), menu: menus.muniMenuFor('manager'), navSaved: { pins: [], bar: [] } });
+  assert.deepEqual(texts(saved.doc, '.tabbar .tab'), ['Menu'], 'an empty bar saved on the server is kept on the first paint too');
+  await sleep(250);
+});
+
 test('for 14 days from the first load on a device: "Settings, Help and Sign out moved here.", until Got it', skip(), async () => {
   const day = 86400000;
   const first = frameFor({ me: { role: 'counter' }, views: viewsFor('counter'), menu: menus.STANDARD.counter, store: { 'so.nav.moved': null } });
