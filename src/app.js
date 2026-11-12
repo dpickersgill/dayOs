@@ -339,6 +339,7 @@ function createApp() {
 
   // Everything below requires a valid token; tenant comes from the token only.
   api.use(authenticate);
+  api.use(require('./lib/nomoney').noMoney); // 2026.11.20: costs and pay are for owners and managers only
   api.use(modules.moduleGate);
   api.use(require('./lib/billing').gate); // a lapsed subscription: read only, except patrol, the time clock and billing
   api.use(require('./routes/billing').router);

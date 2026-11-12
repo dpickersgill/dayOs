@@ -9,6 +9,9 @@ import { h, clear, appendAll, state, button, toast, formDialog, dialog, confirmD
 import { qr } from '../barcode.js';
 import { shareButton } from '../share.js';
 
+// A money field is only sent to owners and managers (2026.11.20): absent for everyone else.
+const has = (v) => v !== null && v !== undefined;
+
 export const STATUS = { in_service: ['In service', 'good'], needs_service: ['Needs service', 'warn'], out_of_service: ['Out of service', 'bad'], retired: ['Retired', 'neutral'] };
 export const SERVICE = { overdue: ['Service overdue', 'bad'], soon: ['Service due soon', 'warn'], ok: ['Service on track', 'good'], never: ['Service never done', 'neutral'] };
 const PAPER = { expired: 'bad', soon: 'warn', ended: 'neutral', ok: 'good' };
@@ -67,7 +70,7 @@ export async function renderAsset(root, id) {
           act('Report a problem', () => problemDialog(a, load), 'warn-btn', 'problem'))),
       urgent.length ? h('section', { class: 'panel stack attention' }, h('h2', null, 'Needs attention'), h('ul', { class: 'plain' }, urgent)) : null,
       serviceSection(a), ordersSection(a), inspectionsSection(a), runHoursSection(a), photosSection(a), historySection(a),
-      partsSection(a), lifecycleSection(a), detailsSection(a), tagSection(a));
+      partsSection(a), isManager() ? lifecycleSection(a) : null, detailsSection(a), tagSection(a));
   }
 
   const dueText = (s) => h('span', { class: 'muted small' }, ` ${[s.due_on && `${s.due_on < todayStr() ? 'was due' : 'by'} ${fmtDay(s.due_on)}`, leftText(s.hours_left, 'h'), leftText(s.miles_left, 'mi')].filter(Boolean).join(', ')}`);
@@ -105,7 +108,7 @@ export async function renderAsset(root, id) {
     return h('details', { class: 'panel more' }, h('summary', null, `Meters and fuel (${a.meters.length + a.fuel.length})`),
       h('div', { class: 'pair' },
         h('div', null, h('h3', null, 'Meter readings'), a.meters.length ? h('ul', { class: 'plain' }, a.meters.map((m) => h('li', null, h('b', null, `${n1(m.value).toLocaleString()} ${m.meter === 'hours' ? 'h' : 'mi'}`), h('span', { class: 'muted small' }, ` ${fmtDateTime(m.read_at)}, ${label(m.source)}`)))) : h('p', { class: 'muted' }, 'None.')),
-        h('div', null, h('h3', null, 'Fuel'), a.fuel.length ? h('ul', { class: 'plain' }, a.fuel.map((f) => h('li', null, h('b', null, `${f.gallons} gal`), f.cost_cents !== null ? ` ${money(f.cost_cents)}` : '', h('span', { class: 'muted small' }, ` ${fmtDateTime(f.filled_at)}${f.vendor ? `, ${f.vendor}` : ''}`)))) : h('p', { class: 'muted' }, 'None.'))));
+        h('div', null, h('h3', null, 'Fuel'), a.fuel.length ? h('ul', { class: 'plain' }, a.fuel.map((f) => h('li', null, h('b', null, `${f.gallons} gal`), f.cost_cents !== null && f.cost_cents !== undefined ? ` ${money(f.cost_cents)}` : '', h('span', { class: 'muted small' }, ` ${fmtDateTime(f.filled_at)}${f.vendor ? `, ${f.vendor}` : ''}`)))) : h('p', { class: 'muted' }, 'None.'))));
   }
 
   function partsSection(a) {
@@ -330,18 +333,18 @@ export async function workOrderSheet(woId, a, done) {
     w.resolution ? h('p', null, h('b', null, 'Done: '), w.resolution) : null,
     closed ? null : h('div', { class: 'row' }, w.status !== 'in_progress' ? st('in_progress', 'Start work') : null, w.status !== 'waiting_parts' ? st('waiting_parts', 'Waiting for parts') : null, st('done', 'Complete', 'primary')),
     h('section', { class: 'stack tight' }, h('h3', null, 'Labor'),
-      c.labor.length ? h('ul', { class: 'plain' }, c.labor.map((l) => h('li', { class: 'spread' }, h('span', null, `${l.who || 'Not named'}: ${l.hours} h on ${fmtDate(l.worked_on)}`, l.rate_cents === null ? null : h('span', { class: 'muted small' }, ` ${money(Math.round(l.hours * l.rate_cents))}`)),
+      c.labor.length ? h('ul', { class: 'plain' }, c.labor.map((l) => h('li', { class: 'spread' }, h('span', null, `${l.who || 'Not named'}: ${l.hours} h on ${fmtDate(l.worked_on)}`, !has(l.rate_cents) ? null : h('span', { class: 'muted small' }, ` ${money(Math.round(l.hours * l.rate_cents))}`)),
         l.mine || isManager() ? button('Remove', async () => { await del(`/assets/work-orders/${woId}/labor/${l.id}`); await refresh(); }, { small: true, kind: 'quiet', label: `Remove ${l.hours} h by ${l.who || 'unnamed'}` }) : null))) : h('p', { class: 'muted' }, 'None logged.'),
       h('div', { class: 'row tight' }, who, hrs, button('Log time', async () => { if (!hrs.value) throw new Error('Enter the hours'); await post(`/assets/work-orders/${woId}/labor`, { worker: who.value.trim() || null, hours: Number(hrs.value) }); toast('Time logged'); await refresh(); }, { small: true }))),
     h('section', { class: 'stack tight' }, h('h3', null, 'Parts from stock'),
-      c.parts.length ? h('ul', { class: 'plain' }, c.parts.map((p) => h('li', { class: 'spread' }, h('span', null, `${p.qty} ${p.unit} ${p.sku} ${p.name}`, h('span', { class: 'muted small' }, ` ${money(p.cost)}`)),
+      c.parts.length ? h('ul', { class: 'plain' }, c.parts.map((p) => h('li', { class: 'spread' }, h('span', null, `${p.qty} ${p.unit} ${p.sku} ${p.name}`, has(p.cost) ? h('span', { class: 'muted small' }, ` ${money(p.cost)}`) : null),
         button('Return one', async () => { await post(`/assets/work-orders/${woId}/parts`, { part_id: p.part_id, qty: -1 }); await refresh(); }, { small: true, kind: 'quiet', label: `Return one ${p.name}` })))) : h('p', { class: 'muted' }, 'None used.'),
       parts.data.length ? h('div', { class: 'row tight' }, partSel, partQty, button('Use part', async () => { if (!partSel.value) throw new Error('Choose a part'); await post(`/assets/work-orders/${woId}/parts`, { part_id: Number(partSel.value), qty: Number(partQty.value) }); toast('Part used'); await refresh(); }, { small: true })) : h('p', { class: 'muted small' }, 'Add parts under Parts to take them from stock here.')),
     h('section', { class: 'stack tight' }, h('h3', null, 'Meter at service and outside work'),
-      h('p', { class: 'small' }, [c.meter_hours !== null ? `${n1(c.meter_hours)} h` : null, c.meter_miles !== null ? `${n1(c.meter_miles)} mi` : null].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No meter recorded'), c.vendor_cost_cents !== null ? ` · Outside work ${money(c.vendor_cost_cents)}${c.vendor ? ` (${c.vendor})` : ''}` : ''),
+      h('p', { class: 'small' }, [c.meter_hours !== null ? `${n1(c.meter_hours)} h` : null, c.meter_miles !== null ? `${n1(c.meter_miles)} mi` : null].filter(Boolean).join(', ') || h('span', { class: 'muted' }, 'No meter recorded'), has(c.vendor_cost_cents) ? ` · Outside work ${money(c.vendor_cost_cents)}${c.vendor ? ` (${c.vendor})` : ''}` : ''),
       button('Record meter or outside cost', () => costsDialog(woId, c, refresh), { small: true })),
     // A person's own labor rate is pay: the crew sees the hours, a manager the money (2026.11.20).
-    c.total_cents === null ? h('p', { class: 'wo-total' }, h('b', null, 'Labor so far: '), `${c.labor_hours} h`)
+    !has(c.total_cents) ? h('p', { class: 'wo-total' }, h('b', null, 'Labor so far: '), `${c.labor_hours} h`)
       : h('p', { class: 'wo-total' }, h('b', null, 'Total so far: '), money(c.total_cents), h('span', { class: 'muted small' }, ` (labor ${money(c.labor_cents)}, parts ${money(c.parts_cents)}${c.equipment_cents ? `, equipment ${money(c.equipment_cents)}` : ''}${c.materials_cents ? `, materials ${money(c.materials_cents)}` : ''}${c.vendor_cost_cents ? `, outside ${money(c.vendor_cost_cents)}` : ''})`)),
   );
   return dlg;

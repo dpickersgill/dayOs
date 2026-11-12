@@ -53,7 +53,7 @@ async function drawOverview(box) {
       stat(o.counts.needs_service, 'need service', o.counts.needs_service ? 'warn' : ''),
       stat(o.counts.open_orders, `open work orders${o.counts.urgent_orders ? `, ${o.counts.urgent_orders} urgent` : ''}`, o.counts.urgent_orders ? 'bad' : ''),
       stat(o.low_stock.length, 'parts at or below reorder', o.low_stock.length ? 'warn' : '', '#/assets/parts'),
-      o.spend_month_cents !== null ? stat(money(o.spend_month_cents), 'spent this month (labor, parts, outside, fuel)') : null),
+      o.spend_month_cents !== null && o.spend_month_cents !== undefined ? stat(money(o.spend_month_cents), 'spent this month (labor, parts, outside, fuel)') : null),
     o.by_category.length ? h('div', { class: 'cat-row' }, o.by_category.map((c) => h('span', { class: 'cat-chip' }, h('b', null, c.total), ` ${c.label}`, c.down ? h('span', { class: 'down' }, ` · ${c.down} down`) : null))) : null,
     h('div', { class: 'pair' },
       list('Service due', o.service_due.map((s) => h('li', null, state(SERVICE[s.state][0], SERVICE[s.state][1]), ' ', s.asset_id ? assetLink(s.asset_id, `${s.asset} (${s.asset_tag})`) : h('span', null, s.lift || ''), h('span', null, `: ${s.name}`), h('span', { class: 'muted small' }, ` ${[s.due_on && `due ${fmtDay(s.due_on)}`, leftText(s.hours_left, 'h'), leftText(s.miles_left, 'mi')].filter(Boolean).join(', ')}`))), 'Nothing due in the next week.'),
@@ -172,7 +172,7 @@ async function drawParts(box) {
       { head: 'Reorder at', num: true, cell: (p) => (p.reorder_point !== null ? String(p.reorder_point) : '') },
       { head: 'Where', cell: (p) => [p.location, p.bin && `bin ${p.bin}`].filter(Boolean).join(', ') },
       { head: 'Vendor', cell: (p) => p.vendor || '' },
-      { head: 'Cost', num: true, cell: (p) => money(p.unit_cost_cents) },
+      ...(isManager() ? [{ head: 'Cost', num: true, cell: (p) => money(p.unit_cost_cents) }] : []), // costs are a manager's (2026.11.20)
       { head: '', actions: true, cell: (p) => button('Open', () => partSheet(p.id, vendors.data, locs.data, load), { small: true, label: `Open ${p.name}` }) },
     ], data));
   }
@@ -243,7 +243,7 @@ async function drawPurchasing(box) {
       { head: 'PO', cell: (o) => h('strong', null, `PO ${o.po_number}`) },
       { head: 'Vendor', cell: (o) => o.vendor },
       { head: 'Status', cell: (o) => state(PO_STATE[o.status][0], PO_STATE[o.status][1]) },
-      { head: 'Total', num: true, cell: (o) => money(o.total_cents) },
+      ...(isManager() ? [{ head: 'Total', num: true, cell: (o) => money(o.total_cents) }] : []),
       { head: 'Expected', cell: (o) => (o.expected_on ? fmtDate(o.expected_on) : '') },
       { head: '', actions: true, cell: (o) => button('Open', () => poSheet(o.id, vendors.data, parts.data, load), { small: true, label: `Open purchase order ${o.po_number}` }) },
     ], data));
@@ -307,10 +307,10 @@ async function poSheet(id, vendors, parts, done) {
       { head: 'Item', cell: (l) => l.description },
       { head: 'Ordered', num: true, cell: (l) => `${l.qty}${l.unit ? ` ${l.unit}` : ''}` },
       { head: 'Received', num: true, cell: (l) => String(l.received_qty) },
-      { head: 'Each', num: true, cell: (l) => money(l.unit_cost_cents) },
+      ...(isManager() ? [{ head: 'Each', num: true, cell: (l) => money(l.unit_cost_cents) }] : []),
       ...(open ? [{ head: 'Receiving now', cell: (l) => { const left = l.qty - l.received_qty; if (left <= 0) return 'Done'; const inp = input({ type: 'number', min: 0, max: left, step: 'any', value: left, 'aria-label': `Receiving now: ${l.description}`, class: 'short-num' }); qtys.set(l.id, inp); return inp; } }] : []),
     ], o.lines),
-    h('p', null, h('b', null, 'Total: '), money(o.total_cents)),
+    isManager() ? h('p', null, h('b', null, 'Total: '), money(o.total_cents)) : null,
     h('div', { class: 'row' },
       o.status === 'draft' && isManager() ? button('Edit', () => { dlg.close(); poDialog(o, vendors, parts, done); }, { small: true }) : null,
       o.status === 'draft' && isManager() ? button('Mark as ordered', async () => { await post(`/assets/purchase-orders/${o.id}/order`, {}); toast('Marked as ordered'); dlg.close(); await done(); }, { kind: 'primary', small: true }) : null,
