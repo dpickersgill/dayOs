@@ -12,7 +12,8 @@ import { watchPasswords } from './showpw.js';
 import { startTabWatch, activity as tabActivity, checkNow as tabCheckNow, msLeft as tabMsLeft, refresh as tabRefresh, LOCK_MINUTES } from './tablock.js';
 import * as alerts from './alerts.js';
 import { flush as flushOutbox, waitingCounts, forgetCases, setDeviceKey, restoreDeviceKey, dropDeviceKey } from './outbox.js';
-import { buildFrame, GROUP_OF, PATROL_SECTIONS, patrolSection, AREA_MENU } from './nav.js';
+import { buildFrame, SECTION_OF, PATROL_SECTIONS, patrolSection, AREA_MENU, samePage } from './nav.js';
+import { SUB_PAGES } from './jumpindex.js';
 import { icon } from './icons.js';
 import { h, svg, clear, ctx, can, isManager, isMuni, schoolCan, toast, loading, errorBox, button, field, input, dialog, closeAllDialogs, dirtyDialogOpen, newPage, hashPath, todayStr, noteBack } from './ui.js';
 
@@ -598,10 +599,16 @@ function buildShell() {
   // Instructor availability is a tab of Lessons for everyone but an instructor, so it is not a menu item for them.
   // The Morning brief is opened from Today, its email and its phone alert, so it is not a menu item.
   const inMenu = visibleViews().filter(([key]) => key !== 'brief' && (key !== 'availability' || ownAvailability()));
-  // The ski area's read-only login has a menu of its own: the summary (and Help), no All apps.
+  // The ski area's read-only login has a menu of its own: the summary alone, and no pins.
   const menu = ctx.me.role === 'area' ? AREA_MENU : ctx.me.menu || null;
-  frame = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu, links: ctx.me.menu_links || {} });
+  // nav: the person's own pins and phone bar when the server sent them with /auth/me, so the first paint has them.
+  const built = buildFrame({ views: inMenu.map(([key, text]) => [key, text]), main, signOut: () => signOut(), menu, links: ctx.me.menu_links || {}, nav: ctx.me.nav || null });
+  frame = built;
   app.append(frame.shell);
+  // The modules that plug into the frame: the person's pins, the counts beside apps, and + New. Each is loaded on its
+  // own and started with the frame; one that is missing or fails leaves the menu working as it is. (The three addresses
+  // are written out so every tool that lists the app's files finds them.)
+  for (const load of [() => import('./pins.js'), () => import('./navcounts.js'), () => import('./newmenu.js')]) load().then((m) => m.start(built)).catch(() => {});
   if (ctx.me.sandbox) app.append(demoPill(ctx.me.sandbox));
   showBillingBanner();
   refreshUnread();
@@ -677,12 +684,16 @@ async function route() {
     if (my !== navToken) return;
     clear(main).append(holder);
     decorateHead(holder, key, params, mod);
+    sayWhere(holder, key, params);
+    // A tab opened by hand changes the part of the app on screen: the top bar follows.
+    holder.addEventListener('tabs:change', () => { if (my === navToken) sayWhere(holder, key, params); });
     noteWork(key, params);
     movedNote(holder, key).catch(() => {});
     main.focus({ preventScroll: true });
   } catch (err) {
     if (my !== navToken) return;
     clear(main).append(errorBox(err));
+    if (frame) frame.setWhere({ part: null, help: null });
   }
 }
 
@@ -715,12 +726,37 @@ export function helpHref(key, params = []) {
 }
 
 /**
- * The page header, the same on every page: a breadcrumb (App / Tab) where the page has tabs (Patrol / Section on
- * Patrol), the title, the page's one-line summary, a Help button, and "<App> settings" for managers. Done here, so
- * each screen only says its title and summary.
+ * The part of the app on screen, in the words the top bar shows after the app's name ("Patrol › Cases", "Sell › Ticket
+ * window"): Patrol's section, the open first-row tab, the open page of Settings, or a page inside the app that Jump to
+ * knows by this address. null when the page has no parts (or it cannot tell): the top bar then shows the app alone.
+ */
+function partOf(holder, key, params) {
+  if (key === 'patrol') return (PATROL_SECTIONS.find(([id]) => id === patrolSection(params)) || PATROL_SECTIONS[0])[1];
+  const bar = holder.querySelector('.tabs[data-address]');
+  const on = bar ? bar.querySelector('[aria-selected=true]') : holder.querySelector('.link-tabs [aria-current], .set-link[aria-current=page]');
+  if (on && on.textContent.trim()) return on.textContent.trim();
+  const at = location.hash.replace(/^#\/?/, '');
+  const sub = at.includes('?') ? SUB_PAGES.filter(([app, , href]) => app === key && samePage(href.replace(/^#\/?/, ''), at)).sort((x, y) => y[2].length - x[2].length)[0] : null;
+  return sub ? sub[1] : null;
+}
+/** Tells the frame which part of the app is on screen and where this page's Help is; the frame tells the other modules. */
+function sayWhere(holder, key, params) {
+  if (!frame || !frame.setWhere) return;
+  const part = partOf(holder, key, params);
+  frame.setWhere({ part: part && part !== appName(key) ? part : null, help: key === 'help' ? null : { href: helpHref(key, params), label: `Help with ${appName(key)}` } });
+}
+
+/**
+ * The page header, the same on every page. The top bar already says where you are (the app, then its part) and holds
+ * the page's Help, so on a computer a title that only repeats the app's name is hidden from sight (it stays the page's
+ * h1 for screen readers) and the header keeps the page's one-line summary, "<App> settings" for managers and the
+ * page's own buttons. A title that says something else (a record, a page inside an app) stays. On a phone, where the
+ * top bar holds the organization's name, the header is as before: a breadcrumb (App / Tab) where the page has tabs,
+ * the title, and Help and the app's settings as round buttons beside it. Done here, so each screen only says its title
+ * and summary.
  */
 function decorateHead(holder, key, params, mod) {
-  const area = GROUP_OF[key];
+  const area = SECTION_OF[key];
   if (area) holder.dataset.group = area.id;
   holder.dataset.app = key;
   const head = holder.querySelector('.page-head');
@@ -737,20 +773,32 @@ function decorateHead(holder, key, params, mod) {
     const next = lead.nextElementSibling;
     if (next && next.tagName === 'P') lead.append(next);
   } else lead.classList.add('head-lead');
+  const same = h1.textContent.trim() === appName(key);
+  if (same) h1.classList.add('h1-same');
   const crumbs = key === 'settings' ? null : breadcrumb(holder, key, params); // Settings draws its own
   if (crumbs) lead.prepend(crumbs);
-  // Help and the app's settings: next to the title, before the page's own buttons.
-  // On a phone both are icon buttons in the title row (the words hide; the names stay for screen readers).
+  // Help and the app's settings: next to the title, before the page's own buttons. On a phone both are icon buttons in
+  // the title row (the words hide; the names stay for screen readers). On a computer Help is in the top bar instead.
   const tools = h('div', { class: 'head-tools' });
   const page = isManager() ? settingsPageFor(key, mod) : null;
   const own = head.querySelector('.head-settings'); // an app that draws its own (Patrol settings, for patrol Admins too)
   const setName = own ? own.textContent.trim() : `${SETTINGS_NAME[key] || appName(key)} settings`;
   if (own) { own.classList.add('btn', 'small'); own.setAttribute('aria-label', setName); own.title = setName; tools.append(own); } else if (page) tools.append(h('a', { class: 'btn small head-settings', href: `#/settings/${page}`, 'aria-label': setName, title: setName }, icon('settings', 16), h('span', { class: 'head-btn-text' }, setName)));
+  const hasOwnTools = Boolean(tools.firstChild);
   if (key !== 'help') tools.append(h('a', { class: 'btn small help-btn', href: helpHref(key, params), 'aria-label': `Help with ${appName(key)}`, title: 'Help' }, icon('help', 16), h('span', { class: 'head-btn-text' }, 'Help')));
   if (tools.firstChild) lead.after(tools);
+  if (!hasOwnTools) tools.classList.add('only-help');
+  // Nothing left to see on a computer (the title repeats the app, no summary, no buttons): the header takes no room there.
+  const leadEmpty = same && ![...lead.children].some((el) => el !== h1 && el !== crumbs);
+  const others = [...head.children].some((el) => el !== lead && el !== tools);
+  if (leadEmpty) head.classList.add('no-title');
+  if (leadEmpty && !hasOwnTools && !others) head.classList.add('head-bare');
 }
 
-/** "Rentals / Service": the app, then the open tab (or Patrol's section). Kept up to date as tabs change. */
+/**
+ * "Rentals / Service" above the title on a phone: the app, then the open tab (or Patrol's section). Kept up to date as
+ * tabs change. (On a computer the top bar says it.)
+ */
 function breadcrumb(holder, key, params) {
   const name = appName(key);
   const bar = holder.querySelector('.tabs[data-address]');
@@ -1092,7 +1140,13 @@ window.addEventListener('hashchange', () => {
   lastHash = location.hash;
   if (now !== lastPath) closeAllDialogs();
   lastPath = now;
-  if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) { noteWork(); return; } // a tab change: remember the tab
+  if (ctx.me && frame && drawnPath !== null && now === drawnPath && currentPath().key) { // a tab change: remember the tab, and say it in the top bar
+    noteWork();
+    const { key, params } = currentPath();
+    // After the tabs have followed the address (they listen for the same change).
+    setTimeout(() => { if (hashPath() === now && main.firstElementChild) sayWhere(main.firstElementChild, key, params); }, 0);
+    return;
+  }
   route();
 });
 watchPasswords();

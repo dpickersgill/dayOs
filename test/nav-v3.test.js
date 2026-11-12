@@ -178,24 +178,25 @@ test('the patrol director has a menu apart from the patrollers\', with records r
 test('the phone bar starts with the screen the menu opens on; shortcuts show for whoever may open their app; the ski area menu', () => {
   const v = (keys) => keys.map((k) => [k, k]);
   const staff = nav.menuPlan(v(['dashboard', 'inbox', 'calendar', 'myshifts', 'conditions', 'park', 'gate', 'lostfound', 'documents', 'settings', 'help']), { apps: ['park', 'conditions', 'lostfound'], start: 'dashboard' });
-  assert.deepEqual(staff.first, ['dashboard', 'park', 'conditions', 'lostfound'], 'park crew: Today, then the park');
+  assert.deepEqual(staff.bar.map((p) => p.href), ['dashboard', 'park', 'conditions', 'lostfound'], 'park crew: Today, then the park');
   const counter = nav.menuPlan(v(['dashboard', 'sell', 'gate', 'rentals', 'people', 'settings', 'help']), menus.STANDARD.counter);
-  assert.equal(counter.first[0], 'sell');
+  assert.equal(counter.bar[0].href, 'sell');
   const instr = nav.menuPlan(v(['dashboard', 'school', 'availability', 'people', 'waivers', 'settings', 'help']), menus.STANDARD.instructor);
-  assert.equal(instr.first[0], 'school');
+  assert.equal(instr.bar[0].href, 'school');
   const links = { 'patrol-records': { label: 'Records requests', href: 'patrol/cases?tab=records', app: 'patrol' } };
   const dir = nav.menuPlan(v(['dashboard', 'patrol', 'conditions', 'settings', 'help']), { apps: ['patrol', 'patrol-records', 'conditions'], start: 'patrol' }, links);
   assert.deepEqual(dir.apps, ['patrol', 'patrol-records', 'conditions']);
-  assert.equal(dir.first[0], 'patrol');
+  assert.equal(dir.bar[0].href, 'patrol');
+  assert.deepEqual(dir.bar[1], { label: 'Records requests', href: 'patrol/cases?tab=records', app: 'patrol' }, 'a shortcut is on the bar as a pin to its page');
   const noPatrol = nav.menuPlan(v(['dashboard', 'conditions', 'settings', 'help']), { apps: ['patrol', 'patrol-records', 'conditions'], start: 'patrol' }, links);
   assert.deepEqual(noPatrol.apps, ['conditions'], 'no Patrol (turned off): no shortcut into it');
   const area = nav.menuPlan(v(['area', 'settings', 'help']), nav.AREA_MENU);
-  assert.deepEqual([area.apps, area.groups, area.first, area.bottom], [['area'], [], ['area'], ['settings', 'help']], 'the patrol summary, no All apps');
+  assert.deepEqual([area.apps, area.sections.map((s) => s.keys), area.bar.map((p) => p.href), area.account], [['area'], [['area']], ['area'], ['settings', 'help']], 'the patrol summary alone');
   const main = read('public/js/main.js');
   assert.match(main, /const menu = ctx\.me\.role === 'area' \? AREA_MENU : ctx\.me\.menu \|\| null;/);
   assert.match(main, /links: ctx\.me\.menu_links \|\| \{\}/);
   // the bar's first item is lit when you are there: the same aria-current as the side menu
-  assert.match(read('public/js/nav.js'), /for \(const \[k, anchors\] of links_\) for \(const a of anchors\) \{ if \(k === key\) a\.setAttribute\('aria-current', 'page'\)/);
+  assert.match(read('public/js/nav.js'), /for \(const s of shown\) \{ if \(on\(s\)\) s\.el\.setAttribute\('aria-current', 'page'\); else s\.el\.removeAttribute\('aria-current'\); \}/);
 });
 
 test('one name for each role: the person card and the menu editor agree', () => {
@@ -207,7 +208,7 @@ test('one name for each role: the person card and the menu editor agree', () => 
   const editor = read('public/js/views/settings-menus.js');
   assert.match(editor, /import \{ ROLE_NAMES \} from '\.\.\/nav\.js';/);
   assert.match(editor, /const ROLE_ROWS = \['counter', 'instructor', 'staff', 'patrol_director', 'patrol', 'manager', 'owner'\];/);
-  assert.match(read('public/js/nav.js'), /const roleText = roleName\(ctx\.me\);/);
+  assert.match(read('public/js/nav.js'), /const roleText = roleName\(me\);/);
 });
 
 test('Jump to finds the tabs inside apps, with the app, and only what the person may open', () => {
@@ -244,7 +245,7 @@ test('Settings and Help go back to the page that opened them; Help from Patrol, 
   const main = read('public/js/main.js');
   assert.match(main, /function noteWork\(/);
   assert.match(main, /if \(!key \|\| key === 'settings' \|\| key === 'help'\) return;/);
-  assert.match(main, /noteWork\(\); return; \} \/\/ a tab change/, 'a tab change is remembered too');
+  assert.match(main, /\{ \/\/ a tab change: remember the tab, and say it in the top bar\n {4}noteWork\(\);/, 'a tab change is remembered too');
   assert.match(main, /if \(key === 'patrol'\) return `#\/help\/for-patrol\?part=\$\{patrolSection\(params\)\}`;/);
   const settings = read('public/js/views/settings.js');
   assert.match(settings, /const was = backTo\(\);/);
