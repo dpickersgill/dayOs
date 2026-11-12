@@ -51,7 +51,7 @@ export const commandTitle = (label) => `New ${label.charAt(0).toLowerCase()}${la
 
 let frame = null;
 let items = [];
-let wired = new WeakSet(); // frames whose palette already has these commands
+const wired = new WeakSet(); // frames whose palette already has these commands
 
 /** Called by main.js once the frame is built (again after each sign-in). Draws nothing until the server has answered. */
 export async function start(f) {
