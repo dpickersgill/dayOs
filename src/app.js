@@ -133,6 +133,9 @@ function createApp() {
   app.use('/api/v1/platform/prospects/import', express.json({ limit: '2mb' })); // a research batch of ski areas
   app.use('/api/v1/patrol/places/import', express.json({ limit: '1mb' })); // a mountain's places as CSV, a few thousand rows
   app.use('/api/v1/street-notices/residents/import', express.json({ limit: '2mb' })); // a borough's alert list as CSV, a few thousand rows
+  // The water customer list from the billing system: up to 30,000 addresses, 5 MB of CSV (2026.11.20 review). Above it, a
+  // plain 413 (lib/errors.js).
+  app.use('/api/v1/street-notices/service-addresses/import', express.json({ limit: '6mb' }));
   app.use(express.json({ limit: '400kb' })); // a customer photo is about 40 KB; a card statement a few hundred rows
 
   // The product website: its pages at /site everywhere, and at / on its own addresses (SITE_HOSTS).

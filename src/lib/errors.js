@@ -24,6 +24,10 @@ function errorHandler(err, req, res, _next) {
   if (err && err.name === 'ZodError' && Array.isArray(err.issues)) {
     return res.status(400).json({ error: 'Validation failed', details: err.issues.map((i) => ({ path: (i.path || []).join('.'), message: i.message })) });
   }
+  if (err && err.type === 'entity.too.large') {
+    const what = /service-addresses\/import/.test(req.originalUrl || '') ? 'The customer list is larger than 5 MB. Split it into smaller files (at most 30,000 addresses each) and import them one after another, without ticking "This file is the whole list".' : 'That is more than this form takes at once. Send it in smaller parts.';
+    return res.status(413).json({ error: what });
+  }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }

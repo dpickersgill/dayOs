@@ -37,6 +37,7 @@ async function call(method, p, { token, body, headers = {}, raw } = {}) {
   return { status: res.status, body: json, type: res.headers.get('content-type') || '' };
 }
 const api = (method, p, o) => call(method, `/api/v1${p}`, o);
+const is = (r, want, why = '') => assert.ok((Array.isArray(want) ? want : [want]).includes(r.status), `${why} ${r.status} ${JSON.stringify(r.body).slice(0, 300)}`);
 
 test.before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
@@ -128,4 +129,39 @@ test('3. request numbers: 40 public reports at once across two municipalities al
     assert.equal(nums.length, 20);
     assert.deepEqual(nums, Array.from({ length: 20 }, (_, i) => 1001 + i), 'R-1001 to R-1020, none twice, none skipped');
   }
+});
+
+test('2 and 4. the water customer list: 30,000 rows in one import; account numbers kept as their last 4 only; a clear 413 above the limit', async () => {
+  const W = await createMuniTenant(base, { modules: { water: true } });
+  is(await api('POST', '/requests/streets/import', { token: W.token, body: { text: 'Market Street\nBridge Street' } }), [200, 201]);
+  const lines = ['account_number,street,house_number,unit,phone,email'];
+  for (let i = 0; i < 30000; i += 1) lines.push(`10-22${String(i).padStart(5, '0')},${i % 2 ? 'Market Street' : 'Bridge Street'},${100 + i},,,`);
+  const csv = lines.join('\n');
+  assert.ok(csv.length > 400 * 1024 && csv.length < 5_000_000, `${csv.length} bytes`);
+  const r = await api('POST', '/street-notices/service-addresses/import', { token: W.token, body: { csv, file_name: 'billing.csv' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+  assert.equal(r.body.added, 30000);
+  // Only the last 4 of each account number is kept, and that is all any endpoint gives.
+  const [[full]] = await pool.query("SELECT COUNT(*) AS n FROM service_addresses WHERE tenant_id = ? AND (CHAR_LENGTH(account_number) > 4 OR account_number LIKE '%-%')", [W.id]);
+  assert.equal(Number(full.n), 0, 'no whole account number is stored');
+  const [[st]] = await pool.query("SELECT id FROM streets WHERE tenant_id = ? AND name = 'Market Street'", [W.id]);
+  const list = await api('GET', `/street-notices/service-addresses?street_id=${st.id}`, { token: W.token });
+  assert.equal(list.status, 200);
+  const first = list.body.data.find((x) => x.house_number === '101');
+  assert.equal(first.account_last4, '0001'); assert.equal(first.account_number, undefined);
+  assert.ok(!JSON.stringify(list.body).includes('10-22'), 'no whole number in the list');
+  // A second import of the same file matches every address by the hashed number: nothing new.
+  const again = await api('POST', '/street-notices/service-addresses/import', { token: W.token, body: { csv: lines.slice(0, 101).join('\n') } });
+  assert.equal(again.body.added, 0); assert.equal(again.body.updated, 100);
+  // A row stored before this release (the whole number) is cut to the last 4 by the migration step.
+  await pool.query("UPDATE service_addresses SET account_number = '10-2200007' WHERE tenant_id = ? AND house_number = '107'", [W.id]);
+  const step = require('../db/steps/m2-release')({ tableExists: async () => true, columnExists: async () => true }).find((s) => /account_number/.test(s[0]));
+  const conn = await pool.getConnection();
+  try { assert.equal(await step[1](conn), false); await conn.query(step[2]); assert.equal(await step[1](conn), true); } finally { conn.release(); }
+  const [[cut]] = await pool.query("SELECT account_number FROM service_addresses WHERE tenant_id = ? AND house_number = '107'", [W.id]);
+  assert.equal(cut.account_number, '0007');
+  // Above 5 MB: a plain 413, not a parse error.
+  const big = await api('POST', '/street-notices/service-addresses/import', { token: W.token, body: { csv: `${csv}\n${'x'.repeat(6_500_000)}` } });
+  assert.equal(big.status, 413);
+  assert.match(big.body.error, /larger than 5 MB/);
 });
