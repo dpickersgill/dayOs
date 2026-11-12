@@ -214,7 +214,7 @@ test('5. Apps and add-ons: adding or removing one add-on keeps every other one o
     const S = await createMuniTenant(base, { modules: { water: true, sewer: true } });
     const ids = { water: await addonId(S, 'water'), sewer: await addonId(S, 'sewer') };
     const [[core]] = await pool.query("SELECT id FROM billing_plans WHERE code = 'muni-core'");
-    await pool.query("UPDATE tenant_billing SET comped = 0, plan_id = ?, addons = ?, billing_interval = 'year', stripe_subscription_id = 'sub_x', sub_status = 'active' WHERE tenant_id = ?", [core.id, `${ids.water},${ids.sewer}`, S.id]);
+    await pool.query("UPDATE tenant_billing SET comped = 0, plan_id = ?, addons = ?, billing_interval = 'year', stripe_subscription_id = ?, sub_status = 'active' WHERE tenant_id = ?", [core.id, `${ids.water},${ids.sewer}`, `sub_${suffix}`, S.id]);
     is(await api('POST', '/billing/apps', { token: S.token, body: { module: 'stormwater', on: true } }), 200, 'subscription');
     const items = posted.at(-1).filter(([k]) => /^items\[\d+\]\[price\]$/.test(k));
     assert.equal(items.length, 4, `the plan and three add-ons: ${JSON.stringify(posted.at(-1))}`);
