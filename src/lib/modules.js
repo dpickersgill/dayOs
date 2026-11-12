@@ -77,6 +77,7 @@ const SHARED_READS = [
 const PUBLIC = { conditions: 'conditions', booking: 'school', quote: 'school', requests: 'school', 'lesson-basket': 'school', waitlist: 'school', 'instructor-availability': 'availability', help: 'patrol', give: 'patrol', shop: 'shop', partner: 'shop', programs: 'programs', family: 'programs', assistant: 'assistant_plus', 'rental-form': 'rentals',
   // The municipal edition's public pages.
   report: 'requests', 'open-requests': 'requests', alerts: 'requests', streets: 'requests', 'bulk-pickup': 'solidwaste' };
+PUBLIC.hauler = 'solidwaste'; // 2026.11.22 (workstream routes): the contracted hauler's link to a missed pickup; the route also needs the hauler add-on
 
 /**
  * Turning one app on turns on what it needs; turning one off turns off what needs it. org: the tenant's kind; an app that

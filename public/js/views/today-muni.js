@@ -190,6 +190,8 @@ export async function crewToday(root) {
       !d.linked ? h('p', { class: 'callout' }, 'Your login is not linked to a staff record, so nothing is assigned to you here. Ask a manager to link it.') : null,
       clockRow(d, load), oncall, ...myWork(d),
     ].filter(Boolean));
+    // Collection routes (2026.11.22): the routes this crew member is on today, or can pick up (trash-routes.js).
+    if (on('solidwaste')) import('../trash-routes.js').then((m) => m.myRoutesSection()).then((sec) => { if (sec && host.isConnected) host.querySelector('[data-part="work"]')?.before(sec); }).catch(() => {});
   }
   await load();
 }

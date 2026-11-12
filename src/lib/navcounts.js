@@ -64,6 +64,15 @@ async function countsFor(req) {
       const mine = await require('./crewday').myWork(t, a.staffId, todayIn(tz));
       put('works', mine.filter((w) => w.overdue).length, 'overdue', true);
     }
+    // Trash and recycling, Collection routes (2026.11.22): missed pickups waiting for a go-back (lib/collectionroutes.js
+    // gobacksWaiting, the same as Today's "Missed pickups to go back for"). A manager's: all; a crew member's: on their routes.
+    if (on.has('solidwaste') && (isMgr(a) || a.role === 'staff')) {
+      const CR = require('./collectionroutes');
+      if (await CR.addonOn(t, 'collectionroutes')) {
+        const g = await CR.gobacksWaiting(pool, t, todayIn(tz), isMgr(a) ? null : a.userId);
+        if (g > 0) out.bulk = out.bulk ? { ...out.bulk, n: out.bulk.n + g, says: `${out.bulk.says}, or to go back for` } : { n: g, says: 'to go back for' };
+      }
+    }
     return out;
   }
   // A ski area.

@@ -623,3 +623,14 @@ Each person's pins (the top of their menu, and their phone bar) are in `user_nav
 
 ### Migration
 Step file `db/steps/m2-utilities.js` (map_features.street_id and pump_gpm, main_breaks, main_break_valves, service_address_imports, service_addresses, street_notice_deliveries.resident_id NULL and service_address_id, sewer_ch94_years, sewer_overflows, ms4_settings, ms4_activities, idd_cases, idd_case_entries, bulk_route_order). Additive and idempotent.
+
+## Collection routes and Hauler oversight (release 2026.11.22)
+
+- Two add-ons (`collectionroutes`, `hauler`), each needing Trash and recycling. Turn them on in the console like any add-on. A ski area never has them.
+- A crew member does not see a route: they see only routes they are on and today's routes nobody is on. A manager adds them under Routes, the route, Who is on it.
+- "Saved on this phone, waiting to send" that does not clear: the phone has no signal or was signed out. Taps stay sealed on the phone until the same person signs in again with a signal. A tap the server refused shows its reason in the strip.
+- A day's routes look wrong after the schedule changed: routes are written the first time the day is opened. A route with no marks can be rebuilt by deleting its stops (support only) and opening the day again.
+- Hauler emails not arriving: Hauler, Missed pickups shows "Email not sent" with the reason. Check the hauler's email in Schedule, Who collects, and that the model is a contracted hauler. The guests job (every 5 minutes) sends new ones; its answer has `hauler_forwards`.
+- A hauler says the link does not work: links last 30 days and a resend replaces the old one. Press Send again.
+- Snow day declared by mistake: Routes, Snow days, Undo. A notice already sent needs a follow-up from Street notices.
+- Money: `/solid-waste/routes` and `/solid-waste/hauler` are in `lib/nomoney.js`; only owners and managers get costs, rates, fees, price and penalties.

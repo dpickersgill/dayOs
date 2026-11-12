@@ -7,7 +7,8 @@
 //
 // Mounted once, after authenticate (src/app.js), so a route added later is covered without remembering to.
 
-const PREFIXES = ['/assets', '/ops', '/water', '/sewer', '/stormwater', '/workforce/crew-board', '/workforce/my-day', '/workforce/overtime', '/jump', '/dashboard'];
+const PREFIXES = ['/assets', '/ops', '/water', '/sewer', '/stormwater', '/workforce/crew-board', '/workforce/my-day', '/workforce/overtime', '/jump', '/dashboard',
+  '/solid-waste/routes', '/solid-waste/hauler']; // 2026.11.22: collection-day costs, tipping fees, the hauler's contract price and penalties
 // A key that holds money. Not "rate" alone: a pump's rated flow and the share of requests met are not money.
 const MONEY_KEY = /(_cents$|^cents$|^cost$|_cost$|^costs?_|_cost_|cost_per|^amount|_amount$|book_value|^money$|^price|_price$|rate_cents|^spend)/i;
 const MANAGERS = ['owner', 'manager'];

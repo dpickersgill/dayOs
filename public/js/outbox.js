@@ -151,6 +151,9 @@ function othersWaiting() {
 // under queue 0: no patrol case has that id (cases are positive, and negative while started with no signal). They are
 // sealed, sent in order and refused the same way as patrol's (2026.11.12).
 export const PARK_QUEUE = 0;
+// Trash and recycling, Collection routes (2026.11.22): the crew's Done / Skipped taps and skip photos wait here too, sealed
+// and sent in order, under a queue no patrol case can have (cases are positive; started offline, small negatives).
+export const ROUTE_QUEUE = -2147483647;
 
 /** Entries for one case that have not reached the server yet: [{ id, method, path, body, label, at, error }]. */
 export function pending(caseId) {
