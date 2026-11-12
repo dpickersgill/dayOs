@@ -566,3 +566,20 @@ If Twilio's debugger shows error 11200 with a 403, the Request URL is not exactl
 
 Limits (Cloud Run settings, rarely changed): `HELP_SMS_CALL_CAP` (texts out per call, default 20) and
 `HELP_SMS_HOURLY_CAP` (texts out per mountain per hour, default 300). Past either, the call's timeline says to call the guest.
+
+## Utilities (release 2026.11.20)
+
+### Water customer list
+- The municipality's manager exports service addresses from the utility billing system as CSV and imports it in Street notices, Water customers. Ask them to tick the consent box only when customers agreed to texts or emails about their service (for example a sign-up box on the water bill) and to write how. Without it no phone or email is stored.
+- Re-imports match on account number through a keyed hash made with LINK_SECRET (else JWT_SECRET). Changing that secret makes every account look new: the next import must use "This file is the whole list" so the old rows are ended.
+- Ended addresses (taken off by a full-list import or "Remove the list") lose their phone and email at once and are deleted by the daily retention run after 13 months.
+- A records request for a person: the personal data export and erase include `service_addresses` (erase blanks phone, email and account number). Tell the person a later billing import can bring the account back, so they should ask the billing office too.
+
+### Chapter 94 file columns
+`GET /api/v1/sewer/ch94.csv?year=YYYY`: year, month (YYYY-MM, or "Year"), station, station_tag, pump (a pump's label, or "All pumps"), run_hours, rated_flow_gpm, estimated_gallons, days, average_daily_flow_mgd. Rows: each station, month and pump; "All pumps" per station and month; "All stations" per month; "Year" per station and for the system. Estimated flow = run hours x rated gpm x 60. Pump rated flows are set per station by a manager (Sewer, Chapter 94, Rated flows); a station without them shows a warning and no flow.
+
+### MS4 pack
+`GET /api/v1/stormwater/ms4.csv?year=YYYY` (the permit year starting July 1 of YYYY): measure, section, date, record, what, audience, people, result, map_item, notes, with a summary row first. Screenings required defaults to every outfall on the map; a manager can set the number in Permit settings.
+
+### Migration
+Step file `db/steps/m2-utilities.js` (map_features.street_id and pump_gpm, main_breaks, main_break_valves, service_address_imports, service_addresses, street_notice_deliveries.resident_id NULL and service_address_id, sewer_ch94_years, sewer_overflows, ms4_settings, ms4_activities, idd_cases, idd_case_entries, bulk_route_order). Additive and idempotent.
