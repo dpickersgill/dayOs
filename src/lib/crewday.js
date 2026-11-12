@@ -106,6 +106,21 @@ async function board(t) {
   };
 }
 
+/**
+ * Everything open that is assigned to one person: what is in progress, then today's and overdue, then the rest (50 at
+ * most). "My work today" lists these, and the count beside Work orders in a crew member's menu is the overdue ones
+ * (lib/navcounts.js), so the two always agree. Only this person's work orders: staffId comes from their own sign-in.
+ */
+async function myWork(t, staffId, today) {
+  if (!staffId) return [];
+  return (await rows(pool, `SELECT w.id, w.title, w.status, w.priority, w.due_date, w.location, mf.tag AS feature_tag, a.name AS asset FROM work_orders w
+        LEFT JOIN map_features mf ON mf.tenant_id = w.tenant_id AND mf.id = w.map_feature_id LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
+        WHERE w.tenant_id = ? AND w.assigned_staff_id = ? AND w.status NOT IN ('done','cancelled')
+        ORDER BY w.status = 'in_progress' DESC, (w.due_date IS NOT NULL AND w.due_date <= ?) DESC, FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.due_date IS NULL, w.due_date, w.id LIMIT 50`, [t, staffId, today]))
+    // The board is often on a wall screen: a resident's house number stays off it (the street stays), as on Today's cards.
+    .map((w) => ({ id: Number(w.id), title: w.house_number ? require('./requests').withoutHouseNumber(w.title, w) : w.title, status: w.status, priority: w.priority, due_date: w.due_date ? String(w.due_date).slice(0, 10) : null, today: Boolean(w.due_date && String(w.due_date).slice(0, 10) <= today), overdue: Boolean(w.due_date && String(w.due_date).slice(0, 10) < today), where: [w.feature_tag, w.asset, w.location].filter(Boolean).join(', ') || null }));
+}
+
 /** "My work today" for a crew member: the clock, on call, assigned work orders and programs, the bulk pickup route and building rounds due. */
 async function myDay(t, staffId, role) {
   const tz = await tzOf(t);
@@ -120,13 +135,7 @@ async function myDay(t, staffId, role) {
     if (shift) out.shift = { starts: String(shift.starts_at).slice(11, 16), ends: String(shift.ends_at).slice(11, 16), position: shift.position };
     out.oncall = await OC.myOnCall(pool, t, staffId);
     if (on.includes('assets')) {
-      // Everything open that is assigned to me: today's and overdue first, then the rest.
-      out.work = (await rows(pool, `SELECT w.id, w.title, w.status, w.priority, w.due_date, w.location, mf.tag AS feature_tag, a.name AS asset FROM work_orders w
-        LEFT JOIN map_features mf ON mf.tenant_id = w.tenant_id AND mf.id = w.map_feature_id LEFT JOIN ops_assets a ON a.tenant_id = w.tenant_id AND a.id = w.asset_id
-        WHERE w.tenant_id = ? AND w.assigned_staff_id = ? AND w.status NOT IN ('done','cancelled')
-        ORDER BY w.status = 'in_progress' DESC, (w.due_date IS NOT NULL AND w.due_date <= ?) DESC, FIELD(w.priority, 'urgent', 'high', 'normal', 'low'), w.due_date IS NULL, w.due_date, w.id LIMIT 50`, [t, staffId, today]))
-        // The board is often on a wall screen: a resident's house number stays off it (the street stays), as on Today's cards.
-    .map((w) => ({ id: Number(w.id), title: w.house_number ? Q.withoutHouseNumber(w.title, w) : w.title, status: w.status, priority: w.priority, due_date: w.due_date ? String(w.due_date).slice(0, 10) : null, today: Boolean(w.due_date && String(w.due_date).slice(0, 10) <= today), overdue: Boolean(w.due_date && String(w.due_date).slice(0, 10) < today), where: [w.feature_tag, w.asset, w.location].filter(Boolean).join(', ') || null }));
+      out.work = await myWork(t, staffId, today);
       out.programs = await programsFor(t, [staffId]);
     }
   }
@@ -159,4 +168,4 @@ async function licenseHolders(t, kind) {
   return list.map((r) => ({ staff_id: Number(r.staff_id), name: String(r.name || '').trim(), certification: r.certification, expires_on: r.expires_on ? String(r.expires_on).slice(0, 10) : null, user_ids: OC.ids(r.user_ids) }));
 }
 
-module.exports = { SYSTEM_GROUPS, kindsOfGroup, systemFilter, board, myDay, licenseHolders, PRIORITY };
+module.exports = { SYSTEM_GROUPS, kindsOfGroup, systemFilter, board, myDay, myWork, licenseHolders, PRIORITY };

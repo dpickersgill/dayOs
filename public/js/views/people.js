@@ -8,6 +8,7 @@ import { loadCustomerForm, customerFields, customerSettingsDialog } from './cust
 import { photoSection, familySection, duplicatesDialog, renewalsDialog, mergeDialog } from './people-extra.js';
 import { alertsBanner, consentSection, notesSection, dataActions, qualityStrip, FLAG_LABELS } from './customer-care.js';
 import { welcomeCard, familyHistory } from './guest-card.js';
+import { whenNew } from '../newmenu.js';
 
 export async function render(root, params = []) {
   const q = input({ type: 'search', placeholder: 'Name, email or phone', 'aria-label': 'Search customers' });
@@ -44,6 +45,7 @@ export async function render(root, params = []) {
     } catch (err) { clear(body).append(errorBox(err)); }
   }
   await load();
+  if (canWrite) whenNew(root, () => edit(null, load)); // #/people?new=1 (+ New): Add a customer
   // #/people/12 (a shared link): open that customer straight away
   if (/^\d+$/.test(params[0] || '')) detail({ id: Number(params[0]) }, load).catch((err) => toast(err.message || 'Could not open that customer', 'error'));
 }

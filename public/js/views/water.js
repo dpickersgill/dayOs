@@ -10,6 +10,7 @@ import { get, post, patch, del, download } from '../api.js';
 import { h, clear, appendAll, button, field, input, select, state, table, toast, fail, formDialog, confirmDialog, dialog, empty, tabs, hashParam, isManager, val, num, fmtDateTime as fmtDateTimeShort, fmtDay, fmtTime, todayStr, nowInput } from '../ui.js';
 import { featurePicker } from './utility-bits.js';
 import { riskState } from './asset-bits.js';
+import { whenNew } from '../newmenu.js';
 
 // A break in another year shows its year (a main's history goes back years): "Sat, Nov 12, 2022, 4:20 AM ET" (2026.11.20).
 const fmtDateTime = (s) => (s && String(s).slice(0, 4) !== todayStr().slice(0, 4) ? `${fmtDay(s)}, ${fmtTime(s)}` : fmtDateTimeShort(s));
@@ -28,11 +29,12 @@ export async function render(root) {
   ], hashParam('tab') || 'breaks'));
   const id = Number(hashParam('break'));
   if (id) openBreak(id, () => reload()).catch(fail);
-  if (hashParam('new') === '1') {
+  // #/water?new=1 (+ New; with &main=12 from the map's panel): the form opens and the mark comes off the address.
+  whenNew(root, async () => {
     const mainId = Number(hashParam('main'));
     const main = mainId ? await get(`/assets/map/features/${mainId}`).catch(() => null) : null;
     breakForm(main ? { main_id: main.id, main_label: [main.kind_label, main.tag, main.name].filter(Boolean).join(' '), pipe_material: main.material, pipe_size: main.size, street_id: main.street_id } : null, () => reload());
-  }
+  });
 }
 
 async function drawBreaks(box) {

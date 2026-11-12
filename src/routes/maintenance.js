@@ -265,9 +265,7 @@ router.get('/work-orders/today', todayRoute(async (req) => {
   const t = req.auth.tenantId;
   const today = todayIn(await tenantTz(t));
   const week = require('../lib/util').addDays(today, 7);
-  const c = await one(pool, `SELECT SUM(status NOT IN ('done','cancelled')) AS open_n, SUM(status NOT IN ('done','cancelled') AND due_date < ?) AS overdue,
-      SUM(status NOT IN ('done','cancelled') AND priority = 'urgent') AS urgent, SUM(status = 'done' AND completed_at >= ? AND completed_at < ?) AS done_today
-    FROM work_orders WHERE tenant_id = ?`, [today, `${today} 00:00:00`, `${require('../lib/util').addDays(today, 1)} 00:00:00`, t]);
+  const c = await require('../lib/waiting').workOrders(pool, t, today); // the menu's count reads the same numbers (lib/navcounts.js)
   const plans = (await rows(pool, `${PM_SQL} WHERE t.tenant_id = ? AND t.active = 1`, [t])).map((x) => O.pmStatus(x, meters(x), today));
   const due = plans.filter((p) => p.state === 'overdue' || p.state === 'soon' || (p.due_on && p.due_on <= week)).length;
   const n = (v) => Number(v || 0);

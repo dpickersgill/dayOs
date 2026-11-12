@@ -5,6 +5,7 @@
 import { get, post, put, del, download } from '../api.js';
 import { customersTab, doorHangers } from './service-addresses.js';
 import { h, clear, table, state, input, select, field, button, toast, fail, formDialog, confirmDialog, dialog, tabs, appendAll, fmtDateTime, fmtInstant, empty, errorBox, loading, isManager, nowInput } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 let setup = null;
 const loadSetup = async () => { setup = await get('/street-notices/setup'); return setup; };
@@ -32,6 +33,7 @@ export async function render(root) {
     h('div', { class: 'row' }, setup.can_send ? button('New notice', () => editor(null), { kind: 'primary' }) : null,
       button('Export notices', () => download('/street-notices/export', 'street-notices.csv'))));
   appendAll(root, head, setupNote(), tabs(items, 'active'));
+  if (setup.can_send) whenNew(root, () => editor(null)); // #/notices?new=1 (+ New): a new notice, for those who may send one
 }
 
 function setupNote() {

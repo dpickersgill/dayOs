@@ -15,6 +15,7 @@ import { costPickers, markDone, costsSection, booksFacts, booksFields, booksBody
 import { featurePicker } from './utility-bits.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { h, clear, ctx, isManager, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, todayStr, fmtDate, fmtDateTime, empty, label, hashParam, money, errorBox } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 const PRIORITY_TONE = { urgent: 'bad', high: 'warn', normal: 'neutral', low: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -60,7 +61,7 @@ export async function render(root, params = []) {
     ['plans', 'Service plans', (box) => { reload = () => drawPlans(box, pick); return drawPlans(box, pick); }],
   ], ['open', 'done', 'map', 'plans'].includes(wanted) ? wanted : 'open', { param: 'tab' }));
   if (opened) openOrder(opened, pick, () => reload()).catch((err) => toast(err.message || 'Could not open that work order', 'error'));
-  else if (hashParam('new') === '1') addOrder(pick, () => reload());
+  whenNew(root, () => addOrder(pick, () => reload())); // #/works?new=1 (+ New, Today's Report a problem): the form opens, the mark comes off the address
 }
 
 // ---------------------------------------------------------------- work orders

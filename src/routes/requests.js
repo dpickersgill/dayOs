@@ -125,7 +125,7 @@ router.get('/today', todayRoute(async (req) => {
   const open = await rows(pool, `${Q.REQ_SQL} WHERE r.tenant_id = ? AND r.status IN ('new','assigned','made_safe') LIMIT 2000`, [t]);
   const standards = await Q.standardsOf(pool, t);
   const late = open.filter((r) => { const x = Q.timing(r, Q.standardFor(standards, r.category_id, r.street_class), now, zone); return x.make_safe.met === false || x.fix.met === false; }).length;
-  const fresh = open.filter((r) => r.status === 'new').length;
+  const fresh = await require('../lib/waiting').newRequests(pool, t); // the menu's count reads the same number (lib/navcounts.js)
   const fixed = await one(pool, "SELECT COUNT(*) AS n FROM requests WHERE tenant_id = ? AND status = 'fixed' AND fixed_at >= ? AND fixed_at < ?", [t, `${today} 00:00:00`, `${addDays(today, 1)} 00:00:00`]);
   const n = Number(fixed.n);
   return [

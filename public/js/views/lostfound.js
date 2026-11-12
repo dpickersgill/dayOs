@@ -3,6 +3,7 @@
 // (who collected it, with their ID checked), donated or thrown away once its keeping time is up.
 import { get, post, put } from '../api.js';
 import { h, clear, input, select, field, button, toast, formDialog, dialog, confirmDialog, empty, errorBox, state, fmtDate, fmtDateTime, nowInput, todayStr, ctx, isManager, fail, closeAllDialogs } from '../ui.js';
+import { whenNew } from '../newmenu.js';
 
 const STATUS = { held: ['Held', 'neutral'], matched: ['Owner found, waiting for pickup', 'good'], returned: ['Returned', 'good'], donated: ['Donated', 'neutral'], discarded: ['Thrown away', 'neutral'] };
 const VALUABLE = ['phone', 'wallet', 'keys', 'card', 'electronics', 'jewelry'];
@@ -46,6 +47,7 @@ export async function render(root) {
           isManager() ? button('Settings', () => settingsDialog(r.settings, load)) : null, pick)),
       h('section', { class: 'cover-section' }, h('h2', null, `Handed in (${r.items.length})`), r.items.length ? h('div', { class: 'lf-list' }, r.items.map(itemCard)) : empty(view === 'open' ? 'Nothing is waiting to be claimed.' : 'Nothing here.')),
       ...(view === 'open' ? [h('section', { class: 'cover-section' }, h('h2', null, `Reported missing (${r.reports.length})`), r.reports.length ? h('div', { class: 'lf-list' }, r.reports.map(reportCard)) : empty('No open reports.'))] : []));
+    whenNew(body, () => itemDialog(r.kinds, load)); // #/lostfound?new=1 (+ New): Log a found item
     // Photos load with the signed-in session.
     for (const img of body.querySelectorAll('img[data-photo]')) loadPhoto(img, img.dataset.photo);
   }
