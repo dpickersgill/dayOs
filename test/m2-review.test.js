@@ -109,3 +109,23 @@ test('1. money: the crew and the front desk never receive a cost, rate or total 
   assert.equal(cc.status, 200);
   assert.ok(cc.body.labor_hours > 0, 'the crew sees the hours');
 });
+
+test('3. request numbers: 40 public reports at once across two municipalities all succeed, each numbered once and in order', async () => {
+  const A = await createMuniTenant(base); const B = await createMuniTenant(base);
+  const catOf = async (X) => (await api('GET', '/requests/meta', { token: X.token })).body.categories.find((c) => /pothole/i.test(c.name)).id;
+  const [ca, cb] = [await catOf(A), await catOf(B)];
+  const sends = [];
+  for (let i = 0; i < 40; i += 1) {
+    const X = i % 2 ? B : A;
+    sends.push(api('POST', `/public/${X.slug}/report`, { body: { category_id: i % 2 ? cb : ca, cross_street: `Main Street at ${i + 1}th Avenue`, description: `Hole ${i}` }, headers: { 'x-forwarded-for': `10.9.${i}.1` } }));
+  }
+  const got = await Promise.all(sends);
+  const bad = got.filter((r) => r.status !== 201 && r.status !== 200).map((r) => `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+  assert.deepEqual(bad, [], 'every report is taken');
+  for (const X of [A, B]) {
+    const [list] = await pool.query("SELECT reference FROM requests WHERE tenant_id = ? AND source = 'web' ORDER BY id", [X.id]);
+    const nums = list.map((r) => Number(r.reference.slice(2))).sort((x, y) => x - y);
+    assert.equal(nums.length, 20);
+    assert.deepEqual(nums, Array.from({ length: 20 }, (_, i) => 1001 + i), 'R-1001 to R-1020, none twice, none skipped');
+  }
+});

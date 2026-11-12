@@ -46,7 +46,8 @@ router.get('/service-addresses', desk, async (req, res) => {
       (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'sms' AND a.addr = RIGHT(REGEXP_REPLACE(COALESCE(s.phone, ''), '[^0-9]', ''), 10)) AS texts_stopped_at,
       (SELECT a.stopped_at FROM alert_addresses a WHERE a.tenant_id = s.tenant_id AND a.channel = 'email' AND a.addr = LOWER(s.email)) AS emails_stopped_at
     FROM service_addresses s WHERE s.tenant_id = ? AND s.street_id = ? AND s.active = 1 ORDER BY s.house_no IS NULL, s.house_no, s.house_number, s.unit, s.id LIMIT 5000`, [req.auth.tenantId, street]);
-  res.set('Cache-Control', 'private, no-store').json({ data: data.map((r) => ({ ...r, contact_ok: Boolean(r.contact_ok) })) });
+  // Only the last 4 of an account number is kept (account_number holds them), shown as "…0100".
+  res.set('Cache-Control', 'private, no-store').json({ data: data.map(({ account_number: last4, ...r }) => ({ ...r, account_last4: last4 ? String(last4).slice(-4) : null, contact_ok: Boolean(r.contact_ok) })) });
 });
 
 router.get('/service-addresses/imports', mgr, async (req, res) => {
@@ -120,7 +121,7 @@ router.post('/service-addresses/import', mgr, validate(importBody), async (req, 
       } else if (row.phone || row.email) out.contacts_dropped += 1;
       const key = SA.matchKey({ account, streetId, houseNumber: house, unit });
       seen.add(key);
-      const vals = [streetId, house ? house.slice(0, 20) : null, SN.houseNo(house), unit, account, phone, email, phone || email ? 1 : 0, importId];
+      const vals = [streetId, house ? house.slice(0, 20) : null, SN.houseNo(house), unit, SA.accountLast4(account), phone, email, phone || email ? 1 : 0, importId];
       if (have.has(key)) {
         await conn.query('UPDATE service_addresses SET street_id = ?, house_number = ?, house_no = ?, unit = ?, account_number = ?, phone = ?, email = ?, contact_ok = ?, import_id = ?, active = 1, ended_at = NULL WHERE tenant_id = ? AND id = ?', [...vals, t, have.get(key)]);
         out.updated += 1;

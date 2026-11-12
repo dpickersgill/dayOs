@@ -91,10 +91,12 @@ function standardFor(standards, categoryId, streetClass) {
  * is skipped. The reference is only a name to read out on the phone: the resident's status link uses status_token.
  */
 async function newReference(conn, tenantId) {
-  await conn.query('INSERT IGNORE INTO request_numbers (tenant_id, last_n) VALUES (?, 1000)', [tenantId]);
   for (let i = 0; i < 200; i += 1) {
-    const [r] = await conn.query('UPDATE request_numbers SET last_n = LAST_INSERT_ID(last_n + 1) WHERE tenant_id = ?', [tenantId]);
-    const ref = `R-${Number(r.insertId)}`;
+    // One statement takes the counter row's write lock straight away (an INSERT IGNORE then UPDATE took a shared lock
+    // first, and two requests at once deadlocked on it: 2026.11.20 review).
+    await conn.query('INSERT INTO request_numbers (tenant_id, last_n) VALUES (?, LAST_INSERT_ID(1001)) ON DUPLICATE KEY UPDATE last_n = LAST_INSERT_ID(last_n + 1)', [tenantId]);
+    const [[got]] = await conn.query('SELECT LAST_INSERT_ID() AS n');
+    const ref = `R-${Number(got.n)}`;
     if (!(await one(conn, 'SELECT id FROM requests WHERE tenant_id = ? AND reference = ?', [tenantId, ref]))) return ref;
   }
   throw new Error('Could not make a request reference');

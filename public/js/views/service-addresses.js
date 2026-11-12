@@ -32,7 +32,7 @@ async function street(s) {
   const r = await get(`/street-notices/service-addresses?street_id=${s.street_id}`);
   dialog(`${s.name}: water customers`, r.data.length ? table([
     { head: 'Address', cell: (x) => `${x.house_number || ''}${x.unit ? `, ${x.unit}` : ''}` },
-    { head: 'Account', cell: (x) => x.account_number || '' },
+    { head: 'Account', cell: (x) => (x.account_last4 ? `\u2026${x.account_last4}` : '') }, // only the last 4 are kept
     { head: 'Text', cell: (x) => (x.phone ? `${x.phone}${x.texts_stopped_at ? ' (stopped)' : ''}` : '') },
     { head: 'Email', cell: (x) => (x.email ? `${x.email}${x.emails_stopped_at ? ' (stopped)' : ''}` : '') },
   ], r.data) : empty('No addresses on this street.'), { wide: true });

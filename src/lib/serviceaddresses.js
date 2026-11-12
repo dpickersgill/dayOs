@@ -103,4 +103,10 @@ async function purge(days) {
   return r.affectedRows;
 }
 
-module.exports = { reachesCustomers, matchKey, placeKey, inAreas, reach, doorHangers, stillContact, purge, norm };
+/**
+ * What is kept of a customer's account number (2026.11.20 review): its last 4 letters or digits, to tell two customers
+ * apart on screen ("…0100"). The whole number is never stored: an import matches on matchKey(), a keyed hash.
+ */
+const accountLast4 = (account) => { const a = String(account || '').replace(/[^0-9A-Za-z]/g, ''); return a ? a.slice(-4) : null; };
+
+module.exports = { accountLast4, reachesCustomers, matchKey, placeKey, inAreas, reach, doorHangers, stillContact, purge, norm };

@@ -74,7 +74,7 @@ module.exports = async function utilities(conn, T, { today, addDays, daysAgo, us
         const email = contact && !phone ? `customer${k}@example.com` : null;
         const acct = `${String(s + 10).padStart(2, '0')}-${String(hn).padStart(4, '0')}`;
         await conn.query('INSERT INTO service_addresses (tenant_id, street_id, house_number, house_no, unit, account_number, match_key, phone, email, contact_ok, import_id) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)',
-          [T, sid, String(hn), hn, acct, SA.matchKey({ account: acct }), phone, email, phone || email ? 1 : 0, imp.insertId]);
+          [T, sid, String(hn), hn, SA.accountLast4(acct), SA.matchKey({ account: acct }), phone, email, phone || email ? 1 : 0, imp.insertId]);
         for (const [ch, addr] of [['sms', phone && phone.slice(2)], ['email', email]]) {
           if (!addr) continue;
           withC += 1;
