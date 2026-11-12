@@ -732,8 +732,9 @@ export function helpHref(key, params = []) {
  */
 function partOf(holder, key, params) {
   if (key === 'patrol') return (PATROL_SECTIONS.find(([id]) => id === patrolSection(params)) || PATROL_SECTIONS[0])[1];
-  const bar = holder.querySelector('.tabs[data-address]');
-  const on = bar ? bar.querySelector('[aria-selected=true]') : holder.querySelector('.link-tabs [aria-current], .set-link[aria-current=page]');
+  // Settings: the open page of its own list (a page there may have tabs of its own; the page is the part).
+  const bar = key === 'settings' ? null : holder.querySelector('.tabs[data-address]');
+  const on = bar ? bar.querySelector('[aria-selected=true]') : holder.querySelector(key === 'settings' ? '.set-link[aria-current=page]' : '.link-tabs [aria-current]');
   if (on && on.textContent.trim()) return on.textContent.trim();
   const at = location.hash.replace(/^#\/?/, '');
   const sub = at.includes('?') ? SUB_PAGES.filter(([app, , href]) => app === key && samePage(href.replace(/^#\/?/, ''), at)).sort((x, y) => y[2].length - x[2].length)[0] : null;

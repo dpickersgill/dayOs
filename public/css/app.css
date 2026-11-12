@@ -957,6 +957,7 @@ tr.row-warn td { background: var(--hold-tint); }
   --side: #ffffff; --side-ink: #1b3642; --side-ico: #1d4452; --side-muted: #52656d; --side-line: #dce3e7; --side-hover: #eef2f4; --side-field: #f1f4f6;
   --side-active-bg: var(--accent-tint); --side-active-ink: #0e2632; --side-sec-bg: #eef2f4;
   --pop-shadow: 0 10px 30px rgba(14, 38, 50, 0.18), 0 1px 3px rgba(14, 38, 50, 0.08);
+  --avatar-bg: #1d4452; --avatar-ink: #ffffff;
   --rail-open: 240px; --rail-strip: 64px;
   /* How far down a bar that sticks to the top of a page must sit to clear the top bar (a computer; on a phone such
      bars cover the top bar, as before). */
@@ -966,10 +967,14 @@ tr.row-warn td { background: var(--hold-tint); }
   --side: #0c171d; --side-ink: #c9d5db; --side-ico: #a7b8c0; --side-muted: #97aab3; --side-line: #26363f; --side-hover: rgba(255, 255, 255, 0.06); --side-field: #16232b;
   --side-active-bg: rgba(216, 182, 114, 0.14); --side-active-ink: #ebd3a0; --side-sec-bg: rgba(255, 255, 255, 0.07);
   --pop-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --avatar-bg: #2b4250; --avatar-ink: #e6edf0;
 }
 .shell { --rail-w: var(--rail-open); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh; }
 .shell.collapsed { --rail-w: var(--rail-strip); }
 .frame { min-width: 0; display: block; }
+/* The first stop for the Tab key, in sight only while it has the focus: past the menu, to the page. */
+.skip-link { position: fixed; z-index: 90; top: 8px; left: 8px; min-height: 36px; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--sel-bg); color: var(--sel-ink); font: inherit; font-size: .875rem; font-weight: 700; cursor: pointer; transform: translateY(-64px); }
+.skip-link:focus-visible { transform: none; outline: 3px solid var(--focus); outline-offset: 2px; }
 .ico { flex: none; }
 .brand-mark { display: block; width: auto; height: 18px; flex: none; }
 .brand-logo-full { display: block; width: 220px; max-width: 100%; height: auto; }
@@ -1026,8 +1031,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .acct { width: 100%; height: 55px; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 16px; border: 0; background: none; color: var(--side-muted); font: inherit; text-align: left; cursor: pointer; }
 .acct:hover, .acct[aria-expanded='true'] { background: var(--side-hover); }
 .rail .acct:focus-visible, .shell.collapsed .rail:not(.peek) .rail-toggle:focus-visible { outline-offset: -3px; }
-.avatar { position: relative; flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--spruce-soft); color: #fff; font-weight: 700; font-size: .75rem; letter-spacing: .02em; }
-:root[data-theme='dark'] .avatar { background: #2b4250; color: #e6edf0; }
+.avatar { position: relative; flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--avatar-bg); color: var(--avatar-ink); font-weight: 700; font-size: .75rem; letter-spacing: .02em; }
 .acct.has-new .avatar::after { content: ''; position: absolute; top: -1px; right: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-line); box-shadow: 0 0 0 2px var(--side); }
 .who-text { min-width: 0; flex: 1; display: grid; line-height: 1.25; }
 .who-text b { font-size: .8125rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1068,6 +1072,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .theme-choice[aria-checked='true'] { background: var(--accent-tint); border-color: var(--accent-line); font-weight: 700; }
 .who-version { display: block; padding: 6px 10px 4px; border-radius: var(--radius-sm); font-size: .75rem; color: var(--quiet); text-decoration: none; }
 .who-version:hover { color: var(--ink); text-decoration: underline; }
+.pop-menu .who-version { min-height: 32px; display: flex; align-items: center; padding: 0 10px; }
 /* The account menu sits over the account row; beside the avatar when the menu is a strip. */
 .acct-menu { position: fixed; left: 8px; bottom: 62px; }
 .shell.collapsed .acct-menu { left: calc(var(--rail-strip) + 8px); bottom: 10px; }
@@ -1103,9 +1108,13 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .top-btn:hover { background: var(--side-hover); border-color: var(--line-strong); color: var(--ink); }
 .top-btn[aria-current='page'] { background: var(--side-active-bg); border-color: var(--accent-line); }
 .top-btn .nav-badge { position: absolute; top: -6px; right: -6px; margin: 0; min-width: 17px; height: 17px; padding: 0 4px; font-size: .65625rem; box-shadow: 0 0 0 2px var(--side); }
-/* When the bar is short of room (a narrow window, or Ask open beside the page): Jump to gives way first, then words. */
-@container topbar (max-width: 760px) { .top-jump { flex-basis: 132px; } .top-jump kbd { display: none; } }
-@container topbar (max-width: 640px) { .top-sos span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } .top-sos { padding: 0 8px; } .top-jump { flex: none; min-width: 34px; width: 34px; padding: 0; justify-content: center; } .top-jump-text { display: none; } }
+/* When the bar is short of room (a narrow window, or Ask open beside the page), things give way in this order, so
+   where you are and Guest needs help keep their words longest: the Ctrl K hint, Jump to's words, New's word, and only
+   then Guest needs help's. Every button keeps its name for screen readers. */
+@container topbar (max-width: 880px) { .top-jump { flex-basis: 160px; } .top-jump kbd { display: none; } }
+@container topbar (max-width: 760px) { .top-jump { flex: none; min-width: 34px; width: 34px; padding: 0; justify-content: center; } .top-jump-text { display: none; } }
+@container topbar (max-width: 680px) { .btn.top-new-btn { width: 34px; padding: 0; } .top-new-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } }
+@container topbar (max-width: 600px) { .top-sos { width: 34px; padding: 0; justify-content: center; } .top-sos span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } }
 
 /* On a computer the top bar names the page and holds its Help, so the page header keeps only what it adds: a title
    that repeats the app's name is there for screen readers but not drawn, the breadcrumb and the Help button are not
@@ -1118,6 +1127,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
   .page-head.no-title > .head-lead { flex: 0 0 auto; }
   .page-head.no-title { justify-content: flex-end; }
   .page-head.head-bare { margin: 0; }
+  .page-head:has(h1.h1-same) { align-items: center; }
 }
 
 /* ---- jump-to palette */
@@ -1146,7 +1156,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .tab span { white-space: nowrap; }
 .tab[aria-current='page'], .tab.on { color: var(--ink); font-weight: 700; }
 .tab[aria-current='page'] .ico, .tab.on .ico { color: currentColor; }
-.tab[aria-current='page']::before, .tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent-line); }
+.tab[aria-current='page']::before, .tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 var(--radius-xs) var(--radius-xs); background: var(--accent-line); }
 .tab .nav-badge:not(.dot) { position: absolute; top: 6px; left: calc(50% + 3px); margin: 0; min-width: 16px; height: 16px; padding: 0 4px; font-size: .625rem; box-shadow: 0 0 0 2px var(--side); }
 .tab.has-new::after { content: ''; position: absolute; top: 10px; left: calc(50% + 8px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent-line); box-shadow: 0 0 0 2px var(--side); }
 .new-fab { position: fixed; z-index: 44; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); box-shadow: 0 6px 16px rgba(14, 38, 50, .28); cursor: pointer; }
@@ -1159,13 +1169,13 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .menu-sheet header h2 { font-size: 1.25rem; }
 .sheet-close { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .sheet-body { display: grid; gap: 0; }
-.sheet-search { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--quiet); font: inherit; font-size: .9375rem; text-align: left; cursor: pointer; }
+.sheet-search { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--quiet); font: inherit; font-size: .9375rem; text-align: left; cursor: pointer; }
 .sheet-help-here { width: 100%; justify-content: center; margin: 12px 0 0; }
 .sheet-sec { margin-top: 14px; }
 .sheet-sec.sheet-home { margin-top: 12px; }
 .sheet-label { display: flex; align-items: center; justify-content: space-between; min-height: 24px; margin: 0 2px 6px; font-size: .8125rem; color: var(--quiet); }
 .sheet-label h3 { margin: 0; font: inherit; }
-.sheet-label .nav-edit { height: 44px; margin: -12px -8px -8px 0; padding: 0 8px; align-items: center; font-size: .8125rem; }
+.sheet-label .nav-edit { height: 44px; min-width: 44px; margin: -12px -8px -8px 0; padding: 0 8px; align-items: center; justify-content: center; font-size: .8125rem; }
 .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
 .sheet-item { position: relative; min-width: 0; min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); font-size: .75rem; line-height: 1.15; text-align: center; text-decoration: none; -webkit-touch-callout: none; user-select: none; }
 .sheet-item .ico { color: var(--side-ico); }
@@ -1183,7 +1193,7 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .sheet-rows .theme-choice { min-height: 44px; font-size: .9375rem; }
 .sheet-rows .menu-label { padding: 8px 12px 2px; font-size: .8125rem; }
 .sheet-rows .menu-who { padding: 4px 12px 8px; }
-.sheet-rows .who-version { padding: 10px 12px 4px; font-size: .8125rem; }
+.sheet-rows .who-version { min-height: 44px; display: flex; align-items: center; padding: 0 12px; font-size: .8125rem; }
 .dialog.acct-sheet, .dialog.new-sheet { background: var(--surface); }
 
 @media (max-width: 860px) {
@@ -1195,10 +1205,10 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
   .top-brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
   .top-brand strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .top-brand .brand-mark { width: auto; height: 20px; }
-  .top-jump { flex: none; min-width: 44px; width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: 10px; background: var(--side); color: var(--ink); }
+  .top-jump { flex: none; min-width: 44px; width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: var(--radius-md); background: var(--side); color: var(--ink); }
   .top-jump .ico { width: 20px; height: 20px; }
   .top-jump-text, .top-jump kbd { display: none; }
-  .top-btn { width: 44px; height: 44px; border-radius: 10px; }
+  .top-btn { width: 44px; height: 44px; border-radius: var(--radius-md); }
   .top-btn .ico { width: 20px; height: 20px; }
   .top-btn .nav-badge { top: -5px; right: -5px; }
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: calc(64px + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--side); border-top: 1px solid var(--side-line); }
@@ -1216,6 +1226,13 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
   .acct-sheet header, .new-sheet header { padding: 0 4px 0 12px; }
 }
 @media (max-width: 340px) { .tab { font-size: .65625rem; } }
+/* Messages that pop up clear the side menu on a computer and the bottom bar on a phone. */
+@media (min-width: 861px) {
+  body:has(.shell) .toasts { left: calc(var(--rail-open) + 16px); }
+  body:has(.shell.collapsed) .toasts { left: calc(var(--rail-strip) + 16px); }
+  .in-settings body:has(.shell) .toasts { left: 16px; }
+}
+@media (max-width: 860px) { body:has(.shell) .toasts { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
 @media print { .rail, .topbar, .tabbar, .new-fab, .moved-here { display: none !important; } }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -351,6 +351,7 @@ test('the side menu: one list (Home, Pinned, every section open), Settings and H
   assert.equal(doc.querySelector('.top-where').closest('h1, h2, h3'), null, 'the top bar\'s words are not a heading: the page keeps its own h1');
   assert.equal(doc.querySelector('.top-help').getAttribute('href'), '#/help/for-patrol?part=cases');
   assert.deepEqual(heard.at(-1), ['nav:page', { key: 'patrol', href: 'patrol/cases', label: 'Patrol: Cases' }]);
+  assert.deepEqual(frame.page, { key: 'patrol', href: 'patrol/cases', label: 'Patrol: Cases' }, 'a module that starts late reads the page from the frame');
   const before = heard.length;
   frame.setWhere({ part: 'Cases', help: null });
   assert.equal(heard.length, before, 'the same page said twice is told once');

@@ -826,7 +826,10 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     window.addEventListener('hashchange', onHash);
   }
 
-  shell.append(rail, h('div', { class: 'frame' }, topbar, main), tabbar, newFab);
+  // The first stop for the Tab key: past the menu, straight to the page.
+  const skip = h('button', { type: 'button', class: 'skip-link' }, 'Skip to the page');
+  skip.addEventListener('click', () => main.focus());
+  shell.append(skip, rail, h('div', { class: 'frame' }, topbar, main), tabbar, newFab);
   paintCollapsed();
   drawPins();
   paintFolds();
@@ -878,6 +881,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     const now = { key: currentKey, href: hrefNow(), label: text };
     if (now.key === where.key && now.href === where.href && now.label === where.label) return;
     where = now;
+    api.page = { ...now };
     tell('nav:page', { ...now });
   }
 
@@ -906,5 +910,8 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
   }
   function addCommands(fn) { if (typeof fn === 'function') commandFns.push(fn); }
 
-  return { shell, plan, canEdit, slots: { star }, setCurrent, setWhere, setPins, setBadge, setNew, addCommands, openPalette, openSheet };
+  // page: the page on screen now ({ key, href, label }, as nav:page last said it), for a module that starts after the
+  // first nav:page (pins.js loads on its own and may arrive late). null until the first page is drawn.
+  const api = { shell, plan, canEdit, slots: { star }, page: null, setCurrent, setWhere, setPins, setBadge, setNew, addCommands, openPalette, openSheet };
+  return api;
 }
