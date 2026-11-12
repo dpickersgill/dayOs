@@ -70,6 +70,8 @@ export function barLabel(item) {
   if (text && text.length <= BAR_LABEL_MAX) return text;
   let out = '';
   for (const word of text.split(/\s+/)) { const next = out ? `${out} ${word}` : word; if (next.length > BAR_LABEL_MAX) break; out = next; }
+  // Never end on a small joining word ("Billing and"): stop before it.
+  out = out.replace(/(\s+(and|or|of|the|for|to|in|on|a|an|by|with|&))+$/i, '');
   return out || short || text.slice(0, BAR_LABEL_MAX);
 }
 
@@ -145,6 +147,18 @@ const onPhone = () => media('(max-width: 860px)');
 /** An address without its "#/": '#/patrol/cases?tab=records' -> 'patrol/cases?tab=records'. */
 const bare = (hash) => String(hash || '').replace(/^#\/?/, '');
 const hrefNow = () => bare(typeof location !== 'undefined' ? location.hash : '');
+/**
+ * A pin's name as it may be shown: no control characters and no characters that turn text around (bidirectional
+ * overrides and isolates, the left-to-right and right-to-left marks), spaces folded, and at most 40 characters
+ * counted as a person counts them (code points, not UTF-16 units). The server keeps names the same way (menus.js).
+ */
+export const PIN_LABEL_MAX = 40;
+// eslint-disable-next-line no-control-regex
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+export function cleanLabel(text) {
+  const plain = String(text == null ? '' : text).replace(UNSAFE_TEXT, '').replace(/\s+/g, ' ').trim();
+  return [...plain].slice(0, PIN_LABEL_MAX).join('').trim();
+}
 /** Tells the other modules something happened in the frame (nav:page, nav:edit-pins, nav:row-menu), on window. */
 const tell = (name, detail) => window.dispatchEvent(new window.CustomEvent(name, { detail }));
 /** True when the address `at` is the page `href` names: the same path, and every ?name=value of href is in it. */
@@ -187,18 +201,34 @@ function themeRow(inMenu) {
     return b;
   });
   const root = h('div', { class: 'theme-seg', role: inMenu ? 'group' : 'radiogroup', 'aria-label': 'Theme' }, choices);
-  const mark = () => { const now = themePick(); for (const b of choices) b.setAttribute('aria-checked', String(b.dataset.theme === now)); };
-  const onChange = () => { if (!root.isConnected) { window.removeEventListener('theme:change', onChange); return; } mark(); };
-  window.addEventListener('theme:change', onChange);
-  mark();
+  markTheme(root);
+  watchTheme();
   return root;
+}
+/** Ticks the theme now in use in every theme row on the page. */
+function markTheme(root = document) {
+  const now = themePick();
+  for (const b of root.querySelectorAll('.theme-seg .theme-choice, .theme-choice')) b.setAttribute('aria-checked', String(b.dataset.theme === now));
+}
+// One listener for every theme row, added once: a row drawn in a menu that opens many times adds nothing more.
+let themeWatched = null; // the window that has the listener (one per page)
+function watchTheme() {
+  if (typeof window === 'undefined' || themeWatched === window) return;
+  themeWatched = window;
+  window.addEventListener('theme:change', () => markTheme());
 }
 
 /** The version at the foot of the account menu: "Verdynt/OS 2026.11.21", linking to What's new. */
 function whoVersion(inMenu) {
-  const a = h('a', { class: 'who-version', href: '#/help/whats-new', role: inMenu ? 'menuitem' : null }, 'Verdynt/OS');
-  fetch('/version').then((r) => r.json()).then((v) => { if (v && v.version) a.textContent = `Verdynt/OS ${v.version}`; }).catch(() => {});
+  const a = h('a', { class: 'who-version', href: '#/help/whats-new', role: inMenu ? 'menuitem' : null }, versionText || 'Verdynt/OS');
+  if (!versionText) versionOnce().then((t) => { if (t) a.textContent = t; });
   return a;
+}
+// The version is asked for once a page load (it cannot change without one), not each time the account menu opens.
+let versionText = null; let versionAsk = null;
+function versionOnce() {
+  if (!versionAsk) versionAsk = fetch('/version').then((r) => r.json()).then((v) => { versionText = v && v.version ? `Verdynt/OS ${v.version}` : null; return versionText; }).catch(() => { versionAsk = null; return null; });
+  return versionAsk;
 }
 
 /**
@@ -264,8 +294,11 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
   // A session opened by PIN on a shared computer and the ski area's read-only login keep the role's menu as it is.
   const canEdit = !me.terminal && me.role !== 'area';
   const appItem = (k) => ({ label: byKey.get(k), href: k, app: k });
-  /** Only pins and bar places whose app this person may open, in the shape the frame draws. */
-  const usablePins = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.href && byKey.has(p.app) && !ACCOUNT.includes(p.app)).map((p) => ({ id: String(p.id || p.href), label: String(p.label || byKey.get(p.app)), href: bare(p.href), app: p.app, ...(p.icon ? { icon: p.icon } : {}) }));
+  /**
+   * Only pins and bar places whose app this person may open, in the shape the frame draws. Settings and Help pages can
+   * be pinned too (Your profile, Billing, a Help article): they are not rows of the list, but a pin to one is.
+   */
+  const usablePins = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.href && byKey.has(p.app)).map((p) => ({ id: String(p.id || p.href), label: cleanLabel(p.label) || byKey.get(p.app), href: bare(p.href), app: p.app, ...(p.icon ? { icon: p.icon } : {}) }));
 
   let pins = me.role === 'area' ? [] : nav && Array.isArray(nav.pins) ? usablePins(nav.pins) : plan.pins;
   // The phone bar the person chose: an array (an empty one too: only Menu), or null for the default.
@@ -291,23 +324,46 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     const hits = [...pins, ...barNow()].filter((p) => p.app === currentKey && p.href !== p.app && samePage(p.href, at));
     return hits.sort((a, b) => b.href.length - a.href.length)[0] || null;
   }
-  /** Marks the open page: its app's row in its section, and among the pins the one that names the page most exactly. */
+  /**
+   * Marks the open page: its app's row in its section, and among the pins the one that names the page most exactly.
+   * A screen reader hears "current page" once in each menu: aria-current goes on the app's own row, and a pin to the
+   * same page is only drawn as current (is-current). Where the open page has no row of its own there (Settings, Help,
+   * or the phone bar), the pin carries aria-current.
+   */
+  const SURFACE = { list: 'side', pins: 'side', sheet: 'sheet', bar: 'bar', top: 'top' };
   function mark() {
     const exact = pinHere();
     const on = (s) => (s.kind === 'app' ? s.app === currentKey : exact ? s.href === exact.href : s.href === currentKey);
-    for (const s of shown) { if (on(s)) s.el.setAttribute('aria-current', 'page'); else s.el.removeAttribute('aria-current'); }
+    const owned = new Set(shown.filter((s) => s.kind === 'app' && on(s)).map((s) => SURFACE[s.zone]));
+    for (const s of shown) {
+      const lit = on(s);
+      const said = lit && (s.kind === 'app' || !owned.has(SURFACE[s.zone]));
+      if (said) s.el.setAttribute('aria-current', 'page'); else s.el.removeAttribute('aria-current');
+      s.el.classList.toggle('is-current', lit);
+    }
     more.classList.toggle('on', Boolean(currentKey) && !barNow().some((p) => (exact ? p.href === exact.href : p.href === currentKey)));
   }
 
-  /** Draws (or removes) the count on one link. A count is said once: hidden from screen readers, and in the link's description. */
+  /**
+   * Draws (or removes) the count on one link. A count is said once: the pill is hidden from screen readers, and words
+   * in the link that only screen readers get say it ("5 new"), so every screen reader hears it, Safari's too (it does
+   * not read aria-description). A link named by aria-label (Inbox in the top bar, a phone bar tab) has the words added
+   * to its name instead.
+   */
   function paintBadge(el, st) {
     let b = [...el.children].find((c) => c.classList && c.classList.contains('nav-badge'));
-    if (!st || !st.n) { if (b) b.remove(); el.removeAttribute('aria-description'); return; }
+    let sr = [...el.children].find((c) => c.classList && c.classList.contains('nav-count-sr'));
+    const name = el.dataset.name || el.getAttribute('aria-label');
+    if (name && !el.dataset.name) el.dataset.name = name;
+    if (!st || !st.n) { if (b) b.remove(); if (sr) sr.remove(); if (name) el.setAttribute('aria-label', name); return; }
     if (!b) { b = h('span', { class: 'nav-badge', 'aria-hidden': 'true' }); el.append(b); }
     b.classList.toggle('dot', Boolean(st.dot));
     b.classList.toggle('alert', Boolean(st.alert));
     b.textContent = st.dot ? '' : st.n > 99 ? '99+' : String(st.n);
-    el.setAttribute('aria-description', st.dot ? st.says : `${st.n} ${st.says}`);
+    const words = st.dot ? st.says : `${st.n} ${st.says}`;
+    if (name) { el.setAttribute('aria-label', `${name}, ${words}`); return; }
+    if (!sr) { sr = h('span', { class: 'nav-count-sr sr' }); b.before(sr); }
+    sr.textContent = `, ${words}`;
   }
   /** Puts every count where its app shows at its own address. A pin to a page inside an app gets none. */
   function paintBadges(zone) {
@@ -338,7 +394,7 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
   }
   function rowMenu(el, item) {
-    if (!canEdit || ACCOUNT.includes(item.app)) return el;
+    if (!canEdit) return el;
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); askRowMenu(item, e.clientX, e.clientY); });
     longPress(el, (x, y) => askRowMenu(item, x, y));
     return el;
@@ -593,9 +649,36 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
     sheet('New', 'new-sheet', () => h('div', { class: 'sheet-body' }, h('div', { class: 'sheet-rows' }, mine.map((it) => newRow(it, null))), mine.length && rest.length ? h('hr') : null, h('div', { class: 'sheet-rows' }, rest.map((it) => newRow(it, null)))));
   });
   /** The round button shows on pages whose app has something to create, unless the page has a floating button of its own. */
+  /**
+   * The round + on a phone shows on pages whose app has something to create, unless the page shows its own way to
+   * create: a floating button of its own (Patrol's New case), or a primary "New ..." / "Add ..." button in its header
+   * (Work orders' New work order) while that button is on screen. Scrolled past it, the round + comes back. The shell
+   * says whether it shows (has-fab), so the page leaves room at the bottom for it.
+   */
+  let ownNew = null; let ownNewInView = false; let watcher = null;
+  const OWN_NEW = /^(new|add|log|report|book|start)\b/i;
+  function findOwnNew() {
+    if (!main.querySelectorAll) return null;
+    return [...main.querySelectorAll('.page-head .btn.primary, .page-head a.btn.primary')].find((b) => OWN_NEW.test((b.textContent || '').trim())) || null;
+  }
+  function watchOwnNew() {
+    const found = findOwnNew();
+    if (found === ownNew) return;
+    if (watcher) { watcher.disconnect(); watcher = null; }
+    ownNew = found; ownNewInView = Boolean(found);
+    if (found && typeof IntersectionObserver === 'function') {
+      watcher = new IntersectionObserver((seen) => { ownNewInView = seen.some((e) => e.isIntersecting); paintFab(); }, { rootMargin: '-56px 0px -64px 0px' });
+      watcher.observe(found);
+    }
+  }
+  function paintFab() {
+    newFab.hidden = !newItems.some((it) => it.app === currentKey) || Boolean(main.querySelector && main.querySelector('.fab')) || Boolean(ownNew && ownNew.isConnected && ownNewInView);
+    shell.classList.toggle('has-fab', !newFab.hidden);
+  }
   function paintNew() {
     newSlot.hidden = !newItems.length;
-    newFab.hidden = !newItems.some((it) => it.app === currentKey) || Boolean(main.querySelector && main.querySelector('.fab'));
+    watchOwnNew();
+    paintFab();
   }
   function setNew(items) {
     newItems = (Array.isArray(items) ? items : []).filter((it) => it && it.label && it.href);
@@ -622,10 +705,10 @@ export function buildFrame({ views, main, signOut, menu = null, links = {}, nav 
   function paintMenuDot() {
     const news = [...badges].some(([k, st]) => st.dot && st.n && !barNow().some((p) => p.href === k));
     more.classList.toggle('has-new', news);
-    if (news) more.setAttribute('aria-description', 'Something new in Help'); else more.removeAttribute('aria-description');
+    more.setAttribute('aria-label', news ? 'Menu, something new in Help' : 'Menu');
     const dot = Boolean(badges.get('help') && badges.get('help').n);
     acctBtn.classList.toggle('has-new', dot);
-    if (dot) acctBtn.setAttribute('aria-description', 'Something new in Help'); else acctBtn.removeAttribute('aria-description');
+    acctBtn.setAttribute('aria-label', `Account: ${name}, ${roleText}${dot ? '. Something new in Help' : ''}`);
   }
 
   /** A sheet over the page (the phone's Menu, the account, + New). build(close) returns its content. The whole sheet scrolls as one. */

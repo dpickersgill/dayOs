@@ -345,7 +345,8 @@ test('the side menu: one list (Home, Pinned, every section open), Settings and H
   w.location.hash = '#/patrol/cases';
   frame.setCurrent('patrol', ['cases']);
   frame.setWhere({ part: 'Cases', help: { href: '#/help/for-patrol?part=cases', label: 'Help with Patrol' } });
-  assert.deepEqual([...rail.querySelectorAll('.nav-row[aria-current=page]')].map((a) => [a.dataset.key, Boolean(a.dataset.pin)]), [['patrol', true], ['patrol', false]]);
+  assert.deepEqual([...rail.querySelectorAll('.nav-row[aria-current=page]')].map((a) => [a.dataset.key, Boolean(a.dataset.pin)]), [['patrol', false]], 'a screen reader hears "current page" once: on the app\'s row in its section');
+  assert.deepEqual([...rail.querySelectorAll('.nav-row.is-current')].map((a) => [a.dataset.key, Boolean(a.dataset.pin)]), [['patrol', true], ['patrol', false]], 'the pin is drawn as current too');
   assert.equal(doc.querySelector('.top-where').textContent, 'Patrol›Cases');
   assert.equal(doc.querySelector('.top-where .where-app a').getAttribute('href'), '#/patrol', 'with a part showing, the app is the way back to its first page');
   assert.equal(doc.querySelector('.top-where').closest('h1, h2, h3'), null, 'the top bar\'s words are not a heading: the page keeps its own h1');
@@ -453,7 +454,11 @@ test('what the other modules call: setPins, setBadge (with alert), setNew, addCo
   const badge = (el) => { const b = el.querySelector('.nav-badge'); return b ? `${b.textContent}${b.classList.contains('alert') ? '!' : ''}` : null; };
   assert.deepEqual([...doc.querySelectorAll('.rail .nav-row[data-key=works]')].map((a) => [a.getAttribute('href'), badge(a)]), [['#/works?dept=water&status=overdue', null], ['#/works', '6!'], ['#/works', '6!']]);
   assert.deepEqual([...doc.querySelectorAll('.rail .nav-row[data-key=requests]')].map(badge), ['4', '4']);
-  assert.equal(doc.querySelector('.rail .nav-row[data-key=works]:not([data-pin])').getAttribute('aria-description'), '6 overdue', 'said once: the number is hidden from screen readers and in the description');
+  const worksRow = doc.querySelector('.rail .nav-row[data-key=works]:not([data-pin])');
+  assert.equal(worksRow.querySelector('.nav-count-sr').textContent, ', 6 overdue', 'said once, in words in the link that every screen reader reads (Safari ignores aria-description)');
+  assert.ok(worksRow.querySelector('.nav-count-sr').classList.contains('sr'), 'and only screen readers get the words');
+  assert.equal(worksRow.getAttribute('aria-description'), null);
+  assert.equal(doc.querySelector('.top-inbox').getAttribute('aria-label'), 'Inbox, 3 unread', 'a button named by aria-label carries the count in its name');
   assert.equal(doc.querySelector('.rail .nav-row[data-key=works] .nav-badge').getAttribute('aria-hidden'), 'true');
   assert.equal(badge(doc.querySelector('.tabbar .tab[data-key=requests]')), '4', 'the phone bar');
   assert.equal(badge(doc.querySelector('.top-inbox')), '3', 'Inbox in the top bar');
@@ -465,7 +470,7 @@ test('what the other modules call: setPins, setBadge (with alert), setNew, addCo
   doc.querySelector('.sheet-close').click();
   frame.setBadge('works', 0);
   assert.equal(doc.querySelector('.rail .nav-row[data-key=works] .nav-badge'), null, '0 removes it');
-  assert.equal(doc.querySelector('.rail .nav-row[data-key=works]').getAttribute('aria-description'), null);
+  assert.equal(doc.querySelector('.rail .nav-row[data-key=works] .nav-count-sr'), null, 'and its words');
   // What's new: a dot on the account row, the menu's Help row, and the phone's Menu button
   frame.setBadge('help', 2, { dot: true, says: 'new' });
   assert.ok(doc.querySelector('.acct').classList.contains('has-new') && doc.querySelector('.tab-menu').classList.contains('has-new'));
@@ -614,7 +619,8 @@ test('the phone: the bar from the person\'s places, and the Menu sheet as open g
   assert.ok(texts(doc, '.tabbar .tab .tab-text').every((t) => t.length <= 12));
   frame.setCurrent('patrol', ['cases']);
   assert.deepEqual([...doc.querySelectorAll('.tabbar .tab[aria-current=page]')].map((a) => a.textContent), ['Records'], 'the pin that names this page, not the app\'s own');
-  assert.deepEqual([...doc.querySelectorAll('.rail .nav-row[aria-current=page]')].map((a) => a.textContent), ['Records requests', 'Patrol'], 'and in the side menu: that pin, and the app in its section');
+  assert.deepEqual([...doc.querySelectorAll('.rail .nav-row[aria-current=page]')].map((a) => a.textContent), ['Patrol'], 'in the side menu, the app in its section is the current page');
+  assert.deepEqual([...doc.querySelectorAll('.rail .nav-row.is-current')].map((a) => a.textContent), ['Records requests', 'Patrol'], 'and the pin is drawn as current');
   assert.ok(doc.querySelector('.top-sos'), 'Guest needs help, for the people who had it');
   doc.querySelector('.tab-menu').click();
   const sheet = doc.querySelector('.menu-sheet.phone-menu');
@@ -626,7 +632,8 @@ test('the phone: the bar from the person\'s places, and the Menu sheet as open g
   assert.deepEqual(texts(sheet, '.sheet-pins .sheet-item'), ['Patrol', 'Records requests', 'Mountain status']);
   assert.deepEqual(texts(sheet, '.sheet-label h3'), ['Pinned', 'Mountain', 'Back office']);
   assert.equal(sheet.querySelector('.nav-fold'), null, 'no folding on the phone');
-  assert.deepEqual([...sheet.querySelectorAll('.sheet-item[aria-current=page]')].map((a) => a.textContent), ['Records requests', 'Patrol']);
+  assert.deepEqual([...sheet.querySelectorAll('.sheet-item[aria-current=page]')].map((a) => a.textContent), ['Patrol']);
+  assert.deepEqual([...sheet.querySelectorAll('.sheet-item.is-current')].map((a) => a.textContent), ['Records requests', 'Patrol']);
   sheet.querySelector('.sheet-pins .nav-edit').click();
   assert.equal(doc.querySelector('.menu-sheet'), null, 'Edit closes the sheet first');
   assert.deepEqual(heard.at(-1), ['nav:edit-pins', { bar: false }]);
@@ -679,6 +686,63 @@ test('setPins while the phone Menu sheet is open draws it again in place; an emp
   assert.deepEqual(texts(doc, '.tabbar .tab .tab-text'), ['Today', 'Requests', 'My shifts'], 'null: the default bar');
   const saved = frameFor({ me: { role: 'manager', org_type: 'municipality' }, views: muniViewsFor('manager'), menu: menus.muniMenuFor('manager'), navSaved: { pins: [], bar: [] } });
   assert.deepEqual(texts(saved.doc, '.tabbar .tab'), ['Menu'], 'an empty bar saved on the server is kept on the first paint too');
+  await sleep(250);
+});
+
+test('review fixes: Settings and Help pins show everywhere; the round + gives way to the page\'s own New; clean pin names; one theme listener and one version fetch', skip(), async () => {
+  // Pins to Settings and Help pages: in the side menu, the sheet and the phone bar, with their icons, and lit when open.
+  const f = frameFor({ me: { role: 'manager', org_type: 'municipality' }, views: muniViewsFor('manager'), menu: menus.muniMenuFor('manager'), hash: '#/settings/billing' });
+  f.frame.setPins([{ id: 'a', label: 'Billing and plan', href: 'settings/billing', app: 'settings' }, { id: 'b', label: 'Help with requests', href: 'help/for-requests', app: 'help' }], [{ label: 'Billing and plan', href: 'settings/billing', app: 'settings' }]);
+  assert.deepEqual(texts(f.doc, '.nav-pins .nav-row'), ['Billing and plan', 'Help with requests'], 'they show in Pinned');
+  const svgOf = (el) => el.querySelector('svg path').getAttribute('d');
+  assert.notEqual(svgOf(f.doc.querySelector('.nav-pins .nav-row[data-key=settings]')), svgOf(f.doc.querySelector('.nav-pins .nav-row[data-key=help]')), 'each with its own icon (settings, help)');
+  assert.deepEqual(texts(f.doc, '.tabbar .tab .tab-text'), ['Billing'], 'on the phone bar, never ending on "and"');
+  f.frame.setCurrent('settings', ['billing']);
+  assert.deepEqual([...f.doc.querySelectorAll('.rail .nav-row[aria-current=page]')].map((x) => x.textContent), ['Billing and plan'], 'Settings has no row of its own, so the pin is the current page');
+  f.frame.openSheet();
+  assert.deepEqual(texts(f.doc, '.sheet-pins .sheet-item'), ['Billing and plan', 'Help with requests']);
+  f.doc.querySelector('.sheet-close').click();
+  // A pin's name: no control or text-direction characters, 40 characters as people count them.
+  assert.equal(nav.cleanLabel('\u202Eyenom\u202C \u2066Cash\u2069\u200F\u0007\u0085 drawers\u200E'), 'yenom Cash drawers');
+  assert.equal([...nav.cleanLabel('\u{1F3BF}'.repeat(50))].length, 40, 'counted in characters, not UTF-16 units');
+  f.frame.setPins([{ id: 'x', label: '\u202EStreet\u202C notices', href: 'notices', app: 'notices' }], null);
+  assert.equal(texts(f.doc, '.nav-pins .nav-row')[0], 'Street notices', 'what the frame draws is clean too');
+  // The round + on a phone: not while the page shows its own primary New button.
+  const g = frameFor({ me: { role: 'manager', org_type: 'municipality' }, views: muniViewsFor('manager'), menu: menus.muniMenuFor('manager') });
+  g.frame.setNew([{ id: 'wo', label: 'Work order', href: 'works?new=1', app: 'works' }]);
+  g.frame.setCurrent('works');
+  const page = g.doc.createElement('div');
+  page.innerHTML = '<div class="page-head"><h1>Work orders</h1><button class="btn primary">New work order</button></div><p>Rows</p>';
+  g.main.append(page);
+  g.frame.setWhere({ part: 'Open', help: null });
+  assert.equal(g.doc.querySelector('.new-fab').hidden, true, 'the page has its own New work order: no round +');
+  assert.ok(!g.doc.querySelector('.shell').classList.contains('has-fab'));
+  page.remove();
+  g.frame.setCurrent('works');
+  const plain = g.doc.createElement('div'); plain.innerHTML = '<div class="page-head"><h1>Work orders</h1><button class="btn primary">Export</button></div>';
+  g.main.append(plain);
+  g.frame.setWhere({ part: 'Done', help: null });
+  assert.equal(g.doc.querySelector('.new-fab').hidden, false, 'a primary button that creates nothing does not count');
+  assert.ok(g.doc.querySelector('.shell').classList.contains('has-fab'), 'the page leaves room for it at the bottom');
+  assert.match(css, /\.shell\.has-fab \.main \{ padding-bottom: calc\(168px/);
+  // The account menu: one theme listener however often it opens, and /version asked for once.
+  const w = g.w;
+  let added = 0; let asked = 0;
+  const realAdd = w.addEventListener.bind(w);
+  w.addEventListener = (type, ...rest) => { if (type === 'theme:change') added += 1; return realAdd(type, ...rest); };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, ...rest) => { if (String(u).includes('/version')) { asked += 1; return { json: async () => ({ version: '2026.11.21' }) }; } return realFetch(u, ...rest); };
+  try {
+    for (let i = 0; i < 4; i += 1) { g.doc.querySelector('.acct').click(); await sleep(5); press(w, g.doc.activeElement, 'Escape'); }
+    g.doc.querySelector('.acct').click();
+    assert.ok(added <= 1, `theme:change listeners added: ${added}`);
+    assert.ok(asked <= 1, `/version asked ${asked} times`);
+    assert.equal(g.doc.querySelector('.acct-menu .who-version').textContent, 'Verdynt/OS 2026.11.21');
+    g.doc.querySelector('.acct-menu [data-theme=dark]').click();
+    assert.equal(g.doc.querySelector('.acct-menu [data-theme=dark]').getAttribute('aria-checked'), 'true', 'the one listener still ticks the choice');
+    g.doc.querySelector('.acct-menu [data-theme=device]').click();
+  } finally { w.addEventListener = realAdd; globalThis.fetch = realFetch; }
+  ui.ctx.me = null;
   await sleep(250);
 });
 

@@ -196,7 +196,7 @@ test('the phone bar starts with the screen the menu opens on; shortcuts show for
   assert.match(main, /const menu = ctx\.me\.role === 'area' \? AREA_MENU : ctx\.me\.menu \|\| null;/);
   assert.match(main, /links: ctx\.me\.menu_links \|\| \{\}/);
   // the bar's first item is lit when you are there: the same aria-current as the side menu
-  assert.match(read('public/js/nav.js'), /for \(const s of shown\) \{ if \(on\(s\)\) s\.el\.setAttribute\('aria-current', 'page'\); else s\.el\.removeAttribute\('aria-current'\); \}/);
+  assert.match(read('public/js/nav.js'), /if \(said\) s\.el\.setAttribute\('aria-current', 'page'\); else s\.el\.removeAttribute\('aria-current'\);/);
 });
 
 test('one name for each role: the person card and the menu editor agree', () => {

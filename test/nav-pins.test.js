@@ -227,6 +227,14 @@ test('the limits: 12 pins, a name of 1 to 40 characters, no page twice', async (
   is(r41, 400);
   assert.equal(r41.body.error, 'A pin\'s name can be up to 40 characters');
   is(await save(t, [appPin('money', '   ')]), 400, 'a name of spaces');
+  // A name is counted in characters as a person counts them: 40 emoji is 40, not 80 UTF-16 units.
+  assert.equal([...ok(await save(t, [appPin('money', '\u{1F3BF}'.repeat(40))])).pins[0].label].length, 40, 'forty emoji fit');
+  is(await save(t, [appPin('money', '\u{1F3BF}'.repeat(41))]), 400, 'forty-one do not');
+  // Control and text-direction characters are taken out, so a name cannot hide or turn around what the menu shows.
+  const sly = ok(await save(t, [appPin('money', '\u202Eyenom\u202C \u2066Cash\u2069\u200F\u0007 \u0085drawers\u200E')])).pins[0].label;
+  assert.equal(sly, 'yenom Cash drawers');
+  assert.equal((await api('GET', '/me/nav', { token: t })).body.pins[0].label, 'yenom Cash drawers', 'kept clean');
+  is(await save(t, [appPin('money', '\u202E\u2066\u0000')]), 400, 'a name that is nothing but such characters is no name');
   is(await save(t, [appPin('money', '')]), 400);
   is(await save(t, [{ id: 'a', label: 'Money', href: 'money' }, { id: 'a', label: 'Sell', href: 'sell' }]), 400, 'one id twice');
   is(await save(t, [{ id: 'a', label: 'Money', href: 'money' }, { id: 'b', label: 'Money too', href: 'money' }]), 400, 'one page twice');

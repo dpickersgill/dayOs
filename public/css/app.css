@@ -1001,8 +1001,8 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .nav-row { position: relative; display: flex; align-items: center; gap: 10px; width: calc(var(--rail-open) - 24px); height: 32px; padding: 0 8px 0 11px; border-radius: var(--radius); color: var(--side-ink); font-size: .875rem; line-height: 1.2; text-decoration: none; cursor: pointer; -webkit-touch-callout: none; }
 .nav-row .ico { color: var(--side-ico); }
 .nav-row:hover { background: var(--side-hover); color: var(--ink); }
-.nav-row[aria-current='page'] { background: var(--side-active-bg); color: var(--side-active-ink); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent-line); }
-.nav-row[aria-current='page'] .ico { color: currentColor; }
+.nav-row[aria-current='page'], .nav-row.is-current { background: var(--side-active-bg); color: var(--side-active-ink); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent-line); }
+.nav-row[aria-current='page'] .ico, .nav-row.is-current .ico { color: currentColor; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A section's label: quiet words, not a heading that shouts. It is a button that folds its section. */
 .nav-sec { width: calc(var(--rail-open) - 24px); padding-top: 2px; }
@@ -1050,8 +1050,11 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .shell.collapsed .rail:not(.peek) .rail-toggle { position: absolute; inset: 0; width: var(--rail-strip); height: 55px; border: 0; border-radius: 0; background: var(--side); opacity: 0; }
 .shell.collapsed .rail:not(.peek) .rail-toggle:hover, .shell.collapsed .rail:not(.peek) .rail-toggle:focus-visible { opacity: 1; }
 /* The strip opened over the page by the pointer or the keyboard: the page under it does not move. */
-.shell.collapsed .rail.peek { width: var(--rail-open); box-shadow: 10px 0 30px rgba(8, 28, 36, .16); }
-:root[data-theme='dark'] .shell.collapsed .rail.peek { box-shadow: 10px 0 30px rgba(0, 0, 0, .5); }
+.shell.collapsed .rail.peek { width: var(--rail-open); border-right-color: var(--line-strong); box-shadow: 10px 0 30px rgba(8, 28, 36, .16); }
+/* In the dark theme a shadow alone is lost on the dark page: a lighter edge and a raised surface set the panel apart. */
+:root[data-theme='dark'] .shell.collapsed .rail.peek { --side: #13212a; border-right-color: #5b7584; box-shadow: 1px 0 0 rgba(255, 255, 255, .06), 14px 0 36px rgba(0, 0, 0, .65); }
+/* The "moved here" note stays beside the panel while it is open over the page, never over the person's name. */
+.shell.collapsed .rail.peek .moved-here.by-rail { left: calc(var(--rail-open) + 10px); }
 .rail { transition: width .14s ease-out; }
 
 /* ---- menus that open from a button: the account menu and + New */
@@ -1154,9 +1157,9 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .tab .ico { color: var(--side-ico); }
 /* A bar label is 12 letters at most (nav.js SHORT and barLabel), so it is never cut. */
 .tab span { white-space: nowrap; }
-.tab[aria-current='page'], .tab.on { color: var(--ink); font-weight: 700; }
-.tab[aria-current='page'] .ico, .tab.on .ico { color: currentColor; }
-.tab[aria-current='page']::before, .tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 var(--radius-xs) var(--radius-xs); background: var(--accent-line); }
+.tab[aria-current='page'], .tab.is-current, .tab.on { color: var(--ink); font-weight: 700; }
+.tab[aria-current='page'] .ico, .tab.is-current .ico, .tab.on .ico { color: currentColor; }
+.tab[aria-current='page']::before, .tab.is-current::before, .tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 var(--radius-xs) var(--radius-xs); background: var(--accent-line); }
 .tab .nav-badge:not(.dot) { position: absolute; top: 6px; left: calc(50% + 3px); margin: 0; min-width: 16px; height: 16px; padding: 0 4px; font-size: .625rem; box-shadow: 0 0 0 2px var(--side); }
 .tab.has-new::after { content: ''; position: absolute; top: 10px; left: calc(50% + 8px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent-line); box-shadow: 0 0 0 2px var(--side); }
 .new-fab { position: fixed; z-index: 44; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); box-shadow: 0 6px 16px rgba(14, 38, 50, .28); cursor: pointer; }
@@ -1180,8 +1183,8 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
 .sheet-item { position: relative; min-width: 0; min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); font-size: .75rem; line-height: 1.15; text-align: center; text-decoration: none; -webkit-touch-callout: none; user-select: none; }
 .sheet-item .ico { color: var(--side-ico); }
 .sheet-item-text { max-width: 100%; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.sheet-item[aria-current='page'] { background: var(--accent-tint); border-color: var(--accent-line); font-weight: 700; }
-.sheet-item[aria-current='page'] .ico { color: currentColor; }
+.sheet-item[aria-current='page'], .sheet-item.is-current { background: var(--accent-tint); border-color: var(--accent-line); font-weight: 700; }
+.sheet-item[aria-current='page'] .ico, .sheet-item.is-current .ico { color: currentColor; }
 .sheet-item .nav-badge:not(.dot) { position: absolute; top: 5px; right: 6px; margin: 0; min-width: 16px; height: 16px; padding: 0 4px; font-size: .625rem; }
 .sheet-acct { width: 100%; min-height: 60px; margin-top: 16px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--quiet); font: inherit; text-align: left; cursor: pointer; }
 .sheet-acct .who-text b { font-size: .9375rem; }
@@ -1214,7 +1217,8 @@ kbd { font: inherit; font-size: .75rem; line-height: 1; padding: 3px 5px; border
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: calc(64px + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--side); border-top: 1px solid var(--side-line); }
   .new-fab { display: grid; }
   .main { padding-bottom: 120px; }
-  .frame:has(~ .new-fab:not([hidden])) .main { padding-bottom: 168px; }
+  /* Room under the last of the page for the round + (56 px and its gap) above the bottom bar, so it never covers it. */
+  .shell.has-fab .main { padding-bottom: calc(168px + env(safe-area-inset-bottom, 0px)) !important; }
   .fab { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
   /* A block overlay, so the sheet grows with what is in it and the overlay scrolls: the sheet scrolls as one. */
   .overlay.menu-overlay { padding: 0; display: block; overflow-y: auto; overscroll-behavior: contain; }
@@ -1526,7 +1530,7 @@ input[type='search'][aria-label='Search documents'] { min-width: min(20rem, 100%
 .demo-pill { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: var(--radius-pill); background: var(--sel-bg); color: var(--sel-ink); font-size: 0.875rem; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); }
 .demo-pill a { color: var(--sel-ink); font-weight: 700; text-underline-offset: 3px; }
 /* On a phone the pill sits just above the bottom bar (the frame's breakpoint), and leaves the corner to the round + New button. */
-@media (max-width: 860px) { .demo-pill { left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-md); } .shell:has(.new-fab:not([hidden])) ~ .demo-pill { right: 84px; } }
+@media (max-width: 860px) { .demo-pill { left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-md); } .shell.has-fab ~ .demo-pill { right: 84px; } }
 .cred { width: min(420px, 100%); padding: 16px 18px; border: 2px solid var(--ink); border-radius: var(--radius); background: var(--surface); }
 .cred-h { font-weight: 700; margin-bottom: 8px; }
 .cred dl { display: grid; gap: 6px; margin: 0; }

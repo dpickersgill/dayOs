@@ -280,7 +280,7 @@ test('Edit: reorder with the arrows, rename, unpin, and reset to the role\'s men
   let box = document.querySelector('.pins-name-input');
   assert.equal(document.activeElement, box);
   assert.equal(box.value, 'Lost and found');
-  assert.equal(box.getAttribute('maxlength'), '40');
+  assert.equal(box.getAttribute('maxlength'), '80', 'the box counts UTF-16 units, so it allows room for 40 emoji; the name is kept to 40 characters');
   box.value = 'Nope';
   box.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.ok(editor(), 'Escape in the name box does not close Edit');
@@ -367,6 +367,28 @@ test('a save the server refuses puts the menu back and says why', { skip }, asyn
   assert.equal((await serverNav('counter')).custom, false);
   assert.equal(ui.ctx.me.nav.custom, false);
   assert.equal(star().getAttribute('aria-pressed'), 'false');
+});
+
+test('Edit tells a phone to press and hold, and a computer to right-click; pin names lose control and text-direction characters', { skip }, async () => {
+  const words = () => document.querySelector('.pins-edit .pins-section p.muted').textContent;
+  await open('staff');
+  say('nav:edit-pins', { bar: false });
+  assert.match(words(), /right-click it in the menu\./, 'a computer');
+  document.querySelector('.dialog header button').click();
+  window.matchMedia = (q) => ({ matches: /max-width: 860px|pointer: coarse/.test(q) });
+  try {
+    await open('staff');
+    say('nav:edit-pins', { bar: false });
+    assert.match(words(), /press and hold it in Menu\./, 'a phone: there is no right-click');
+    assert.ok(!/right-click/.test(words()));
+    document.querySelector('.dialog header button').click();
+  } finally { delete window.matchMedia; }
+  const { frame, star } = await open('staff');
+  say('nav:page', { key: 'gate', href: 'gate?tab=cards', label: '\u202EGate\u202C: \u2066Cards\u2069\u0007' });
+  click(star());
+  assert.equal(frame.last().pins.at(-1).label, 'Gate: Cards', 'the star names the pin without them');
+  await settle();
+  ok(await api('DELETE', '/me/nav', { token: T.staff }));
 });
 
 test('twelve pins is the most: the thirteenth is not added, and says so', { skip }, async () => {

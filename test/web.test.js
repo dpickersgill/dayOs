@@ -622,7 +622,7 @@ test('theme: follows the device until the person picks Light or Dark in the acco
   const nav = await mods.imp('nav.js');
   const acct = document.querySelector('.rail .acct');
   assert.equal(acct.querySelector('.who-text b').textContent, 'owner', 'the account row: the login\'s short name');
-  assert.equal(acct.getAttribute('aria-label'), `Account: owner@${slug}.test, Owner`);
+  assert.match(acct.getAttribute('aria-label'), new RegExp(`^Account: owner@${slug}\\.test, Owner(\\. Something new in Help)?$`), 'its name, and What\'s new when there is something (said in words, not only aria-description)');
   acct.click();
   assert.equal(document.querySelector('.acct-menu .menu-who b').textContent, `owner@${slug}.test`);
   const choices = [...document.querySelectorAll('.acct-menu [role=menuitemradio]')];
@@ -720,7 +720,8 @@ test('role menus: a patroller starts on Patrol; the phone Menu sheet shows Home,
     assert.deepEqual([...sheet.querySelectorAll('.sheet-home .sheet-item')].map((a) => a.dataset.key), ['dashboard', 'inbox', 'calendar', 'myshifts'], 'Home');
     assert.deepEqual([...sheet.querySelectorAll('.sheet-pins .sheet-item')].map((a) => a.dataset.key), ['patrol', 'conditions'], 'Pinned');
     assert.deepEqual([...sheet.querySelectorAll('.sheet-label h3')].map((x) => x.textContent), ['Pinned', 'Mountain', 'Back office'], 'then each section, labeled');
-    assert.deepEqual([...sheet.querySelectorAll('.sheet-item[aria-current=page]')].map((a) => a.dataset.key), ['patrol', 'patrol'], 'the open app: its pin and its tile in its section');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-item[aria-current=page]')].map((a) => a.dataset.key), ['patrol'], 'the open app\'s tile in its section is the current page');
+    assert.deepEqual([...sheet.querySelectorAll('.sheet-item.is-current')].map((a) => a.dataset.key), ['patrol', 'patrol'], 'its pin is drawn as current too');
     assert.equal(sheet.querySelector('.sheet-chip'), null, 'no Patrol section chips: they are tabs on the page');
     assert.equal(sheet.querySelector('.nav-all-head, .nav-fold'), null, 'no All apps and no folding on a phone: every section is open');
     assert.ok(sheet.querySelector('.sheet-help-here'), 'Guest needs help, for those who have it');

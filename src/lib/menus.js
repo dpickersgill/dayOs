@@ -320,11 +320,22 @@ function startingPins(menu, may) {
   return out;
 }
 
+/**
+ * A pin's name as it is kept: control characters and the characters that turn text around (bidirectional overrides
+ * and isolates, the left-to-right and right-to-left marks) taken out, so a name cannot hide or reorder what the menu
+ * shows; runs of spaces folded. The same rule as nav.js cleanLabel.
+ */
+// eslint-disable-next-line no-control-regex
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const cleanText = (v) => (typeof v === 'string' ? v.replace(UNSAFE_TEXT, '').replace(/\s+/g, ' ').trim() : '');
+/** How long a name is as a person counts it: in characters (code points), so an emoji or an accented letter is one. */
+const textLength = (v) => [...v].length;
+
 /** One pin as it is kept and sent, or null when it is not a pin at all (a stored row is read through this too). */
 function cleanPin(p) {
   if (!p || typeof p !== 'object') return null;
-  const label = typeof p.label === 'string' ? p.label.trim() : '';
-  if (!PIN_ID.test(String(p.id || '')) || !label || label.length > PIN_LABEL_MAX || !goodHref(p.href)) return null;
+  const label = cleanText(p.label);
+  if (!PIN_ID.test(String(p.id || '')) || !label || textLength(label) > PIN_LABEL_MAX || !goodHref(p.href)) return null;
   const pin = { id: String(p.id), label, href: p.href, app: appOfHref(p.href) };
   if (typeof p.icon === 'string' && PIN_ICON.test(p.icon)) pin.icon = p.icon;
   return pin;
@@ -341,9 +352,9 @@ function checkNav(body, may) {
   if (list.length > PIN_MAX) return { problem: `You can have up to ${PIN_MAX} pins. Unpin one to add another.` };
   const pins = [];
   for (const raw of list) {
-    const label = raw && typeof raw.label === 'string' ? raw.label.trim() : '';
+    const label = raw ? cleanText(raw.label) : '';
     if (!label) return { problem: 'Every pin needs a name' };
-    if (label.length > PIN_LABEL_MAX) return { problem: `A pin's name can be up to ${PIN_LABEL_MAX} characters` };
+    if (textLength(label) > PIN_LABEL_MAX) return { problem: `A pin's name can be up to ${PIN_LABEL_MAX} characters` };
     if (!raw || !goodHref(raw.href)) return { problem: `"${label}" does not point to a page in Verdynt/OS, so it cannot be pinned` };
     const app = appOfHref(raw.href);
     if (raw.app !== undefined && raw.app !== app) return { problem: `"${label}" names one app and points to another. Pin the page again.` };

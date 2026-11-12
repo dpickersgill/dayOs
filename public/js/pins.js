@@ -10,10 +10,13 @@
 // pressed) and nav:row-menu (a row was right-clicked or long-pressed). main.js loads it after the frame is built.
 import { h, clear, ctx, svg, dialog, toast } from './ui.js';
 import { icon } from './icons.js';
+import { cleanLabel } from './nav.js';
 import { get, put, del, describeError } from './api.js';
 
 export const PIN_MAX = 12;
 export const LABEL_MAX = 40;
+/** A phone or tablet, where a menu row is pressed and held rather than right-clicked. */
+const touchScreen = () => { try { return window.matchMedia('(max-width: 860px)').matches || window.matchMedia('(pointer: coarse)').matches; } catch (_) { return false; } };
 export const BAR_MAX = 4;
 // A page address a pin may hold, as the server checks it (src/lib/menus.js): an app, path parts, a query; no ".." part.
 const HREF = /^[a-z0-9-]+(\/[A-Za-z0-9_.-]+)*(\?[A-Za-z0-9_=&%.,:+-]*)?$/;
@@ -138,7 +141,7 @@ export function start(frame) {
     if (!canEdit || !at) return false;
     if (pinAt(at)) return true;
     if (state.pins.length >= PIN_MAX) { toast(`You have ${PIN_MAX} pins, the most there can be. Unpin one to add another.`, 'warn'); return false; }
-    const name = String(label || '').trim().slice(0, LABEL_MAX).trim() || appOf(at);
+    const name = cleanLabel(label) || appOf(at); // no control or text-direction characters; 40 characters as people count them
     change([...state.pins, { id: newId(), label: name, href: at, app: app || appOf(at), ...(ico ? { icon: ico } : {}) }]);
     toast(`Pinned ${name}`);
     return true;
@@ -236,7 +239,7 @@ export function start(frame) {
     const iconBtn = (act, name, label, disabled, run) => h('button', { type: 'button', class: 'pins-icon-btn', 'data-act': act, 'aria-label': label, title: label, disabled, onclick: run }, glyph(name, 16));
 
     function rename(p, value) {
-      const name = String(value || '').trim().slice(0, LABEL_MAX).trim();
+      const name = cleanLabel(value);
       renaming = null;
       dlg.setDirty(false);
       if (!name || name === p.label) { redraw(`[data-id="${p.id}"] [data-act=rename]`); return; }
@@ -288,7 +291,8 @@ export function start(frame) {
       dragFrom(handle, li, list);
       let middle;
       if (renaming === p.id) {
-        const box = h('input', { type: 'text', class: 'pins-name-input', maxlength: String(LABEL_MAX), value: p.label, 'aria-label': `Name for ${p.label}`, autocomplete: 'off' });
+        // maxlength counts UTF-16 units (an emoji is two), so it allows twice the room; cleanLabel keeps 40 characters.
+        const box = h('input', { type: 'text', class: 'pins-name-input', maxlength: String(LABEL_MAX * 2), value: p.label, 'aria-label': `Name for ${p.label}`, autocomplete: 'off' });
         // Escape puts the name back without closing the dialog; a name being typed does not make the dialog ask to discard.
         box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); renaming = null; dlg.setDirty(false); redraw(`[data-id="${p.id}"] [data-act=rename]`); } });
         box.addEventListener('input', (e) => e.stopPropagation());
@@ -364,7 +368,7 @@ export function start(frame) {
       clear(body).append(
         h('section', { class: 'pins-section', 'aria-labelledby': 'pins-list-h' },
           h('h3', { id: 'pins-list-h', class: 'sr' }, 'Pinned'),
-          h('p', { class: 'muted small' }, `Pinned pages are at the top of your menu, on every device you sign in on. Up to ${PIN_MAX}. To pin a page, open it and press the star at the top, or right-click it in the menu.`),
+          h('p', { class: 'muted small' }, `Pinned pages are at the top of your menu, on every device you sign in on. Up to ${PIN_MAX}. To pin a page, open it and press the star at the top, or ${touchScreen() ? 'press and hold it in Menu' : 'right-click it in the menu'}.`),
           state.pins.length ? list : h('p', { class: 'pins-none' }, 'Nothing is pinned. Every app you can use is still in the menu, in its section.'),
           resetRow),
         barSection());
