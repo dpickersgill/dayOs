@@ -12,6 +12,7 @@ import { h, clear, button, toast, formDialog, confirmDialog, dialog, state, fiel
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { CONDITIONS, CRITICALITIES, OWNERSHIP, riskState, riskColor, scoreSelect, photoStrip, runHoursTable, miniMap, inspectDialog, inspectionRows } from './asset-bits.js';
 import { workOrderSheet } from './asset-page.js';
+import { streetField, utilityPanel } from './utility-bits.js';
 
 const GOOD_M = 8; const OK_M = 15; const STEP_M = 6;
 const US_VIEW = { lat: 39.8283, lng: -98.5795, zoom: 4 };
@@ -297,6 +298,7 @@ export async function drawMap(box, deep = '') {
       field('Condition', scoreSelect('condition_score', CONDITIONS, f.condition_score), '1 is new, 5 is failed or failing'),
       field('Criticality', scoreSelect('criticality', CRITICALITIES, f.criticality), 'What happens if it fails: 1 little, 5 severe'),
       field('Owned by', select([['', 'Not set'], ...OWNERSHIP], f.ownership || '', { name: 'ownership' })),
+      isMuni() ? streetField(f.street_id) : null, // 2026.11.20
       field('Size', input({ name: 'size', value: f.size || '', maxlength: 40, placeholder: k.geometry === 'line' ? 'For example: 8 in' : '' })),
       field('Material', input({ name: 'material', value: f.material || '', maxlength: 40, placeholder: k.geometry === 'line' ? 'For example: ductile iron, HDPE' : '' })),
       field('Depth (ft)', input({ name: 'depth_ft', type: 'number', step: '0.5', min: '0', value: f.depth_ft ?? '' })),
@@ -306,7 +308,8 @@ export async function drawMap(box, deep = '') {
       field('Notes', h('textarea', { name: 'notes', rows: 3, maxlength: 1000 }, f.notes || '')));
     formDialog(isNew ? `New ${k.label.toLowerCase()}` : `Edit ${title(f)}`, body, async (fd) => {
       const b = { kind: val(fd, 'kind'), name: val(fd, 'name'), tag: val(fd, 'tag'), size: val(fd, 'size'), material: val(fd, 'material'), depth_ft: num(fd, 'depth_ft'), installed_year: num(fd, 'installed_year'),
-        status: val(fd, 'status'), asset_id: num(fd, 'asset_id'), notes: val(fd, 'notes'), condition_score: num(fd, 'condition_score'), criticality: num(fd, 'criticality'), ownership: val(fd, 'ownership') };
+        status: val(fd, 'status'), asset_id: num(fd, 'asset_id'), notes: val(fd, 'notes'), condition_score: num(fd, 'condition_score'), criticality: num(fd, 'criticality'), ownership: val(fd, 'ownership'),
+        ...(fd.has('street_id') ? { street_id: num(fd, 'street_id') } : {}) };
       let saved;
       if (isNew) saved = await post('/assets/map/features', { ...b, geometry: f.geometry, points: f.points, placed_how: f.placed_how, accuracy_m: f.accuracy_m });
       else saved = await patch(`/assets/map/features/${f.id}`, b);
@@ -358,7 +361,7 @@ export async function drawMap(box, deep = '') {
       ['Depth', f.depth_ft != null ? `${f.depth_ft} ft` : null], ['Year installed', f.installed_year], ['Length or area', measure(f)],
       ['Status', f.status !== 'in_service' ? (STATUS.find((x) => x[0] === f.status) || [null, label(f.status)])[1] : null],
       ['Owned by', f.ownership ? (OWNERSHIP.find((o) => o[0] === f.ownership) || [null, f.ownership])[1] : null],
-      ['Asset', f.asset_id ? h('a', { href: `#/assets/a/${f.asset_id}` }, `${f.asset_name}${f.asset_tag ? ` (${f.asset_tag})` : ''}`) : null], ['Notes', f.notes],
+      ['Asset', f.asset_id ? h('a', { href: `#/assets/a/${f.asset_id}` }, `${f.asset_name}${f.asset_tag ? ` (${f.asset_tag})` : ''}`) : null], ['Street', f.street], ['Notes', f.notes],
     ].filter(([, v]) => v !== null && v !== undefined && v !== '');
     const cond = scoreSelect('condition_score', CONDITIONS, f.condition_score); cond.setAttribute('aria-label', 'Condition');
     const crit = scoreSelect('criticality', CRITICALITIES, f.criticality); crit.setAttribute('aria-label', 'Criticality');
@@ -382,7 +385,8 @@ export async function drawMap(box, deep = '') {
       h('section', { class: 'stack tight' }, h('h3', null, 'Inspections'), inspectionRows(f.inspections)),
       f.kind === 'lift_station' || f.run_hours ? h('section', { class: 'stack tight' }, h('h3', null, 'Run hours by month'), runHoursTable(f.run_hours, `/assets/map/features/${id}/run-hours?format=csv`, `${(f.tag || `station-${id}`).replace(/[^A-Za-z0-9-]+/g, '-')}-run-hours.csv`)) : null,
       h('section', { class: 'stack tight' }, h('h3', null, 'Photos'), canEdit ? photoStrip(f.photos, `/assets/map/features/${id}/photos`, again) : (f.photos.length ? photoStrip(f.photos, `/assets/map/features/${id}/photos`, again) : h('p', { class: 'muted' }, 'No photos.'))),
-      f.programs.length ? h('section', { class: 'stack tight' }, h('h3', null, 'Programs'), h('ul', { class: 'plain' }, f.programs.map((p) => h('li', null, h('a', { href: `#/assetprograms/${p.id}` }, p.name), h('span', { class: 'muted small' }, ` ${p.status === 'closed' ? 'closed' : { todo: 'to do', done: 'done', skipped: 'skipped' }[p.target_status]}`))))) : null);
+      f.programs.length ? h('section', { class: 'stack tight' }, h('h3', null, 'Programs'), h('ul', { class: 'plain' }, f.programs.map((p) => h('li', null, h('a', { href: `#/assetprograms/${p.id}` }, p.name), h('span', { class: 'muted small' }, ` ${p.status === 'closed' ? 'closed' : { todo: 'to do', done: 'done', skipped: 'skipped' }[p.target_status]}`))))) : null,
+      utilityPanel(f)); // 2026.11.20: a main's breaks, an outfall's cases, a pump station's rated flows
     const dlg = dialog(title(f), body, { wide: true });
     miniMap(f, { label: `Map of ${title(f)}` }).then((el) => mapSlot.append(el));
   }

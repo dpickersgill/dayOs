@@ -10,6 +10,7 @@ import { get, post, patch, put, sendBytes, fetchBlob, download } from '../api.js
 import { h, clear, ctx, isManager, can, table, state, tabs, input, select, field, button, toast, formDialog, confirmDialog, dialog, val, num, fmtDateTime, fmtDay, empty, errorBox, hashParam, todayStr, addDays } from '../ui.js';
 import { loadLeaflet, makeMap, removeWhenGone, fitMap } from './incident-map.js';
 import { qr } from '../barcode.js';
+import { intakeChecks, requestChecks } from './utility-bits.js';
 
 const TONE = { new: 'warn', assigned: 'neutral', made_safe: 'neutral', fixed: 'good', closed_no_action: 'neutral', duplicate: 'neutral', referred: 'neutral' };
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
@@ -117,6 +118,7 @@ async function openRequest(id, after) {
     h('p', null, clock(r.make_safe), h('br'), clock(r.fix)),
     h('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
     r.public_note ? h('p', null, h('strong', null, 'Note for the resident: '), r.public_note) : null,
+    requestChecks(r, redo), // 2026.11.20: what else is open on the block (utility-bits.js)
     r.contact ? h('section', { class: 'panel' }, h('h3', null, 'Resident'), h('p', null, [r.contact.name, r.contact.phone && h('a', { href: `tel:${r.contact.phone.replace(/[^0-9+]/g, '')}` }, r.contact.phone), r.contact.email].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]))),
       h('p', { class: 'muted small' }, `Updates: ${[r.updates_by_text && 'texts', r.updates_by_email && 'emails'].filter(Boolean).join(' and ') || 'none asked for'}.`))
       : r.has_resident ? h('p', { class: 'muted small' }, 'A resident left contact details. Front desk can see them.') : null,
@@ -256,16 +258,19 @@ function newRequest(done) {
     h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'texts_ok' }), ' They want texts about it (they said yes; they can reply STOP)'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'emails_ok' }), ' They want emails about it')) : null;
   const crew = ctx.me && ctx.me.role === 'staff';
+  const checks = intakeChecks(); // 2026.11.20: already open on the block, and the caller's earlier requests (utility-bits.js)
   formDialog('New request', h('div', { class: 'form' },
     field('What', select(META.categories.filter((c) => c.active).map((c) => [c.id, c.name]), '', { name: 'category_id', required: true })),
     field('How it came in', select(SOURCES, crew ? 'crew' : 'phone', { name: 'source' })),
     field('Street', select([['', 'Pick the street'], ...META.streets.filter((s) => s.active).map((s) => [s.id, s.name])], '', { name: 'street_id' })),
     field('House number', input({ name: 'house_number', maxlength: 20 })), field('Or the nearest cross street', input({ name: 'cross_street', maxlength: 120 })),
     h('div', { class: 'row' }, gps, where),
+    checks,
     field('Description', h('textarea', { name: 'description', rows: 3, maxlength: 1000 })),
     field('Priority', select(PRIORITIES, 'normal', { name: 'priority' })),
     field('Photo', photoField()),
     contact,
+    contact ? checks.callerEl : null,
     isManager() ? h('details', null, h('summary', null, 'They told us earlier (a voicemail, a note)'),
       field('Told at', input({ name: 'reported_at', type: 'datetime-local' })), field('Why it is different', input({ name: 'reported_reason', maxlength: 255 }))) : null), async (fd) => {
     const body = {
@@ -275,6 +280,7 @@ function newRequest(done) {
       ...(desk() ? { contact: { name: val(fd, 'name'), phone: val(fd, 'phone'), email: val(fd, 'email'), texts_ok: fd.get('texts_ok') === 'on', emails_ok: fd.get('emails_ok') === 'on' } } : {}),
     };
     const out = await post('/requests', body);
+    if (!out.repeat) await checks.after(out);
     await sendPhoto(out.id, fd.get('photo'), 'before');
     toast(`Request ${out.reference} saved`);
     if (out.texts_off) toast(out.texts_off, 'error'); // the phone texted STOP: only a texted START turns texts back on
