@@ -23,7 +23,7 @@ async function call(base, method, path, { token, body, headers = {} } = {}) {
 
 /**
  * A new municipality with its owner signed in. opts: slug, name, modules ({ key: true|false } on top of the municipal
- * defaults), key (the platform key, default process.env.BOOTSTRAP_KEY), timezone.
+ * defaults), key (the platform key, default process.env.BOOTSTRAP_KEY), timezone, billing ('comped', the default, or 'trial').
  * Returns { id, slug, name, token, ownerEmail, password, login(username), addLogin(role, extra) }.
  */
 async function createMuniTenant(base, opts = {}) {
@@ -34,7 +34,7 @@ async function createMuniTenant(base, opts = {}) {
   const key = opts.key || process.env.BOOTSTRAP_KEY;
   const made = await call(base, 'POST', '/platform/tenants', {
     headers: { 'x-platform-key': key },
-    body: { slug, name, org_type: 'municipality', timezone: opts.timezone || 'America/New_York', billing: 'comped', modules: opts.modules || {},
+    body: { slug, name, org_type: 'municipality', timezone: opts.timezone || 'America/New_York', billing: opts.billing || 'comped', modules: opts.modules || {},
       owner: { email: ownerEmail, password: PASSWORD, first_name: 'Pat', last_name: 'Manager' } },
   });
   if (made.status !== 201) throw new Error(`createMuniTenant: ${made.status} ${JSON.stringify(made.body)}`);

@@ -153,7 +153,15 @@ router.post('/billing/apps', managers, ownerOnly, validate(z.object({ module: z.
   const all = await B.plansFor(t);
   const planId = Number(b.plan_id) || (all.find((p) => p.kind === 'plan' && p.active && p.monthly_cents) || {}).id;
   if (!planId) throw conflict('Choose a plan on Billing and plan first');
-  const addons = new Set(B.ids(b.addons).filter((id) => all.some((p) => p.id === id && p.kind === 'addon' && p.active)));
+  // The add-ons on now, so changing one keeps every other (2026.11.20 review). With a live subscription they are the
+  // subscription's (the saved choice Stripe bills); without one (the trial, no charge, paid by invoice) they are the
+  // priced add-ons whose apps are on, whatever the saved choice says.
+  const live = Boolean(b.stripe_subscription_id && ['active', 'trialing', 'past_due'].includes(b.sub_status));
+  const onNow = new Set(await M.enabledKeys(t));
+  const current = live
+    ? B.ids(b.addons).filter((id) => all.some((p) => p.id === id && p.kind === 'addon' && p.active))
+    : all.filter((p) => p.kind === 'addon' && p.active && p.modules.length && p.modules.every((k) => onNow.has(k))).map((p) => p.id);
+  const addons = new Set(current);
   if (req.body.on) addons.add(app.addon_id); else addons.delete(app.addon_id);
   await saveChoice(req, { plan_id: planId, addons: [...addons], interval: now.interval });
   // Not paid through Stripe or by invoice yet (a trial, or no charge): the apps do not follow the plan until it is paid,

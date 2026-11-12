@@ -165,3 +165,68 @@ test('2 and 4. the water customer list: 30,000 rows in one import; account numbe
   assert.equal(big.status, 413);
   assert.match(big.body.error, /larger than 5 MB/);
 });
+
+test('5. Apps and add-ons: adding or removing one add-on keeps every other one on (trial, no charge, paid until a date, and a subscription)', async () => {
+  const onOf = async (X) => (await api('GET', '/billing/apps', { token: X.token })).body.apps.filter((a) => a.on).map((a) => a.key);
+  const savedAddons = async (X) => (await pool.query('SELECT addons FROM tenant_billing WHERE tenant_id = ?', [X.id]))[0][0].addons;
+  const addonId = async (X, key) => (await api('GET', '/billing/apps', { token: X.token })).body.apps.find((a) => a.key === key).addon_id;
+  const check = async (X, why) => {
+    is(await api('POST', '/billing/apps', { token: X.token, body: { module: 'stormwater', on: true } }), 200, why);
+    let on = await onOf(X);
+    for (const k of ['water', 'sewer', 'stormwater']) assert.ok(on.includes(k), `${why}: ${k} on after adding Stormwater (${on})`);
+    const ids = String(await savedAddons(X)).split(',').map(Number);
+    for (const k of ['water', 'sewer', 'stormwater']) assert.ok(ids.includes(await addonId(X, k)), `${why}: the plan choice holds ${k}`);
+    is(await api('POST', '/billing/apps', { token: X.token, body: { module: 'sewer', on: false } }), 200, why);
+    on = await onOf(X);
+    assert.ok(on.includes('water') && on.includes('stormwater') && !on.includes('sewer'), `${why}: only Sewer went (${on})`);
+  };
+  await check(await createMuniTenant(base, { billing: 'trial', modules: { water: true, sewer: true } }), 'trial');
+  await check(await createMuniTenant(base, { modules: { water: true, sewer: true } }), 'no charge');
+  // Paid until a date outside Stripe (an invoice): the apps follow the saved choice, which must hold the others.
+  const P = await createMuniTenant(base, { modules: { water: true, sewer: true } });
+  const plan = (await api('GET', '/billing/apps', { token: P.token })).body;
+  is(await api('PUT', `/platform/tenants/${P.id}/billing`, { headers: { 'x-platform-key': process.env.BOOTSTRAP_KEY }, body: { comped: false, paid_until: '2030-01-01', interval: 'year' } }), 200);
+  await check(P, 'paid until a date');
+  assert.ok(plan);
+
+  // A subscription: Stripe is asked for the plan and every add-on on, plus the one added (a stand-in for Stripe's API).
+  const http = require('http');
+  const posted = [];
+  let n = 0;
+  const fake = http.createServer((req, res) => {
+    let data = ''; req.on('data', (c) => { data += c; });
+    req.on('end', () => {
+      const url = req.url.split('?')[0]; const params = new URLSearchParams(data);
+      const send = (b) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
+      if (req.method === 'GET' && url.startsWith('/v1/subscriptions/')) return send({ id: 'sub_x', items: { data: [{ id: 'si_old' }] } });
+      if (req.method === 'POST' && url.startsWith('/v1/subscriptions/')) { posted.push([...params.entries()]); return send({ id: 'sub_x', status: 'active' }); }
+      if (url === '/v1/products') return send({ id: `prod_${++n}` });
+      if (url === '/v1/prices') return send({ id: `price_${++n}` });
+      return send({ id: `x_${++n}` });
+    });
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  const config = require('../src/config');
+  const saved = { ...config.stripe };
+  const [plansBefore] = await pool.query('SELECT * FROM billing_plans');
+  try {
+    Object.assign(config.stripe, { apiBase: `http://127.0.0.1:${fake.address().port}`, secretKey: 'sk_test_x', webhookSecret: 'whsec_x' });
+    const S = await createMuniTenant(base, { modules: { water: true, sewer: true } });
+    const ids = { water: await addonId(S, 'water'), sewer: await addonId(S, 'sewer') };
+    const [[core]] = await pool.query("SELECT id FROM billing_plans WHERE code = 'muni-core'");
+    await pool.query("UPDATE tenant_billing SET comped = 0, plan_id = ?, addons = ?, billing_interval = 'year', stripe_subscription_id = 'sub_x', sub_status = 'active' WHERE tenant_id = ?", [core.id, `${ids.water},${ids.sewer}`, S.id]);
+    is(await api('POST', '/billing/apps', { token: S.token, body: { module: 'stormwater', on: true } }), 200, 'subscription');
+    const items = posted.at(-1).filter(([k]) => /^items\[\d+\]\[price\]$/.test(k));
+    assert.equal(items.length, 4, `the plan and three add-ons: ${JSON.stringify(posted.at(-1))}`);
+    const on = await onOf(S);
+    for (const k of ['water', 'sewer', 'stormwater']) assert.ok(on.includes(k), `subscription: ${k} on (${on})`);
+    is(await api('POST', '/billing/apps', { token: S.token, body: { module: 'water', on: false } }), 200);
+    assert.equal(posted.at(-1).filter(([k]) => /^items\[\d+\]\[price\]$/.test(k)).length, 3, 'the plan, Sewer and Stormwater');
+    const after = await onOf(S);
+    assert.ok(!after.includes('water') && after.includes('sewer') && after.includes('stormwater'), String(after));
+  } finally {
+    Object.assign(config.stripe, saved);
+    await new Promise((r) => fake.close(r));
+    for (const p of plansBefore) await pool.query('UPDATE billing_plans SET stripe_product = ?, stripe_month = ?, stripe_month_cents = ?, stripe_year = ?, stripe_year_cents = ?, stripe_season = ?, stripe_season_cents = ? WHERE id = ?', [p.stripe_product, p.stripe_month, p.stripe_month_cents, p.stripe_year, p.stripe_year_cents, p.stripe_season, p.stripe_season_cents, p.id]);
+  }
+});
