@@ -1,7 +1,7 @@
 // A hauler's or business's yearly recycling form (/hauler-report/<municipality>/<link>, release 2026.11.22): no sign-in,
 // the link is the key and opens only this reporter's form for this year, until the municipality closes the report. Tons
 // by material in the four columns of Pennsylvania's municipal recycling report, the residue, and the processor or market.
-import { h, clear } from './ui.js';
+import { h, clear, appendAll } from './ui.js';
 
 const parts = location.pathname.split('/').filter(Boolean);
 const slug = decodeURIComponent(parts[1] || '');
@@ -39,7 +39,7 @@ function draw(f, { saved = false } = {}) {
     const cols = f.columns.map((c) => ({ key: c.key, el: h('input', { id: `r-${c.key}-${i}`, inputmode: 'decimal', value: fmt(l[c.key]), placeholder: '0' }), label: c.label }));
     const residue = h('input', { id: `r-res-${i}`, inputmode: 'decimal', value: fmt(l.residue), placeholder: '0' });
     const proc = h('input', { id: `r-proc-${i}`, maxlength: 160, value: l.processor || '', autocomplete: 'organization' });
-    const box = h('fieldset', { class: 'bulk-size stack tight' },
+    const box = h('fieldset', { class: 'panel stack tight' },
       h('legend', null, `Material ${i}`), h('div', { class: 'field' }, h('label', { for: mat.id }, 'Material'), mat),
       h('div', { class: 'hr-cols' }, cols.map((c) => h('div', { class: 'field' }, h('label', { for: c.el.id }, `${c.label}, tons`), c.el))),
       h('div', { class: 'field' }, h('label', { for: residue.id }, 'Residue, tons'), residue, h('span', { class: 'hint' }, 'What the processor threw away. It is taken off the tons above.')),
@@ -71,7 +71,7 @@ function draw(f, { saved = false } = {}) {
   const addBtn = h('button', { type: 'button', class: 'btn' }, 'Add another material');
   addBtn.addEventListener('click', () => add());
   none.addEventListener('change', syncNone);
-  clear(root).append(
+  appendAll(clear(root), // appendAll leaves out the parts that do not apply (append would write "null")
     h('div', { class: 'bulk-head' }, h('h1', null, `${f.town}: ${f.year} recycling report`)),
     saved ? h('p', { class: 'help-done', role: 'status' }, h('strong', null, 'Thank you. Your report is in.'), ' You can change it with this link until the municipality closes the report.') : null,
     h('p', null, `For ${f.reporter} (${f.form}). ${f.town} reports its recycling each year to the county under Pennsylvania's Act 101. Please give the tons you collected in ${f.town} in ${f.year}, by material, by ${f.due_words}.`),

@@ -40,8 +40,9 @@ async function requestsPart(panel) {
   let show = ['waiting', 'scheduled', 'delivered', 'cancelled', 'all'].includes(hashParam('show')) ? hashParam('show') : 'waiting';
   const search = input({ type: 'search', placeholder: 'Reference, address or name', 'aria-label': 'Search requests' });
   const body = h('div');
-  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Show' }, ...[['waiting', 'Waiting'], ['scheduled', 'Delivery set'], ['delivered', 'Delivered'], ['cancelled', 'Canceled'], ['all', 'All']]
-    .map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(show === k), onclick: (e) => { show = k; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === e.currentTarget))); load(); } }, t)));
+  // A list rather than buttons, so it fits a phone (2026.11.22 browser check).
+  const seg = select([['waiting', 'Waiting'], ['scheduled', 'Delivery day set'], ['delivered', 'Delivered'], ['cancelled', 'Canceled'], ['all', 'All']], show, { 'aria-label': 'Show' });
+  seg.addEventListener('change', () => { show = seg.value; load(); });
   let timer = null;
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 300); });
   panel.append(h('div', { class: 'week-bar' }, h('div', { class: 'row' }, seg, search),
