@@ -51,7 +51,11 @@ async function send({ tenantId, to, body, promotional = false, tag = null, logId
     line = await require('./helpline').outbound(tenantId, to);
     if (line && line.blocked) return { ok: false, error: line.blocked, refused: true };
   }
-  const r = await post({ to, body, from: from || (line && line.from) });
+  // A phone that texted STOP to the number this would come from gets nothing until it texts START (lib/smsstops.js,
+  // 2026.11.20 review). A Text HELP line keeps its own STOP list (lib/helpline.js), so it is not asked here.
+  const sendFrom = from || (line && line.from) || null;
+  if (!(line && line.from) && await require('./smsstops').stopped(tenantId, to, sendFrom || sharedNumbers()[0] || null)) return { ok: false, error: 'This phone texted STOP to this number', refused: true };
+  const r = await post({ to, body, from: sendFrom });
   if (!r.ok) logFailure({ job: 'sms', tenant: tenantId, message: r.error });
   return r;
 }

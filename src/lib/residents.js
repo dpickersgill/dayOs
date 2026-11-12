@@ -101,7 +101,9 @@ async function stoppedByText(conn, tenantId, phone) {
     WHERE c.tenant_id = ? AND c.channel = 'sms' AND r.phone IS NOT NULL AND REGEXP_REPLACE(r.phone, '[^0-9]', '') IN (?, ?) ORDER BY c.id DESC LIMIT 1`, [tenantId, key, `1${key}`]);
   if (last && last.status === 'opted_out' && last.source === 'text_reply') return true;
   const alert = await one(conn, "SELECT 1 AS x FROM alert_addresses WHERE tenant_id = ? AND channel = 'sms' AND addr = ? AND stopped_at IS NOT NULL AND stop_source = 'text_reply'", [tenantId, key]);
-  return Boolean(alert);
+  if (alert) return true;
+  // A STOP texted before any list here had the phone (lib/smsstops.js, 2026.11.20 review).
+  return require('./smsstops').stoppedAt(tenantId, key);
 }
 
 /**

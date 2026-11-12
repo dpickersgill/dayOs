@@ -326,7 +326,8 @@ router.post('/residents/import', mgr, validate(importBody), async (req, res) => 
         if (dup) continue;
         const a = await SN.addressRow(conn, t, channel, v);
         // A phone that texted STOP, or an address that used the stop link, stays stopped: the import is not a new yes.
-        if (a.stopped_at || (channel === 'sms' && await RES.stoppedByText(conn, t, v))) stopped = true;
+        if (a.stopped_at) stopped = true;
+        else if (channel === 'sms' && await RES.stoppedByText(conn, t, v)) { await SN.stopAddress(conn, t, 'sms', v, 'text_reply'); stopped = true; }
         else {
           if (!a.confirmed_at) await conn.query("UPDATE alert_addresses SET confirmed_at = UTC_TIMESTAMP(), confirmed_by = 'import' WHERE tenant_id = ? AND id = ?", [t, a.id]);
           await SN.recordAnswer(conn, t, a.id, 'opted_in', 'import', req.auth.userId);

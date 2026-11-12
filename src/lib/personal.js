@@ -149,6 +149,7 @@ const NOT_GUESTS = {
   deletion_ledger: 'the record of erasures, kept to replay after a restore', sms_held: 'texts waiting for 8 AM (deleted once sent)',
   // 2026.11.20: an on-call alert's phones is how many of a staff member's phones got it (a count), not a phone number.
   oncall_alerts: 'a count of the on-call person\'s phones alerted, about staff',
+  sms_stops: 'a texted STOP, kept as a keyed hash of the phone (never the number) so the phone is never texted again',
   // 2026.11.13: school tables with no guest column, named so nobody wonders. Each is about a class, a group or staff.
   lesson_live_updates: 'a line or photo to a whole class, deleted after 90 days', school_group_places: 'where a class is, kept for the day only',
   group_program_handoffs: 'drop-off and pickup counts for a school group', pay_line_flags: 'an instructor asking about their own pay',

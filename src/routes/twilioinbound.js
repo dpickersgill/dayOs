@@ -86,6 +86,8 @@ router.post('/sms', express.urlencoded({ extended: false, limit: '20kb' }), asyn
       // a reply to the shared number counts for every customer record and every municipality with that phone.
       const RES = require('../lib/residents');
       const own = await RES.tenantsOfNumber(pool, req.body.To);
+      // Remembered for the number it came to, even for a phone no list has yet (lib/smsstops.js, 2026.11.20 review).
+      await require('../lib/smsstops').record(req.body.From, intent, { tenantIds: own });
       if (!own.length) await applyReply(req.body.From, intent);
       await RES.applyTextReply(pool, req.body.From, intent, { tenantIds: own });
     } catch (err) { logFailure({ job: 'sms_reply', message: err.message }); return res.status(500).type('text/plain').send('Try again'); }

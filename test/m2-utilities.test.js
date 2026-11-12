@@ -419,3 +419,30 @@ test('requests: an open pothole on the same block is shown before saving; a call
   // The public pages never answer it.
   is(await api('GET', `/public/${A.slug}/requests/checks/callers?phone=${encodeURIComponent(phone)}`), 404);
 });
+
+test('a STOP from a phone no list has yet is remembered: a later customer import and street notice never text it, until START', async () => {
+  const M = await createMuniTenant(base, { slug: `ut-stop-${suffix}`, modules: { water: true } });
+  const st = await addStreets(M.id, ['Cherry Street']);
+  const pEarly = newPhone(); const pOther = newPhone();
+  // The phone texts STOP to the shared number before anyone has it on a list.
+  await textBack(pEarly, 'STOP');
+  const [[kept]] = await pool.query('SELECT COUNT(*) AS n FROM sms_stops WHERE phone_hash = ? AND scope_tenant = 0', [require('../src/lib/smsstops').hashOf(keyOf(pEarly))]);
+  assert.equal(Number(kept.n), 1, 'kept as a hash, for the shared number');
+  // Then the customer list arrives with that phone, consent attested.
+  const csv = ['account_number,service_address,unit,phone,email', `C-1,1 Cherry Street,,${pEarly},`, `C-2,3 Cherry Street,,${pOther},`].join('\n');
+  const imp = ok(await api('POST', '/street-notices/service-addresses/import', { token: M.token, body: { csv, consent: true, consent_note: 'Water bill sign-up form, text box ticked' } }));
+  assert.equal(imp.stopped, 1, 'the import counts it as stopped');
+  // And a notice goes out: the phone that said STOP gets nothing.
+  const n = ok(await api('POST', '/street-notices', { token: M.token, body: { type: 'water_outage', title: 'Main break', sms_text: 'Water is off on Cherry Street.', body: 'Crews are repairing a main.', areas: [{ street_id: st['Cherry Street'] }] } }), 201);
+  assert.equal(n.preview.opted_out, 1);
+  ok(await api('POST', `/street-notices/${n.id}/send`, { token: M.token, body: { confirm: true } }));
+  await settled(M, n.id);
+  assert.equal(textsTo(pEarly).length, 0, 'no text to the phone that said STOP');
+  assert.equal(textsTo(pOther).length, 1);
+  // Any other text from the shared number is refused too, at any tenant.
+  const r = await require('../src/lib/sms').send({ tenantId: M.id, to: pEarly, body: 'test' });
+  assert.equal(r.ok, false); assert.equal(r.refused, true);
+  // START lifts it.
+  await textBack(pEarly, 'START');
+  assert.equal((await require('../src/lib/sms').send({ tenantId: M.id, to: pEarly, body: 'Back on the list' })).ok, true);
+});

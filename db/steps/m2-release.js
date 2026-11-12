@@ -6,6 +6,8 @@
 //   (data)                           a typed name that is a department's name (any case) becomes that department
 //   service_addresses.account_number  keeps only the last 4 letters or digits of a water customer's account number (the
 //                                    import matches on match_key, a keyed hash, so the whole number is not needed)
+//   sms_stops                        a texted STOP for the number it went to (scope_tenant 0: the shared numbers), kept
+//                                    as a keyed hash of the phone even when no list has the phone yet
 
 module.exports = ({ tableExists, columnExists }) => [
   ['oncall_rotations.department_id', (c) => columnExists(c, 'oncall_rotations', 'department_id'),
@@ -21,4 +23,12 @@ module.exports = ({ tableExists, columnExists }) => [
     const [r] = await c.query("SELECT COUNT(*) AS n FROM service_addresses WHERE account_number IS NOT NULL AND (CHAR_LENGTH(account_number) > 4 OR account_number REGEXP '[^0-9A-Za-z]')");
     return Number(r[0].n) === 0;
   }, "UPDATE service_addresses SET account_number = NULLIF(RIGHT(REGEXP_REPLACE(account_number, '[^0-9A-Za-z]', ''), 4), '') WHERE account_number IS NOT NULL AND (CHAR_LENGTH(account_number) > 4 OR account_number REGEXP '[^0-9A-Za-z]')"],
+  // A texted STOP, kept for the number it was sent to (lib/smsstops.js): a keyed hash of the phone, never the number.
+  ['sms_stops', (c) => tableExists(c, 'sms_stops'), `CREATE TABLE sms_stops (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    phone_hash    CHAR(64) NOT NULL,
+    scope_tenant  BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    stopped_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sms_stops (phone_hash, scope_tenant)
+  ) ENGINE=InnoDB`],
 ];

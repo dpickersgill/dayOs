@@ -136,7 +136,8 @@ router.post('/service-addresses/import', mgr, validate(importBody), async (req, 
         if (!v) continue;
         out.contacts_kept += 1;
         const a = await SN.addressRow(conn, t, channel, v);
-        if (a.stopped_at || (channel === 'sms' && await RES.stoppedByText(conn, t, v))) { out.stopped += 1; continue; }
+        if (a.stopped_at) { out.stopped += 1; continue; }
+        if (channel === 'sms' && await RES.stoppedByText(conn, t, v)) { await SN.stopAddress(conn, t, 'sms', v, 'text_reply'); out.stopped += 1; continue; }
         if (!a.confirmed_at) {
           await conn.query("UPDATE alert_addresses SET confirmed_at = UTC_TIMESTAMP(), confirmed_by = 'import' WHERE tenant_id = ? AND id = ?", [t, a.id]);
           await SN.recordAnswer(conn, t, a.id, 'opted_in', 'water_customers', req.auth.userId);
