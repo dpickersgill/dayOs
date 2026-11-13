@@ -153,6 +153,31 @@ test('today\'s routes are built from the zones and the street order; a later day
   assert.equal(later.kept, false); assert.equal(later.routes.length, 3); assert.equal(later.routes[0].id, null);
 });
 
+test('cart deliveries of the day are on a route: their zone\'s, else the day\'s first (a zone not collected that day, or no zone)', async () => {
+  const east = (await q("INSERT INTO collection_zones (tenant_id, name, sort) VALUES (?, 'East', 3)", [A.id])).insertId; // no collection days
+  const pine = (await q("INSERT INTO streets (tenant_id, name) VALUES (?, 'Pine Road')", [A.id])).insertId;
+  await q('INSERT INTO collection_zone_streets (tenant_id, zone_id, street_id) VALUES (?, ?, ?)', [A.id, east, pine]);
+  const cart = async (street, no) => (await q("INSERT INTO cart_requests (tenant_id, reference, view_token, kind, stream_id, size_gal, street_id, house_number, status, deliver_on) VALUES (?, ?, ?, 'new', ?, 95, ?, ?, 'scheduled', ?)",
+    [A.id, crypto.randomBytes(3).toString('hex').toUpperCase().slice(0, 8), crypto.randomBytes(16).toString('hex'), Z.trash, street, no, TODAY])).insertId;
+  const south = await cart(S['Church Street'], '5'); const east5 = await cart(pine, '5'); const nozone = await cart(S['Bridge Street'], '16');
+  const day = (await api('GET', `/solid-waste/routes?date=${TODAY}`, { token: A.token })).body.routes;
+  const carts = async (name) => (await api('GET', `/solid-waste/routes/${day.find((r) => r.name === name).id}`, { token: A.token })).body.carts.map((c) => c.id).sort();
+  assert.deepEqual(await carts('South, Trash'), [south], 'its own zone\'s route');
+  assert.deepEqual(await carts('North, Trash'), [east5, nozone].sort(), 'the day\'s first route takes the rest');
+  assert.deepEqual(await carts('North, Recycling'), []);
+  await q('DELETE FROM cart_requests WHERE tenant_id = ?', [A.id]);
+});
+
+test('every browser file of this workstream parses (a syntax error leaves a page at Loading)', () => {
+  const fs = require('node:fs'); const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-js-'));
+  for (const f of ['public/js/trash-routes.js', 'public/js/haulerpage.js']) {
+    const copy = path.join(dir, `${path.basename(f, '.js')}.mjs`);
+    fs.copyFileSync(path.join(__dirname, '..', f), copy);
+    execFileSync(process.execPath, ['--check', copy]);
+  }
+});
+
 // ---------------------------------------------------------------- who sees what
 test('crew see their own routes and today\'s that nobody is on; the front desk reads but marks nothing', async () => {
   const nt = await routeNamed(A.token, 'North, Trash');
@@ -276,6 +301,19 @@ test('the missed-pickup check reads the route: done with the time, skipped with 
   assert.equal((await check('Main Street', '120', Z.recycling)).outcome, 'not_yet', 'recycling has not been yet');
   assert.equal(await check('Bridge Street', '16', Z.trash), null, 'the even side is in no zone');
   is(await api('GET', `/solid-waste/routes/check?street_id=${S['Main Street']}`, { token: crew1.token }), 403, 'the office\'s');
+  // A past day's route that was never finished does not hold a resident back: only today's route can still be coming.
+  const R = require('../src/lib/collectionroutes');
+  const y = plus(TODAY, -1);
+  const pr = (await q("INSERT INTO collection_routes (tenant_id, on_date, zone_id, stream_id, name, status) VALUES (?, ?, ?, ?, 'North, Trash (yesterday)', 'started')", [A.id, y, Z.north, Z.trash])).insertId;
+  await q("INSERT INTO collection_route_stops (tenant_id, route_id, position, street_id) VALUES (?, ?, 10, ?)", [A.id, pr, S['Main Street']]);
+  const ds = (await q("INSERT INTO collection_route_stops (tenant_id, route_id, position, street_id, from_no, to_no, side, status, marked_at) VALUES (?, ?, 20, ?, 1, 99, 'odd', 'done', ?)", [A.id, pr, S['Bridge Street'], `${y} 07:04:00`])).insertId;
+  assert.equal(await R.routeCheck(pool, A.id, { streetId: S['Main Street'], houseNo: '120', streamId: Z.trash, date: y }), null, 'yesterday, not marked: the check\'s own rule (ok to report)');
+  const yd = await R.routeCheck(pool, A.id, { streetId: S['Bridge Street'], houseNo: '15', streamId: Z.trash, date: y });
+  assert.equal(yd.outcome, 'done');
+  const dayName = new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
+  assert.match(yd.message, new RegExp(`done ${dayName} at 7:04 AM`), 'a day that is not today says which day');
+  assert.match((await R.routeCheck(pool, A.id, { streetId: S['Main Street'], houseNo: '120', streamId: Z.trash, date: TODAY })).message, /done at \d{1,2}:\d{2} [AP]M/, 'today: the time only');
+  await q('DELETE FROM collection_route_stops WHERE route_id = ?', [pr]); await q('DELETE FROM collection_routes WHERE id = ?', [pr]); void ds;
   // The schedule's own missed-pickup check (lib/collection.js pickupCheck) answers from the route: each outcome.
   const sched = async (street, no, stream) => (await api('GET', `/solid-waste/collection/check?street=${S[street]}&no=${no}&stream=${stream}`, { token: desk.token })).body;
   const d1 = await sched('Main Street', '120', Z.trash);
@@ -371,8 +409,12 @@ test('no money for crew and front desk: costs are a manager\'s, and every path i
 // ---------------------------------------------------------------- snow
 test('a snow day: changes by the holiday rule, routes Delayed for snow, a drafted street notice; undo puts it back', async () => {
   is(await api('POST', '/solid-waste/routes/snow-days', { token: crew1.token, body: { on_date: TODAY } }), 403, 'a manager declares it');
+  await q("UPDATE collection_settings SET curb_by = 'Carts out by 7 AM' WHERE tenant_id = ?", [A.id]);
   const r = await api('POST', '/solid-waste/routes/snow-days', { token: mgr.token, body: { on_date: TODAY, zone_ids: [Z.north], note: 'Six inches overnight' } });
   is(r, 201);
+  assert.deepEqual(r.body.finished, ['North, Trash'], 'the route finished this morning is left alone, and said so');
+  const [nb] = await q('SELECT body FROM street_notices WHERE id = ?', [r.body.notice_id]);
+  assert.match(nb.body, /Carts out by 7 AM\./); assert.doesNotMatch(nb.body, /6 AM/, 'the borough\'s own out-by rule');
   const next = (() => { const x = plus(TODAY, 1); return new Date(`${x}T12:00:00Z`).getUTCDay() === 0 ? plus(TODAY, 2) : x; })();
   assert.deepEqual(r.body.changes, [{ from: TODAY, to: next }], 'one zone: that day only moves');
   const [ch] = await q("SELECT reason, moved_to, notice_id FROM collection_changes WHERE tenant_id = ? AND on_date = ? AND reason = 'snow'", [A.id, TODAY]);
@@ -393,6 +435,7 @@ test('a snow day: changes by the holiday rule, routes Delayed for snow, a drafte
   const nextDay = (await api('GET', `/solid-waste/routes?date=${next}`, { token: mgr.token })).body;
   assert.ok(nextDay.moved_in.length, 'the next day shows what moved to it');
   assert.ok(nextDay.routes.some((x) => x.name === 'North, Recycling'), 'North recycling runs the next day');
+  assert.ok(!nextDay.routes.some((x) => x.name === 'North, Trash'), 'North trash was collected already: not again the next day');
   is(await api('POST', '/solid-waste/routes/snow-days', { token: mgr.token, body: { on_date: TODAY, zone_ids: [Z.north] } }), 409, 'declared already');
   const u = await api('POST', `/solid-waste/routes/snow-days/${r.body.id}/undo`, { token: mgr.token });
   is(u, 200); assert.equal(u.body.notice_sent, false);
@@ -411,9 +454,14 @@ test('a whole-borough snow day with the shift rule moves the rest of the week', 
   await q('INSERT INTO collection_zone_days (tenant_id, zone_id, stream_id, weekday) VALUES (?, ?, ?, 1)', [D.id, z.id, s.id]);
   const z2 = (await q("INSERT INTO collection_zones (tenant_id, name) VALUES (?, 'Wednesday')", [D.id])).insertId;
   await q('INSERT INTO collection_zone_days (tenant_id, zone_id, stream_id, weekday) VALUES (?, ?, ?, 3)', [D.id, z2, s.id]);
+  const oak = (await q("INSERT INTO streets (tenant_id, name) VALUES (?, 'Oak Court')", [D.id])).insertId;
+  await q('INSERT INTO collection_zone_streets (tenant_id, zone_id, street_id) VALUES (?, ?, ?)', [D.id, z2, oak]);
   const r = await api('POST', '/solid-waste/routes/snow-days', { token: D.token, body: { on_date: dd } });
   is(r, 201);
   assert.deepEqual(r.body.changes, [{ from: dd, to: plus(dd, 1) }, { from: plus(dd, 2), to: plus(dd, 3) }]);
+  const streetsOn = (await q('SELECT street_id FROM street_notice_areas WHERE notice_id = ?', [r.body.notice_id])).map((x) => Number(x.street_id));
+  assert.ok(streetsOn.includes(oak), 'the notice reaches the Wednesday zone too, whose day moves as well');
+  assert.ok(streetsOn.length >= 2);
 });
 
 // ---------------------------------------------------------------- hauler oversight

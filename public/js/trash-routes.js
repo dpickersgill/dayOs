@@ -141,6 +141,7 @@ async function routePage(el, id) {
       r.status === 'delayed' ? h('p', { class: 'callout rt-delayed' }, `${r.status_words}. Nothing is collected on this route today.`) : null,
       working && r.status === 'planned' ? startPanel(r, () => load()) : null,
       h('ol', { class: 'plain rt-stops' }, r.stops.map((s) => stopRow(s, working && r.status !== 'planned'))),
+      r.carts && r.carts.length ? [h('h3', { class: 'rt-h3' }, `Cart deliveries (${r.carts.length})`), h('ol', { class: 'plain rt-stops' }, r.carts.map((c) => cartRow(c, working && r.status !== 'planned')))] : null,
       r.bulk && r.bulk.length ? [h('h3', { class: 'rt-h3' }, `Bulk pickups on this route (${r.bulk.length})`), h('ol', { class: 'plain rt-stops' }, r.bulk.map((b) => bulkRow(b, working && r.status !== 'planned')))] : null,
       working && r.status === 'started' ? h('div', { class: 'rt-finish' }, button('Finish the route', () => finishDialog(r, () => load()), { kind: 'primary' })) : null,
       isManager() && !r.offline ? managerTools(r, () => load()) : null);
@@ -194,6 +195,15 @@ async function routePage(el, id) {
       await sendPhoto(`/solid-waste/routes/${id}/photos?${q}`, f, { caseId: ROUTE_QUEUE, label: `Photo: ${s.words}`, ref });
       await mark(s, { status: 'skipped', reason, note: note.value.trim() || undefined, photo_ref: ref });
     }, { submitText: 'Save skip' });
+  }
+  /** A cart to drop off: Delivered goes through Carts' own endpoint (stock and the address's carts move with it). */
+  function cartRow(c, canMark) {
+    const row = h('li', { class: `rt-stop rt-${c.done ? 'done' : 'todo'}` },
+      h('div', { class: 'rt-stop-words' }, h('b', null, c.words), h('span', { class: 'rt-tag' }, 'Cart'), h('span', { class: 'rt-why' }, c.what), c.done ? h('span', { class: 'rt-why' }, 'Delivered') : null));
+    if (canMark && !c.done && c.id) row.append(h('div', { class: 'rt-acts' }, h('button', { type: 'button', class: 'rt-btn rt-done-btn', onclick: async () => {
+      try { await post(`/solid-waste/carts/requests/${c.id}/deliver`, {}); c.done = true; toast(`${c.words}: cart delivered`); draw(); } catch (err) { fail(err); }
+    } }, 'Delivered')));
+    return row;
   }
   function bulkRow(b, canMark) {
     const row = h('li', { class: `rt-stop rt-${b.outcome ? (b.outcome === 'picked_up' ? 'done' : 'skipped') : 'todo'}` },
@@ -297,7 +307,7 @@ async function officeHome(el) {
   const views = [['board', 'Today\'s routes'], ['gobacks', 'Go-backs'], ...(isManager() ? [['trucks', 'Trucks and plowing'], ['snow', 'Snow days'], ['costs', 'Costs']] : [])];
   let view = views.some((v) => v[0] === hashParam('view')) ? hashParam('view') : 'board';
   const body = h('div');
-  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Show' });
+  const seg = h('div', { class: 'seg rt-seg', role: 'group', 'aria-label': 'Show' });
   const drawSeg = () => clear(seg).append(...views.map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(view === k), onclick: () => { view = k; setParam('view', k); drawSeg(); show(); } }, t)));
   drawSeg();
   el.append(h('div', { class: 'week-bar' }, seg), body);
@@ -322,7 +332,7 @@ async function boardView(el) {
       d.moved.length ? h('p', { class: 'callout' }, d.moved.map((m) => `${m.zones}: ${m.to ? `moved to ${fmtDay(m.to)}` : 'canceled'} for ${m.reason}`).join('. ')) : null,
       d.moved_in.length ? h('p', { class: 'set-note' }, d.moved_in.map((m) => `${m.zones} from ${fmtDay(m.from)} (${m.reason})`).join('. ')) : null,
       !d.kept ? h('p', { class: 'muted' }, 'A later day: the routes as the schedule has them. They open on the day.') : null,
-      d.routes.length ? h('div', { class: 'figures' }, h('div', { class: 'figure' }, h('strong', null, String(d.routes.length)), h('span', null, 'routes')),
+      d.routes.length ? h('div', { class: 'figures rt-figures' }, h('div', { class: 'figure' }, h('strong', null, String(d.routes.length)), h('span', null, 'routes')),
         h('div', { class: 'figure' }, h('strong', null, `${all.total ? Math.round(((all.done + all.skipped) / all.total) * 100) : 0}%`), h('span', null, 'of streets marked')),
         h('div', { class: 'figure' }, h('strong', null, String(all.skipped)), h('span', null, 'skipped'))) : null,
       d.routes.length ? h('ul', { class: 'plain rt-routes rt-board' }, d.routes.map((r) => (r.id ? routeCard(r) : h('li', null, h('div', { class: 'rt-card' }, h('b', null, r.name), h('span', { class: 'muted' }, `${r.progress.total} streets`)))))) : empty('No collection routes this day.'),
@@ -446,8 +456,9 @@ async function snowDialog(el) {
     const r = await post('/solid-waste/routes/snow-days', { on_date: String(fd.get('on_date')), zone_ids: boxes.filter((b) => b.el.checked).map((b) => b.z.id), note: String(fd.get('note') || '').trim() || undefined });
     dialog('Snow day declared', h('div', { class: 'stack' },
       h('ul', null, r.changes.map((c) => h('li', null, `${fmtDay(c.from)}: ${c.to ? `moves to ${fmtDay(c.to)}` : 'canceled'}`))),
-      h('p', null, `A street notice to ${r.notice.streets} street${r.notice.streets === 1 ? '' : 's'} is drafted. It is not sent until you send it.`),
-      h('blockquote', { class: 'rt-quote' }, r.notice.sms_text),
+      r.finished && r.finished.length ? h('p', null, `Left alone, finished already today: ${r.finished.join('; ')}. Those are not collected again.`) : null,
+      r.notice ? h('p', null, `A street notice to ${r.notice.streets} street${r.notice.streets === 1 ? '' : 's'} is drafted. It is not sent until you send it.`) : null,
+      r.notice ? h('blockquote', { class: 'rt-quote' }, r.notice.sms_text) : null,
       h('p', null, h('a', { class: 'btn primary', href: `#/notices?tab=drafts` }, 'Read and send the notice'))));
     clear(el); snowView(el);
   }, { submitText: 'Declare' });
@@ -464,7 +475,7 @@ async function costsView(el) {
     try { c = await get(`/solid-waste/routes/costs?from=${from.value}&to=${to.value}`); } catch (err) { clear(body).append(errorBox(err)); return; }
     const t = c.totals;
     appendAll(clear(body),
-      h('div', { class: 'figures' },
+      h('div', { class: 'figures rt-figures' },
         h('div', { class: 'figure' }, h('strong', null, money(t.collection.total_cents || 0)), h('span', null, 'collection (Sanitation)')),
         h('div', { class: 'figure' }, h('strong', null, `${t.collection.tons}`), h('span', null, 'tons on tickets')),
         h('div', { class: 'figure' }, h('strong', null, t.collection.cost_per_ton_cents ? money(t.collection.cost_per_ton_cents) : '–'), h('span', null, 'a ton')),
@@ -487,7 +498,7 @@ registerTab({
     const views = [['missed', 'Missed pickups'], ['scorecard', 'Scorecard'], ['contract', 'Contract']];
     let view = views.some((v) => v[0] === hashParam('view')) ? hashParam('view') : 'missed';
     const body = h('div');
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Show' });
+    const seg = h('div', { class: 'seg rt-seg', role: 'group', 'aria-label': 'Show' });
     const drawSeg = () => clear(seg).append(...views.map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(view === k), onclick: () => { view = k; setParam('view', k); drawSeg(); show(); } }, t)));
     const show = () => { clear(body); return ({ missed: missedView, scorecard: scorecardView, contract: contractView })[view](body); };
     drawSeg();
@@ -541,7 +552,7 @@ async function scorecardView(el) {
     appendAll(clear(body),
       h('h3', null, `${c ? c.hauler_name : 'Hauler'}: ${new Date(`${s.month}-15T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`),
       c ? h('p', { class: 'muted' }, `Service level: missed pickups collected within ${c.service_hours} hours.`) : h('p', { class: 'callout' }, 'Add the contract to measure against its service level (24 hours is used until then).'),
-      h('div', { class: 'figures' },
+      h('div', { class: 'figures rt-figures' },
         h('div', { class: 'figure' }, h('strong', null, String(s.missed)), h('span', null, 'missed pickups')),
         h('div', { class: 'figure' }, h('strong', null, s.on_time_rate === null ? '–' : `${s.on_time_rate}%`), h('span', null, 'collected on time')),
         h('div', { class: 'figure' }, h('strong', null, String(s.late + s.open_late)), h('span', null, 'late')),

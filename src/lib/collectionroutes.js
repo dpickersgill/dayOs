@@ -109,12 +109,21 @@ function covers(s, no) {
 
 // ---------------------------------------------------------------- building a day's routes
 /**
+ * What is collected on a day (lib/collection.js dayRoutes), less a stream that a change moved here from a day its route
+ * was already finished on: a snow day leaves finished routes alone, so they are not collected twice.
+ */
+async function planOf(db, t, date) {
+  const finishedBefore = new Set((await rows(db, `SELECT r.zone_id, r.stream_id FROM collection_changes c JOIN collection_routes r ON r.tenant_id = c.tenant_id AND r.on_date = c.on_date AND r.status = 'done'
+    WHERE c.tenant_id = ? AND c.moved_to = ?`, [t, date])).map((x) => `${x.zone_id}|${x.stream_id}`));
+  return (await C.dayRoutes(db, t, date)).filter((p) => !finishedBefore.has(`${p.zoneId}|${p.streamId}`));
+}
+/**
  * Keeps the routes of a day in the database (a day that has come: today or earlier): one per zone and stream collected
  * that day, its streets in order, the go-backs due, and marks a route that a change moved off this day Delayed.
  * Safe to call at the same time from two phones: each route's stops are written once, under its row lock.
  */
 async function ensureRoutes(t, date) {
-  const plan = await C.dayRoutes(pool, t, date);
+  const plan = await planOf(pool, t, date);
   await tx(async (conn) => {
     for (const [i, p] of plan.entries()) {
       await conn.query('INSERT IGNORE INTO collection_routes (tenant_id, on_date, zone_id, stream_id, name, sort) VALUES (?, ?, ?, ?, ?, ?)', [t, date, p.zoneId, p.streamId, `${p.zoneName}, ${p.streamName}`.slice(0, 140), i + 1]);
@@ -232,7 +241,7 @@ async function dayView(req, date) {
   }
   if (!out.kept) {
     // A later day: what the schedule says, nothing kept or marked yet.
-    out.routes = (await C.dayRoutes(pool, t, date)).map((p) => ({ id: null, date, name: `${p.zoneName}, ${p.streamName}`, zone_id: p.zoneId, zone: p.zoneName, stream_id: p.streamId, stream: p.streamName, kind: p.kind, status: 'planned', status_words: 'Planned', crew: [], progress: progressOf(p.streets.map(() => ({ status: 'todo' }))) }));
+    out.routes = (await planOf(pool, t, date)).map((p) => ({ id: null, date, name: `${p.zoneName}, ${p.streamName}`, zone_id: p.zoneId, zone: p.zoneName, stream_id: p.streamId, stream: p.streamName, kind: p.kind, status: 'planned', status_words: 'Planned', crew: [], progress: progressOf(p.streets.map(() => ({ status: 'todo' }))) }));
     return out;
   }
   await ensureRoutes(t, date);
@@ -297,15 +306,20 @@ async function cartStopsOn(t, r, date) {
   let list;
   try { list = (await CT.cartStopsFor(pool, t, date)) || []; } catch (_) { return []; }
   if (!list.length) return [];
-  const first = await one(pool, 'SELECT id FROM collection_routes WHERE tenant_id = ? AND on_date = ? ORDER BY sort, id LIMIT 1', [t, date]);
+  // A delivery goes on its zone's route that day; when its zone is not collected that day (or it has no zone), on the
+  // day's first route, so every delivery of the day is on some route.
+  const dayRoutesKept = await rows(pool, "SELECT id, zone_id FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status <> 'delayed' ORDER BY sort, id", [t, date]);
+  const first = dayRoutesKept[0] || null;
+  const zonesToday = new Set(dayRoutesKept.map((x) => Number(x.zone_id)));
   const out = [];
   for (const c of list) {
     const streetId = Number(c.street_id || 0); const no = c.house_number || null;
     const houseNo = no != null && /^\d+/.test(String(no)) ? parseInt(String(no), 10) : null; // "120A" is house 120 for zones
     const z = streetId ? await C.zoneFor(pool, t, { streetId, houseNo }) : null;
-    const mine = z && z.zoneId ? z.zoneId === Number(r.zone_id) : first && Number(first.id) === Number(r.id);
+    const zoneRoute = z && z.zoneId && zonesToday.has(z.zoneId) ? dayRoutesKept.find((x) => Number(x.zone_id) === z.zoneId) : null;
+    const mine = zoneRoute ? Number(zoneRoute.id) === Number(r.id) : Boolean(first && Number(first.id) === Number(r.id));
     if (!mine) continue;
-    out.push({ id: c.id ? Number(c.id) : null, words: c.address || c.words || `${no ? `${no} ` : ''}${c.street || ''}`.trim(), what: [c.kind_label || c.kind, c.stream, c.size_gal ? `${c.size_gal} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered) }); // the shape tonnage's cartStopsFor returns
+    out.push({ id: c.id ? Number(c.id) : null, reference: c.reference || null, words: c.address || c.words || `${no ? `${no} ` : ''}${c.street || ''}`.trim(), what: [c.kind_label || c.kind, c.stream, c.size_gal ? `${c.size_gal} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered) }); // the shape tonnage's cartStopsFor returns
   }
   return out;
 }
@@ -660,12 +674,18 @@ async function gobackList(req, { status = 'waiting' } = {}) {
 async function routeCheck(conn, t, { streetId, houseNo: no, streamId = null, date }) {
   const z = await C.zoneFor(conn, t, { streetId, houseNo: no });
   if (!z || !z.zoneId) return null;
+  // Only today's route can still be on its way. A past day's route says done or skipped by the street's own mark, and
+  // otherwise nothing (null), so the check's own rule lets the resident report it (ok_to_report).
+  const tz = await tzOf(conn, t);
+  const isToday = date === todayIn(tz);
+  const when = (at) => { const d = dt(at); const c = require('./util').clock(d); return d.slice(0, 10) === todayIn(tz) ? `at ${c}` : `${DAY[weekdayOf(d.slice(0, 10))]} at ${c}`; };
   const list = await rows(conn, `SELECT id, status, moved_to, delayed_reason FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND zone_id = ? ${streamId ? 'AND stream_id = ?' : ''} ORDER BY id`, streamId ? [t, date, z.zoneId, streamId] : [t, date, z.zoneId]);
   if (!list.length) {
     const plan = (await C.dayRoutes(conn, t, date)).find((p) => p.zoneId === z.zoneId && (!streamId || p.streamId === Number(streamId)));
-    return plan ? { outcome: 'not_yet', message: 'The truck is still on its route today.' } : null;
+    return plan && isToday ? { outcome: 'not_yet', message: 'The truck is still on its route today.' } : null;
   }
   const r = list[0];
+  if (r.status === 'delayed' && !isToday) return null;
   if (r.status === 'delayed') {
     const to = ymd(r.moved_to);
     return { outcome: 'not_yet', delayed: true, reason: r.delayed_reason === 'snow' ? 'snow' : 'weather', moved_to: to, message: `Today's pickup on your street is delayed for ${r.delayed_reason === 'snow' ? 'snow' : 'weather'}${to ? `. It is now ${dayWords(to)}` : ''}.` };
@@ -673,10 +693,10 @@ async function routeCheck(conn, t, { streetId, houseNo: no, streamId = null, dat
   const stops = await rows(conn, 'SELECT id, kind, from_no, to_no, side, status, reason, marked_at, photo_id FROM collection_route_stops WHERE tenant_id = ? AND route_id = ? AND street_id = ? ORDER BY marked_at DESC', [t, r.id, streetId]);
   const hit = stops.filter((s) => covers(s, no));
   const done = hit.find((s) => s.status === 'done');
-  if (done) return { outcome: 'done', at: dt(done.marked_at), message: `The crew marked your street done at ${require('./util').clock(dt(done.marked_at))}. Tell us what was missed and we will send someone back.` };
+  if (done) return { outcome: 'done', at: dt(done.marked_at), message: `The crew marked your street done ${when(done.marked_at)}. Tell us what was missed and we will send someone back.` };
   const skipped = hit.find((s) => s.status === 'skipped');
-  if (skipped) return { outcome: 'skipped', at: dt(skipped.marked_at), reason: REASONS[skipped.reason].toLowerCase(), reason_key: skipped.reason, reason_words: REASONS[skipped.reason], photo: Boolean(skipped.photo_id), message: `The crew could not collect on your street today: ${REASONS[skipped.reason].toLowerCase()}. You can still report it, and we will send someone back.` };
-  if (r.status === 'done') return null; // finished without that street marked: the check's own rule
+  if (skipped) return { outcome: 'skipped', at: dt(skipped.marked_at), reason: REASONS[skipped.reason].toLowerCase(), reason_key: skipped.reason, reason_words: REASONS[skipped.reason], photo: Boolean(skipped.photo_id), message: `The crew could not collect on your street ${isToday ? 'today' : `on ${DAY[weekdayOf(dt(skipped.marked_at).slice(0, 10))]}`}: ${REASONS[skipped.reason].toLowerCase()}. You can still report it, and we will send someone back.` };
+  if (r.status === 'done' || !isToday) return null; // finished, or a past day, without that street marked: the check's own rule
   return { outcome: 'not_yet', message: 'The truck is still on its route today.' };
 }
 
@@ -701,15 +721,26 @@ async function declareSnowDay(req, b) {
     const rule = s.holiday_rule || 'shift';
     if (zoneIds.length && (await rows(conn, 'SELECT id FROM collection_zones WHERE tenant_id = ? AND id IN (?)', [t, zoneIds])).length !== zoneIds.length) throw notFound('Zone');
     const plan = await C.dayRoutes(conn, t, b.on_date);
-    const hit = plan.filter((p) => !zoneIds.length || zoneIds.includes(p.zoneId));
+    let hit = plan.filter((p) => !zoneIds.length || zoneIds.includes(p.zoneId));
     if (!hit.length) throw conflict(`Nothing is collected ${zoneIds.length ? 'in those zones ' : ''}on ${dayWords(b.on_date)}`);
+    // Routes the crew already finished that day stay finished: their zone and stream is not collected again. A zone whose
+    // every route is finished does not move at all; the confirmation names what was left alone.
+    const kept = await rows(conn, "SELECT zone_id, stream_id, name FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status = 'done'", [t, b.on_date]);
+    const doneKey = new Set(kept.map((k) => `${k.zone_id}|${k.stream_id}`));
+    const finished = hit.filter((p) => doneKey.has(`${p.zoneId}|${p.streamId}`)).map((p) => `${p.zoneName}, ${p.streamName}`);
+    const zonesAllDone = new Set([...new Set(hit.map((p) => p.zoneId))].filter((z) => hit.filter((p) => p.zoneId === z).every((p) => doneKey.has(`${p.zoneId}|${p.streamId}`))));
+    hit = hit.filter((p) => !zonesAllDone.has(p.zoneId));
+    if (!hit.length) throw conflict(`Every route on ${dayWords(b.on_date)}${zoneIds.length ? ' in those zones' : ''} is finished already. Nothing to move.`);
+    // A whole-borough snow day that leaves a finished zone alone names the zones it moves.
+    const moveZones = !zoneIds.length && zonesAllDone.size ? [...new Set(hit.map((p) => p.zoneId))] : zoneIds;
     const active = await rows(conn, 'SELECT id, zone_ids FROM collection_snow_days WHERE tenant_id = ? AND on_date = ? AND undone_at IS NULL', [t, b.on_date]);
     if (active.some((x) => { const z = zoneIdsOf(x.zone_ids); return !z.length || !zoneIds.length || z.some((i) => zoneIds.includes(i)); })) throw conflict(`A snow day is already declared for ${dayWords(b.on_date)}. Undo it first to change it.`);
-    const moves = [{ from: b.on_date, to: rule === 'skip' ? null : nextRunDay(b.on_date), zones: zoneIds }];
+    const moves = [{ from: b.on_date, to: rule === 'skip' ? null : nextRunDay(b.on_date), zones: moveZones, zoneIds: [...new Set(hit.map((p) => p.zoneId))] }];
     // A whole-borough snow day with the shift rule: the rest of that Monday-Saturday week moves a day too.
     if (rule === 'shift' && !zoneIds.length && weekdayOf(b.on_date) !== 0) {
       for (let d = addDays(b.on_date, 1); weekdayOf(d) !== 0; d = addDays(d, 1)) {
-        if ((await C.dayRoutes(conn, t, d)).length) moves.push({ from: d, to: nextRunDay(d), zones: [] });
+        const later = await C.dayRoutes(conn, t, d);
+        if (later.length) moves.push({ from: d, to: nextRunDay(d), zones: [], zoneIds: [...new Set(later.map((p) => p.zoneId))] });
       }
     }
     const changeIds = [];
@@ -723,13 +754,13 @@ async function declareSnowDay(req, b) {
     // The street notice: the schedule's own draft for a moved or canceled day (routes/collection.js draftNotice), aimed
     // at the zones affected, for the manager to read over and send from Street notices.
     const more = moves.length > 1 ? 'Pickups later this week move one day later too.' : '';
-    const noticeId = await require('../routes/collection').draftNotice(conn, req, { id: changeIds[0], on_date: b.on_date, moved_to: moves[0].to, reason: 'snow', note: [more, b.note].filter(Boolean).join(' ') || null, zone_ids: zoneIds.length ? zoneIds : [...new Set(affected)] });
+    const noticeId = await require('../routes/collection').draftNotice(conn, req, { id: changeIds[0], on_date: b.on_date, moved_to: moves[0].to, reason: 'snow', note: [more, b.note].filter(Boolean).join(' ') || null, zone_ids: [...new Set(moves.flatMap((m) => m.zoneIds))] });
     if (noticeId) await conn.query('UPDATE collection_changes SET notice_id = ? WHERE tenant_id = ? AND id IN (?)', [noticeId, t, changeIds]);
     const nt = noticeId ? await one(conn, 'SELECT title, sms_text FROM street_notices WHERE tenant_id = ? AND id = ?', [t, noticeId]) : null;
     const streetsN = noticeId ? n((await one(conn, 'SELECT COUNT(*) AS c FROM street_notice_areas WHERE tenant_id = ? AND notice_id = ?', [t, noticeId])).c) : 0;
     const [sd] = await conn.query('INSERT INTO collection_snow_days (tenant_id, on_date, zone_ids, change_ids, notice_id, note, declared_by, declared_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, b.on_date, JSON.stringify(zoneIds), JSON.stringify(changeIds), noticeId, b.note || null, req.auth.userId, now]);
     await audit(conn, req, 'snow_day', 'collection_snow_days', sd.insertId, { on_date: b.on_date, zones: zoneIds, rule, changes: moves.length, notice_id: noticeId });
-    return { id: Number(sd.insertId), rule, changes: moves.map((m) => ({ from: m.from, to: m.to })), notice_id: noticeId, notice: nt ? { title: nt.title, sms_text: nt.sms_text, streets: streetsN } : null, delayed: del.affectedRows };
+    return { id: Number(sd.insertId), rule, changes: moves.map((m) => ({ from: m.from, to: m.to })), notice_id: noticeId, notice: nt ? { title: nt.title, sms_text: nt.sms_text, streets: streetsN } : null, delayed: del.affectedRows, finished };
   });
 }
 async function undoSnowDay(req, id) {
