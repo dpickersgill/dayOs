@@ -134,8 +134,10 @@ async function holidaysBetween(conn, tenantId, from, to) {
   return new Map((await rows(conn, 'SELECT on_date, name FROM collection_holidays WHERE tenant_id = ? AND on_date BETWEEN ? AND ?', [tenantId, from, to])).map((h) => [String(h.on_date).slice(0, 10), h.name]));
 }
 async function changesBetween(conn, tenantId, from, to) {
-  return (await rows(conn, `SELECT id, on_date, moved_to, zone_ids, reason, note FROM collection_changes WHERE tenant_id = ? AND (on_date BETWEEN ? AND ? OR moved_to BETWEEN ? AND ?) ORDER BY id DESC`, [tenantId, from, to, from, to]))
-    .map((c) => ({ id: Number(c.id), on_date: String(c.on_date).slice(0, 10), moved_to: c.moved_to ? String(c.moved_to).slice(0, 10) : null, zone_ids: asList(c.zone_ids), reason: c.reason, note: c.note }));
+  // stream_ids (routes workstream, 2026.11.22): a change for some streams only (a snow day leaves a route finished that
+  // day alone); empty or missing: every stream of its zones.
+  return (await rows(conn, `SELECT * FROM collection_changes WHERE tenant_id = ? AND (on_date BETWEEN ? AND ? OR moved_to BETWEEN ? AND ?) ORDER BY id DESC`, [tenantId, from, to, from, to]))
+    .map((c) => ({ id: Number(c.id), on_date: String(c.on_date).slice(0, 10), moved_to: c.moved_to ? String(c.moved_to).slice(0, 10) : null, zone_ids: asList(c.zone_ids), stream_ids: asList(c.stream_ids), reason: c.reason, note: c.note }));
 }
 
 /**
@@ -165,7 +167,7 @@ async function collectionDays(conn, tenantId, { zoneId, from, to }) {
         // A holiday from Monday up to this day, in the same week, moves it one day later.
         for (let h = mondayOf(d); h <= d; h = addDays(h, 1)) if (holidays.has(h)) { item.date = addDays(d, 1); item.moved = true; item.reason = 'holiday'; break; }
       }
-      const change = changes.find((c) => c.on_date === item.date && (!c.zone_ids.length || c.zone_ids.includes(Number(zoneId))));
+      const change = changes.find((c) => c.on_date === item.date && (!c.zone_ids.length || c.zone_ids.includes(Number(zoneId))) && (!c.stream_ids.length || c.stream_ids.includes(Number(stream.id))));
       if (change) {
         if (!change.moved_to) continue; // canceled
         item.date = change.moved_to; item.moved = true; item.reason = change.reason; item.changeId = change.id;

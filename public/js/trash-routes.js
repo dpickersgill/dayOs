@@ -336,6 +336,13 @@ async function boardView(el) {
         h('div', { class: 'figure' }, h('strong', null, `${all.total ? Math.round(((all.done + all.skipped) / all.total) * 100) : 0}%`), h('span', null, 'of streets marked')),
         h('div', { class: 'figure' }, h('strong', null, String(all.skipped)), h('span', null, 'skipped'))) : null,
       d.routes.length ? h('ul', { class: 'plain rt-routes rt-board' }, d.routes.map((r) => (r.id ? routeCard(r) : h('li', null, h('div', { class: 'rt-card' }, h('b', null, r.name), h('span', { class: 'muted' }, `${r.progress.total} streets`)))))) : empty('No collection routes this day.'),
+      d.deliveries && d.deliveries.length ? h('section', { class: 'panel stack' }, h('h3', null, `Deliveries (${d.deliveries.length})`),
+        h('p', { class: 'muted small' }, 'Cart deliveries for this day with no route still on the road to take them.'),
+        h('ol', { class: 'plain rt-stops' }, d.deliveries.map((c) => {
+          const row = h('li', { class: `rt-stop rt-${c.done ? 'done' : 'todo'}` }, h('div', { class: 'rt-stop-words' }, h('b', null, c.words), h('span', { class: 'rt-tag' }, 'Cart'), h('span', { class: 'rt-why' }, c.what), c.done ? h('span', { class: 'rt-why' }, 'Delivered') : null));
+          if (!c.done && c.id) row.append(h('div', { class: 'rt-acts' }, h('button', { type: 'button', class: 'rt-btn rt-done-btn', onclick: async () => { try { await post(`/solid-waste/carts/requests/${c.id}/deliver`, {}); toast(`${c.words}: cart delivered`); await load(); } catch (err) { fail(err); } } }, 'Delivered')));
+          return row;
+        }))) : null,
       d.gobacks_unplaced ? h('p', { class: 'set-note' }, `${d.gobacks_unplaced} go-back${d.gobacks_unplaced === 1 ? '' : 's'} with no route that day. `, h('a', { href: '#/bulk?tab=routes&view=gobacks' }, 'See go-backs')) : null,
       d.kept && d.routes.length && can('staff') ? mapBox : null);
     if (!d.kept || !d.routes.length || !can('staff')) return; // the map's tiles come with Assets and fleet, which the front desk does not open

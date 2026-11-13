@@ -361,7 +361,8 @@ async function draftNotice(conn, req, ch) {
   const zoneNames = (await rows(conn, 'SELECT name FROM collection_zones WHERE tenant_id = ? AND id IN (?) ORDER BY sort, name', [t, zoneIds])).map((x) => x.name);
   const why = CHANGE_REASON[ch.reason];
   const day = C.longDay(ch.on_date);
-  const smsText = ch.moved_to ? `${day.split(',')[0]}'s trash and recycling pickup moves to ${C.longDay(ch.moved_to)} because of ${why}.` : `No trash or recycling pickup on ${day} because of ${why}.`;
+  // ch.what: the streams that move, when not all of them do (a snow day that leaves a finished route alone).
+  const smsText = ch.moved_to ? `${day.split(',')[0]}'s ${ch.what || 'trash and recycling'} pickup moves to ${C.longDay(ch.moved_to)} because of ${why}.` : `No ${ch.what || 'trash or recycling'} pickup on ${day} because of ${why}.`;
   // The "out by" rule is the borough's own (Schedule, Setup); without one, nothing is said about a time.
   const curb = ((await C.settingsOf(conn, t)) || {}).curb_by;
   const body = `${smsText}${ch.note ? ` ${ch.note}` : ''}\n\nThis is for ${ch.zone_ids.length ? `these collection zones: ${zoneNames.join(', ')}` : 'every collection zone'}.${curb ? ` ${String(curb).replace(/\.?\s*$/, '.')}` : ''}`;

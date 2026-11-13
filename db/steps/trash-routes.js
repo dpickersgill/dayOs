@@ -17,9 +17,12 @@
 //   collection_route_tickets the landfill and recycling tickets a driver entered at the end of the day
 //   collection_snow_days     a snow day a manager declared: the changes it made and the street notice it drafted
 //   hauler_contracts         the contracted hauler's terms: dates, the service level, price per household, penalties
+//   collection_changes.stream_ids  (a column on the shared table) the streams a change moves; null: all of the zones'
 //   hauler_forwards          a missed pickup sent to the hauler: the link (hashed token, 30 days), when it was collected
 
-const OWN = ({ tableExists }) => [
+const OWN = ({ tableExists, columnExists }) => [
+  // A snow day moves only the streams whose route was not finished that day (null: every stream of the zones).
+  ['collection_changes.stream_ids', (c) => columnExists(c, 'collection_changes', 'stream_ids'), 'ALTER TABLE collection_changes ADD COLUMN stream_ids JSON NULL'],
   ['collection_trucks', (c) => tableExists(c, 'collection_trucks'), `CREATE TABLE collection_trucks (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT UNSIGNED NOT NULL,

@@ -394,6 +394,23 @@ test('plowing hours go on Streets and the Liquid Fuels fund; a changeover is a w
   is(await api('POST', `/solid-waste/routes/trucks/${truck2}/hours`, { token: crew1.token, body: { job: 'plowing', hours: 1, crew: [{ staff_id: 999999, hours: 1 }] } }), 400, 'crew log their own hours');
 });
 
+test('a cart delivery never lands on a finished route; with every route finished, the board lists it as a delivery', async () => {
+  const cid = (await q("INSERT INTO cart_requests (tenant_id, reference, view_token, kind, stream_id, size_gal, street_id, house_number, status, deliver_on) VALUES (?, 'CFIN1', ?, 'new', ?, 95, ?, '12', 'scheduled', ?)",
+    [A.id, crypto.randomBytes(16).toString('hex'), Z.trash, S['Main Street'], TODAY])).insertId;
+  const day = (await api('GET', `/solid-waste/routes?date=${TODAY}`, { token: A.token })).body.routes;
+  const carts = async (name) => (await api('GET', `/solid-waste/routes/${day.find((x) => x.name === name).id}`, { token: A.token })).body.carts.map((c) => c.id);
+  assert.equal(day.find((x) => x.name === 'North, Trash').status, 'done');
+  assert.deepEqual(await carts('North, Trash'), [], 'not on the finished route');
+  assert.deepEqual(await carts('North, Recycling'), [cid], 'on its zone\'s route still to run');
+  const open = await q("SELECT id, status FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status <> 'done'", [A.id, TODAY]);
+  await q("UPDATE collection_routes SET status = 'done' WHERE tenant_id = ? AND on_date = ?", [A.id, TODAY]);
+  const board = (await api('GET', `/solid-waste/routes/board?date=${TODAY}`, { token: mgr.token })).body;
+  assert.deepEqual(board.deliveries.map((c) => c.id), [cid], 'every route finished: listed as Deliveries');
+  for (const name of ['North, Recycling', 'South, Trash']) assert.deepEqual(await carts(name), []);
+  for (const o of open) await q('UPDATE collection_routes SET status = ? WHERE id = ?', [o.status, o.id]);
+  await q('DELETE FROM cart_requests WHERE id = ?', [cid]);
+});
+
 test('no money for crew and front desk: costs are a manager\'s, and every path is scrubbed', async () => {
   is(await api('GET', '/solid-waste/routes/costs', { token: crew1.token }), 403);
   is(await api('GET', '/solid-waste/routes/costs', { token: desk.token }), 403);
@@ -413,6 +430,19 @@ test('a snow day: changes by the holiday rule, routes Delayed for snow, a drafte
   const r = await api('POST', '/solid-waste/routes/snow-days', { token: mgr.token, body: { on_date: TODAY, zone_ids: [Z.north], note: 'Six inches overnight' } });
   is(r, 201);
   assert.deepEqual(r.body.finished, ['North, Trash'], 'the route finished this morning is left alone, and said so');
+  // Left alone everywhere: the change moves North's recycling only, so the calendar keeps today's trash where it was.
+  const chRows = await q("SELECT zone_ids, stream_ids FROM collection_changes WHERE tenant_id = ? AND on_date = ? AND reason = 'snow'", [A.id, TODAY]);
+  assert.equal(chRows.length, 1);
+  const sids = chRows[0].stream_ids; assert.deepEqual((typeof sids === "string" ? JSON.parse(sids) : sids).map(Number), [Z.recycling]);
+  const Cl = require('../src/lib/collection');
+  const cal = await Cl.collectionDays(pool, A.id, { zoneId: Z.north, from: TODAY, to: plus(TODAY, 3) });
+  assert.ok(cal.some((x) => x.streamId === Z.trash && x.date === TODAY && !x.moved), 'trash stays on today in the calendar');
+  assert.ok(cal.some((x) => x.streamId === Z.recycling && x.moved && x.reason === 'snow'), 'recycling moves');
+  const [sn] = await q('SELECT sms_text, body FROM street_notices WHERE id = ?', [r.body.notice_id]);
+  assert.match(sn.sms_text, /'s recycling pickup moves/); assert.doesNotMatch(sn.sms_text, /trash and recycling/);
+  assert.match(sn.body, /North: trash was collected before the snow and is not moved/);
+  const banner = (await api('GET', `/solid-waste/routes?date=${TODAY}`, { token: mgr.token })).body.moved;
+  assert.deepEqual(banner.map((m) => m.zones), ['North (Recycling)'], 'the board says what moved, not every zone');
   const [nb] = await q('SELECT body FROM street_notices WHERE id = ?', [r.body.notice_id]);
   assert.match(nb.body, /Carts out by 7 AM\./); assert.doesNotMatch(nb.body, /6 AM/, 'the borough\'s own out-by rule');
   const next = (() => { const x = plus(TODAY, 1); return new Date(`${x}T12:00:00Z`).getUTCDay() === 0 ? plus(TODAY, 2) : x; })();

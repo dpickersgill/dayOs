@@ -232,11 +232,14 @@ async function dayView(req, date) {
   const t = req.auth.tenantId;
   const tz = await tzOf(pool, t); const today = todayIn(tz);
   const out = { date, today, kept: date <= today, routes: [], moved: [], moved_in: [], can_manage: isMgr(req) };
-  const changes = await rows(pool, `SELECT c.on_date, c.moved_to, c.zone_ids, c.reason, c.note FROM collection_changes c WHERE c.tenant_id = ? AND (c.on_date = ? OR c.moved_to = ?) ORDER BY c.id`, [t, date, date]);
+  const changes = await rows(pool, `SELECT c.on_date, c.moved_to, c.zone_ids, c.stream_ids, c.reason, c.note FROM collection_changes c WHERE c.tenant_id = ? AND (c.on_date = ? OR c.moved_to = ?) ORDER BY c.id`, [t, date, date]);
   const zones = new Map((await rows(pool, 'SELECT id, name FROM collection_zones WHERE tenant_id = ?', [t])).map((z) => [Number(z.id), z.name]));
   const zoneWords = (ids) => (ids.length ? ids.map((i) => zones.get(i) || 'A zone').join(', ') : 'Every zone');
+  const streamNames = new Map((await rows(pool, 'SELECT id, name FROM collection_streams WHERE tenant_id = ?', [t])).map((x) => [Number(x.id), x.name]));
   for (const c of changes) {
-    const w = { zones: zoneWords(zoneIdsOf(c.zone_ids)), reason: c.reason, note: c.note, from: ymd(c.on_date), to: ymd(c.moved_to) };
+    // A change for some streams only (a snow day that left a finished route alone) names them: "North (Recycling)".
+    const sids = zoneIdsOf(c.stream_ids);
+    const w = { zones: `${zoneWords(zoneIdsOf(c.zone_ids))}${sids.length ? ` (${sids.map((i) => streamNames.get(i) || 'a stream').join(', ')})` : ''}`, reason: c.reason, note: c.note, from: ymd(c.on_date), to: ymd(c.moved_to) };
     if (ymd(c.on_date) === date) out.moved.push(w); else out.moved_in.push(w);
   }
   if (!out.kept) {
@@ -299,16 +302,22 @@ async function bulkStopsFor(t, r, date) {
  * That day's cart deliveries (workstream tonnage's lib/carts.js cartStopsFor, when it is there) in this route's zone, or
  * with no zone on the day's first route. Shown on the route; delivered and marked in Carts. Never a resident's contact.
  */
-async function cartStopsOn(t, r, date) {
+/** That day's cart deliveries from Carts (tonnage's lib/carts.js cartStopsFor), or [] when Carts is not there. */
+async function cartList(t, date) {
   let CT;
   try { CT = require('./carts'); } catch (err) { if (err.code === 'MODULE_NOT_FOUND' && String(err.message).startsWith("Cannot find module './carts'")) return []; throw err; }
   if (typeof CT.cartStopsFor !== 'function') return [];
-  let list;
-  try { list = (await CT.cartStopsFor(pool, t, date)) || []; } catch (_) { return []; }
+  try { return (await CT.cartStopsFor(pool, t, date)) || []; } catch (_) { return []; }
+}
+const cartShape = (c) => ({ id: c.id ? Number(c.id) : null, reference: c.reference || null, words: c.address || c.words || `${c.house_number ? `${c.house_number} ` : ''}${c.street || ''}`.trim(), what: [c.kind_label || c.kind, c.stream, c.size_gal ? `${c.size_gal} gallon` : null].filter(Boolean).join(', '), done: Boolean(c.delivered) });
+async function cartStopsOn(t, r, date) {
+  if (!['planned', 'started'].includes(r.status)) return []; // a finished (or delayed) route takes no deliveries
+  const list = await cartList(t, date);
   if (!list.length) return [];
   // A delivery goes on its zone's route that day; when its zone is not collected that day (or it has no zone), on the
   // day's first route, so every delivery of the day is on some route.
-  const dayRoutesKept = await rows(pool, "SELECT id, zone_id FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status <> 'delayed' ORDER BY sort, id", [t, date]);
+  // Never on a finished route: when every route of the day is finished, the board lists them as Deliveries instead.
+  const dayRoutesKept = await rows(pool, "SELECT id, zone_id FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status IN ('planned','started') ORDER BY sort, id", [t, date]);
   const first = dayRoutesKept[0] || null;
   const zonesToday = new Set(dayRoutesKept.map((x) => Number(x.zone_id)));
   const out = [];
@@ -735,32 +744,48 @@ async function declareSnowDay(req, b) {
     const moveZones = !zoneIds.length && zonesAllDone.size ? [...new Set(hit.map((p) => p.zoneId))] : zoneIds;
     const active = await rows(conn, 'SELECT id, zone_ids FROM collection_snow_days WHERE tenant_id = ? AND on_date = ? AND undone_at IS NULL', [t, b.on_date]);
     if (active.some((x) => { const z = zoneIdsOf(x.zone_ids); return !z.length || !zoneIds.length || z.some((i) => zoneIds.includes(i)); })) throw conflict(`A snow day is already declared for ${dayWords(b.on_date)}. Undo it first to change it.`);
-    const moves = [{ from: b.on_date, to: rule === 'skip' ? null : nextRunDay(b.on_date), zones: moveZones, zoneIds: [...new Set(hit.map((p) => p.zoneId))] }];
+    // The day itself: one change for the zones that move whole, and one for each zone where a route was finished already
+    // (only its other streams move, stream_ids), so the calendar, reminders, the check and the notice leave the
+    // finished stream alone.
+    const to0 = rule === 'skip' ? null : nextRunDay(b.on_date);
+    const partZones = [...new Set(hit.map((p) => p.zoneId))].filter((z) => hit.some((p) => p.zoneId === z && doneKey.has(`${p.zoneId}|${p.streamId}`)));
+    const wholeZones = [...new Set(hit.map((p) => p.zoneId))].filter((z) => !partZones.includes(z));
+    const first = [];
+    if (wholeZones.length) first.push({ from: b.on_date, to: to0, zones: partZones.length || zonesAllDone.size ? wholeZones : moveZones, streams: [], zoneIds: wholeZones });
+    for (const z of partZones) first.push({ from: b.on_date, to: to0, zones: [z], streams: hit.filter((p) => p.zoneId === z && !doneKey.has(`${p.zoneId}|${p.streamId}`)).map((p) => p.streamId), zoneIds: [z] });
+    const moving = hit.filter((p) => !doneKey.has(`${p.zoneId}|${p.streamId}`));
+    const moves = [...first];
     // A whole-borough snow day with the shift rule: the rest of that Monday-Saturday week moves a day too.
     if (rule === 'shift' && !zoneIds.length && weekdayOf(b.on_date) !== 0) {
       for (let d = addDays(b.on_date, 1); weekdayOf(d) !== 0; d = addDays(d, 1)) {
         const later = await C.dayRoutes(conn, t, d);
-        if (later.length) moves.push({ from: d, to: nextRunDay(d), zones: [], zoneIds: [...new Set(later.map((p) => p.zoneId))] });
+        if (later.length) moves.push({ from: d, to: nextRunDay(d), zones: [], streams: [], zoneIds: [...new Set(later.map((p) => p.zoneId))] });
       }
     }
     const changeIds = [];
     for (const m of moves) {
-      const [ins] = await conn.query("INSERT INTO collection_changes (tenant_id, on_date, moved_to, zone_ids, reason, note, created_by) VALUES (?, ?, ?, ?, 'snow', ?, ?)", [t, m.from, m.to, JSON.stringify(m.zones), b.note || null, req.auth.userId]);
+      const [ins] = await conn.query("INSERT INTO collection_changes (tenant_id, on_date, moved_to, zone_ids, stream_ids, reason, note, created_by) VALUES (?, ?, ?, ?, ?, 'snow', ?, ?)", [t, m.from, m.to, JSON.stringify(m.zones), m.streams.length ? JSON.stringify(m.streams) : null, b.note || null, req.auth.userId]);
       changeIds.push(Number(ins.insertId));
     }
     // That day's routes kept already (today): Delayed for snow.
     const affected = hit.map((p) => p.zoneId);
-    const [del] = await conn.query("UPDATE collection_routes SET status = 'delayed', delayed_reason = 'snow', moved_to = ? WHERE tenant_id = ? AND on_date = ? AND zone_id IN (?) AND status IN ('planned','started')", [moves[0].to, t, b.on_date, affected]);
+    let delayed = 0;
+    for (const p of moving) delayed += (await conn.query("UPDATE collection_routes SET status = 'delayed', delayed_reason = 'snow', moved_to = ? WHERE tenant_id = ? AND on_date = ? AND zone_id = ? AND stream_id = ? AND status IN ('planned','started')", [to0, t, b.on_date, p.zoneId, p.streamId]))[0].affectedRows;
+    void affected;
     // The street notice: the schedule's own draft for a moved or canceled day (routes/collection.js draftNotice), aimed
     // at the zones affected, for the manager to read over and send from Street notices.
-    const more = moves.length > 1 ? 'Pickups later this week move one day later too.' : '';
-    const noticeId = await require('../routes/collection').draftNotice(conn, req, { id: changeIds[0], on_date: b.on_date, moved_to: moves[0].to, reason: 'snow', note: [more, b.note].filter(Boolean).join(' ') || null, zone_ids: [...new Set(moves.flatMap((m) => m.zoneIds))] });
+    // It names only what moves: the streams that do, and for a zone where a route was finished, what was collected.
+    const more = moves.length > first.length ? 'Pickups later this week move one day later too.' : '';
+    const names = [...new Set(moving.map((p) => p.streamName.toLowerCase()))];
+    const what = finished.length ? names.join(' and ') : null;
+    const left = partZones.map((z) => { const fin = hit.filter((p) => p.zoneId === z && doneKey.has(`${p.zoneId}|${p.streamId}`)); return `${fin[0].zoneName}: ${fin.map((p) => p.streamName.toLowerCase()).join(' and ')} was collected before the snow and is not moved.`; });
+    const noticeId = await require('../routes/collection').draftNotice(conn, req, { id: changeIds[0], on_date: b.on_date, moved_to: to0, reason: 'snow', what, note: [more, ...left, b.note].filter(Boolean).join(' ') || null, zone_ids: [...new Set(moves.flatMap((m) => m.zoneIds))] });
     if (noticeId) await conn.query('UPDATE collection_changes SET notice_id = ? WHERE tenant_id = ? AND id IN (?)', [noticeId, t, changeIds]);
     const nt = noticeId ? await one(conn, 'SELECT title, sms_text FROM street_notices WHERE tenant_id = ? AND id = ?', [t, noticeId]) : null;
     const streetsN = noticeId ? n((await one(conn, 'SELECT COUNT(*) AS c FROM street_notice_areas WHERE tenant_id = ? AND notice_id = ?', [t, noticeId])).c) : 0;
     const [sd] = await conn.query('INSERT INTO collection_snow_days (tenant_id, on_date, zone_ids, change_ids, notice_id, note, declared_by, declared_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [t, b.on_date, JSON.stringify(zoneIds), JSON.stringify(changeIds), noticeId, b.note || null, req.auth.userId, now]);
     await audit(conn, req, 'snow_day', 'collection_snow_days', sd.insertId, { on_date: b.on_date, zones: zoneIds, rule, changes: moves.length, notice_id: noticeId });
-    return { id: Number(sd.insertId), rule, changes: moves.map((m) => ({ from: m.from, to: m.to })), notice_id: noticeId, notice: nt ? { title: nt.title, sms_text: nt.sms_text, streets: streetsN } : null, delayed: del.affectedRows, finished };
+    return { id: Number(sd.insertId), rule, changes: [...new Map(moves.map((m) => [`${m.from}|${m.to}`, { from: m.from, to: m.to }])).values()], notice_id: noticeId, notice: nt ? { title: nt.title, sms_text: nt.sms_text, streets: streetsN } : null, delayed, finished };
   });
 }
 async function undoSnowDay(req, id) {
@@ -791,11 +816,14 @@ async function snowDays(t, today) {
 /** Today's (or a day's) routes for the office's board: progress, truck, crew, where the truck was last, and the stops' marks for the map. */
 async function board(req, date) {
   const v = await dayView(req, date);
-  if (!v.kept) return { ...v, points: [] };
+  if (!v.kept) return { ...v, points: [], deliveries: [] };
   const ids = v.routes.map((r) => r.id).filter(Boolean);
   const pts = ids.length ? await rows(pool, `SELECT s.route_id, s.status, s.marked_lat, s.marked_lng, s.marked_at, st.name AS street, s.from_no, s.to_no, s.side, s.kind FROM collection_route_stops s
     JOIN streets st ON st.tenant_id = s.tenant_id AND st.id = s.street_id WHERE s.tenant_id = ? AND s.route_id IN (?) AND s.marked_lat IS NOT NULL`, [req.auth.tenantId, ids]) : [];
-  return { ...v, points: pts.map((p) => ({ route_id: Number(p.route_id), status: p.status, lat: Number(p.marked_lat), lng: Number(p.marked_lng), at: dt(p.marked_at), words: p.kind === 'goback' ? p.street : stopWords(p) })) };
+  // Cart deliveries with no route to ride on (every route of the day finished, or none that day): the board lists them.
+  const open = await one(pool, "SELECT COUNT(*) AS c FROM collection_routes WHERE tenant_id = ? AND on_date = ? AND status IN ('planned','started')", [req.auth.tenantId, date]);
+  const deliveries = n(open.c) ? [] : (await cartList(req.auth.tenantId, date)).map(cartShape);
+  return { ...v, deliveries, points: pts.map((p) => ({ route_id: Number(p.route_id), status: p.status, lat: Number(p.marked_lat), lng: Number(p.marked_lng), at: dt(p.marked_at), words: p.kind === 'goback' ? p.street : stopWords(p) })) };
 }
 
 /** Collection-day costs from..to (managers): by day and route: crew hours, truck hours, tons, and (managers only) costs. */

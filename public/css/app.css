@@ -4510,6 +4510,8 @@ dl.facts dd { margin: 0; }
 .rt-card:hover, .rt-card:focus-visible { border-color: var(--ink); }
 .rt-card-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; font-size: 1.125rem; }
 .rt-card-meta { color: var(--ink-2); font-size: 0.9375rem; }
+.rt-card .state { white-space: normal; text-align: left; align-items: baseline; } /* "Delayed for snow: now Friday, November 13" wraps on a phone */
+.rt-card-top > b { min-width: 0; overflow-wrap: anywhere; }
 .rt-card.rt-delayed { border-color: var(--warn-line); background: var(--warn-bg); }
 .rt-bar { display: flex; height: 12px; border-radius: var(--radius-pill); background: var(--snowpack); overflow: hidden; border: 1px solid var(--line-strong); }
 .rt-bar-done { background: var(--open); }
