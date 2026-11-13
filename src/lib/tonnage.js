@@ -10,7 +10,8 @@
 //   The math    net = gross - tare, in pounds. A statement line with only a net weight (pounds or tons) is taken as it
 //               is. Tons = pounds / 2000, shown to two places. A ticket number is unique at its facility, so the same
 //               ticket cannot be counted twice (a line without a number is matched on its date, facility, stream and net).
-//   Figures     tons by month, stream, facility and zone; recycling rate = (recycling + yard + food tons) / all tons;
+//   Figures     tons by month, stream, facility and zone; recycling rate = recycled tons / all tons, where
+//               recycled means taken to a recycling processor or compost site (RECYCLED_SQL below);
 //               cost per ton from tipping fees (owners and managers only, lib/nomoney.js); pounds per household from
 //               the service address count (the water customer list), else the addresses that have carts.
 const { pool, tx, rows, one } = require('../db');
@@ -19,6 +20,13 @@ const { audit } = require('./audit');
 
 const STREAM_KINDS = ['trash', 'recycling', 'yard', 'food', 'other'];
 const RECYCLED = ['recycling', 'yard', 'food'];
+// What counts as recycled is decided by where it went, not by the truck's stream: a ticket counts as recycled only at a
+// recycling processor or a compost site, and never trash (msw). Anything taken to a landfill, a transfer station or an
+// "other" facility is disposal, even yard waste or recycling (contaminated loads, a load sent to the landfill). The
+// recycling rate, the monthly report and the annual recycling report all use this one rule.
+const RECYCLING_FACILITIES = ['recycling', 'compost'];
+const RECYCLED_SQL = "(f.kind IN ('recycling','compost') AND t.material <> 'msw')"; // t: weigh_tickets, f: its tonnage_facilities row
+const isRecycled = (facilityKind, material) => RECYCLING_FACILITIES.includes(facilityKind) && material !== 'msw';
 const SECTORS = { res_curb: 'Residential curbside', res_dropoff: 'Residential drop-off', com_curb: 'Commercial curbside', com_dropoff: 'Commercial drop-off' };
 const SECTOR_KEYS = Object.keys(SECTORS);
 const FACILITY_KINDS = { landfill: 'Landfill', transfer: 'Transfer station', recycling: 'Recycling processor', compost: 'Compost or yard waste site', other: 'Other' };
@@ -83,14 +91,10 @@ function weights(t) {
 }
 
 /**
- * Adds one weigh ticket inside the caller's transaction (conn), checked and audited. The routes workstream calls this
- * for a driver's ticket at the end of a route. ticket: { on_date, facility_id, stream_id?, stream_kind?, material?,
- * sector?, zone_id?, truck_asset_id?, truck_label?, ticket_no?, gross_lb?, tare_lb?, net_lb?, net_tons?, fee_cents?,
- * hauler?, note?, source?: 'office'|'driver'|'import', import_id? }. by: the user id entering it.
- * Returns { id, net_lb, net_tons, fee_cents }. A ticket number already used at that facility is refused (409,
- * code duplicate_ticket).
+ * Every check a ticket must pass, without writing anything (the CSV import's check-only run uses it too, so it accepts
+ * exactly what the real import does). Returns what addTicket writes.
  */
-async function addTicket(conn, tenantId, ticket, { by = null } = {}) {
+async function checkTicket(conn, tenantId, ticket) {
   const t = ticket || {};
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(t.on_date || ''))) throw bad('Give the ticket date (YYYY-MM-DD)');
   const tz = (await one(conn, 'SELECT timezone FROM tenants WHERE id = ?', [tenantId])).timezone;
@@ -125,6 +129,19 @@ async function addTicket(conn, tenantId, ticket, { by = null } = {}) {
       [tenantId, f.id, t.on_date, kind, material, w.net_lb]);
     if (same) throw conflict('This line is already entered (same date, facility, stream and weight)', { code: 'duplicate_ticket', ticket_id: Number(same.id) });
   }
+  return { t, f, kind, streamId, material, sector, w, ticketNo, fee };
+}
+
+/**
+ * Adds one weigh ticket inside the caller's transaction (conn), checked and audited. The routes workstream calls this
+ * for a driver's ticket at the end of a route. ticket: { on_date, facility_id, stream_id?, stream_kind?, material?,
+ * sector?, zone_id?, truck_asset_id?, truck_label?, ticket_no?, gross_lb?, tare_lb?, net_lb?, net_tons?, fee_cents?,
+ * hauler?, note?, source?: 'office'|'driver'|'import', import_id? }. by: the user id entering it.
+ * Returns { id, net_lb, net_tons, fee_cents }. A ticket number already used at that facility is refused (409,
+ * code duplicate_ticket).
+ */
+async function addTicket(conn, tenantId, ticket, { by = null } = {}) {
+  const { t, f, kind, streamId, material, sector, w, ticketNo, fee } = await checkTicket(conn, tenantId, ticket);
   let ins;
   try {
     [ins] = await conn.query(`INSERT INTO weigh_tickets (tenant_id, on_date, ticket_no, facility_id, stream_id, stream_kind, material, sector, zone_id, truck_asset_id, truck_label, gross_lb, tare_lb, net_lb,
@@ -169,22 +186,23 @@ const rate = (recycled, all) => (all > 0 ? Math.round((recycled / all) * 1000) /
 async function figures(db, tenantId, { from, to, year = null }) {
   const W = 't.tenant_id = ? AND t.on_date BETWEEN ? AND ? AND t.voided_at IS NULL';
   const P = [tenantId, from, to];
-  const byKind = await rows(db, `SELECT t.stream_kind AS kind, SUM(t.net_lb) AS lb, SUM(COALESCE(t.fee_cents, 0)) AS fees, COUNT(*) AS n FROM weigh_tickets t WHERE ${W} GROUP BY t.stream_kind`, P);
-  const byMonth = await rows(db, `SELECT DATE_FORMAT(t.on_date, '%Y-%m') AS month, t.stream_kind AS kind, SUM(t.net_lb) AS lb, SUM(COALESCE(t.fee_cents, 0)) AS fees FROM weigh_tickets t WHERE ${W} GROUP BY month, t.stream_kind ORDER BY month`, P);
+  const FJ = 'JOIN tonnage_facilities f ON f.tenant_id = t.tenant_id AND f.id = t.facility_id';
+  const byKind = await rows(db, `SELECT t.stream_kind AS kind, SUM(t.net_lb) AS lb, SUM(CASE WHEN ${RECYCLED_SQL} THEN t.net_lb ELSE 0 END) AS rec, SUM(COALESCE(t.fee_cents, 0)) AS fees, COUNT(*) AS n FROM weigh_tickets t ${FJ} WHERE ${W} GROUP BY t.stream_kind`, P);
+  const byMonth = await rows(db, `SELECT DATE_FORMAT(t.on_date, '%Y-%m') AS month, t.stream_kind AS kind, SUM(t.net_lb) AS lb, SUM(CASE WHEN ${RECYCLED_SQL} THEN t.net_lb ELSE 0 END) AS rec, SUM(COALESCE(t.fee_cents, 0)) AS fees FROM weigh_tickets t ${FJ} WHERE ${W} GROUP BY month, t.stream_kind ORDER BY month`, P);
   const byFacility = await rows(db, `SELECT f.id, f.name, f.kind, t.stream_kind AS stream_kind, SUM(t.net_lb) AS lb, SUM(COALESCE(t.fee_cents, 0)) AS fees, COUNT(*) AS n FROM weigh_tickets t
     JOIN tonnage_facilities f ON f.tenant_id = t.tenant_id AND f.id = t.facility_id WHERE ${W} GROUP BY f.id, f.name, f.kind, t.stream_kind ORDER BY f.name`, P);
   const byZone = await rows(db, `SELECT z.id, z.name, t.stream_kind AS kind, SUM(t.net_lb) AS lb FROM weigh_tickets t LEFT JOIN collection_zones z ON z.tenant_id = t.tenant_id AND z.id = t.zone_id
     WHERE ${W} GROUP BY z.id, z.name, t.stream_kind ORDER BY z.id IS NULL, z.name`, P);
   const byMaterial = await rows(db, `SELECT t.material, SUM(t.net_lb) AS lb FROM weigh_tickets t WHERE ${W} GROUP BY t.material ORDER BY lb DESC`, P);
   const lbOf = (list, kinds) => list.filter((x) => kinds.includes(x.kind)).reduce((s, x) => s + Number(x.lb || 0), 0);
-  const allLb = lbOf(byKind, STREAM_KINDS); const recLb = lbOf(byKind, RECYCLED);
+  const allLb = lbOf(byKind, STREAM_KINDS); const recLb = byKind.reduce((s, x) => s + Number(x.rec || 0), 0);
   const fees = byKind.reduce((s, x) => s + Number(x.fees || 0), 0);
   const hh = await households(db, tenantId, year);
   const months = new Map();
   for (const m of byMonth) {
     const cur = months.get(m.month) || { month: m.month, tons: {}, all_tons: 0, recycled_tons: 0, fees_cents: 0 };
     cur.tons[m.kind] = tons(m.lb); cur.fees_cents += Number(m.fees || 0);
-    cur.all_lb = (cur.all_lb || 0) + Number(m.lb); if (RECYCLED.includes(m.kind)) cur.rec_lb = (cur.rec_lb || 0) + Number(m.lb);
+    cur.all_lb = (cur.all_lb || 0) + Number(m.lb); cur.rec_lb = (cur.rec_lb || 0) + Number(m.rec || 0);
     months.set(m.month, cur);
   }
   const facilities = new Map();
@@ -318,7 +336,7 @@ async function importCsv(tenantId, { csv, sourceName, fileName = null, facilityI
       try {
         await conn.query('SAVEPOINT line');
         if (dryRun) {
-          weights(t);
+          await checkTicket(conn, tenantId, t); // the same checks as the real import
           if (t.ticket_no && (seenNos.has(`${fac.id}|${t.ticket_no}`) || await one(conn, 'SELECT id FROM weigh_tickets WHERE tenant_id = ? AND facility_id = ? AND ticket_no = ?', [tenantId, fac.id, t.ticket_no]))) throw conflict(`Ticket ${t.ticket_no} from ${fac.name} is already entered`);
           if (t.ticket_no) seenNos.add(`${fac.id}|${t.ticket_no}`);
         } else await addTicket(conn, tenantId, t, { by });
@@ -339,6 +357,6 @@ async function importCsv(tenantId, { csv, sourceName, fileName = null, facilityI
 }
 
 module.exports = {
-  STREAM_KINDS, RECYCLED, SECTORS, SECTOR_KEYS, FACILITY_KINDS, MATERIALS, MATERIAL, MATERIAL_KEYS, defaultMaterial, tons, weights, addTicket, facilitiesOf, households, figures,
+  STREAM_KINDS, RECYCLED, RECYCLING_FACILITIES, RECYCLED_SQL, isRecycled, SECTORS, SECTOR_KEYS, FACILITY_KINDS, MATERIALS, MATERIAL, MATERIAL_KEYS, defaultMaterial, tons, weights, checkTicket, addTicket, facilitiesOf, households, figures,
   monthSection, importCsv, streamFromWords, rate, collection,
 };

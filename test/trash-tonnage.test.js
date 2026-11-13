@@ -62,6 +62,34 @@ const paidEvent = (row, acct, extra = {}) => ({ id: `evt_${++n}`, type: 'checkou
   data: { object: { id: row.stripe_session_id, payment_status: 'paid', amount_total: row.fee_cents, payment_intent: `pi_${row.stripe_session_id}`, metadata: { tenant_id: String(row.tenant_id), request_id: String(row.id), kind: 'cart', ...extra } } } });
 const JPEG = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]), crypto.randomBytes(200), Buffer.from([0xff, 0xd9])]);
 
+/** A small JPEG with an EXIF block: DateTimeOriginal and a GPS position (as test/fieldkit.test.js makes it). */
+function jpegWithGps({ when = '2026:01:17 10:42:05', lat = [40, 7, 48], lng = [75, 30, 54] } = {}) {
+  const tiff = Buffer.alloc(400);
+  tiff.write('II', 0, 'latin1'); tiff.writeUInt16LE(42, 2); tiff.writeUInt32LE(8, 4);
+  let o = 8; tiff.writeUInt16LE(2, o); o += 2;
+  const exifAt = 38;
+  tiff.writeUInt16LE(0x8769, o); tiff.writeUInt16LE(4, o + 2); tiff.writeUInt32LE(1, o + 4); tiff.writeUInt32LE(exifAt, o + 8); o += 12;
+  const gpsAt = exifAt + 2 + 12 + 4 + 20;
+  tiff.writeUInt16LE(0x8825, o); tiff.writeUInt16LE(4, o + 2); tiff.writeUInt32LE(1, o + 4); tiff.writeUInt32LE(gpsAt, o + 8); o += 12;
+  tiff.writeUInt32LE(0, o);
+  o = exifAt; tiff.writeUInt16LE(1, o); o += 2;
+  const dateAt = exifAt + 2 + 12 + 4;
+  tiff.writeUInt16LE(0x9003, o); tiff.writeUInt16LE(2, o + 2); tiff.writeUInt32LE(20, o + 4); tiff.writeUInt32LE(dateAt, o + 8); o += 12;
+  tiff.writeUInt32LE(0, o);
+  tiff.write(`${when}\0`, dateAt, 'latin1');
+  o = gpsAt; tiff.writeUInt16LE(4, o); o += 2;
+  const ratAt = gpsAt + 2 + 4 * 12 + 4;
+  const ent = (tag, type, count, valueOrOffset, inline) => { tiff.writeUInt16LE(tag, o); tiff.writeUInt16LE(type, o + 2); tiff.writeUInt32LE(count, o + 4); if (inline) tiff.write(inline, o + 8, 'latin1'); else tiff.writeUInt32LE(valueOrOffset, o + 8); o += 12; };
+  ent(1, 2, 2, 0, 'N\0'); ent(2, 5, 3, ratAt); ent(3, 2, 2, 0, 'W\0'); ent(4, 5, 3, ratAt + 24);
+  tiff.writeUInt32LE(0, o);
+  [...lat, ...lng].forEach((v, i) => { tiff.writeUInt32LE(v, ratAt + i * 8); tiff.writeUInt32LE(1, ratAt + i * 8 + 4); });
+  const body = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff.subarray(0, ratAt + 48)]);
+  const app1 = Buffer.alloc(4); app1.writeUInt16BE(0xffe1, 0); app1.writeUInt16BE(body.length + 2, 2);
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app1, body, Buffer.from([0xff, 0xda, 0x00, 0x02]), crypto.randomBytes(256), Buffer.from([0xff, 0xd9])]);
+}
+
+const { photoFacts } = require('../src/lib/exif');
+
 let A; let B; let C; let skiToken; let crewA; let deskA; let mgrA;
 const S = {}; // per tenant: { streets: [ids], trash, recycling, yard, zoneN, zoneS }
 
@@ -297,7 +325,7 @@ test('stock never goes below zero: no cart in the yard, no delivery; receive, de
   is(await sw('POST', `/carts/requests/${r.id}/schedule`, { token: deskA.token, body: { deliver_on: plus(TODAY, -1) } }), 400, 'not a past day');
   is(await sw('POST', `/carts/requests/${r.id}/schedule`, { token: deskA.token, body: { deliver_on: TODAY } }), 200);
   const none = await sw('POST', `/carts/requests/${r.id}/deliver`, { token: crewA.token, body: { serial: 'R-1' } });
-  is(none, 409); assert.equal(none.body.details.code, 'no_stock'); assert.match(none.body.error, /Only 0 65-gallon Recycling carts are in the yard/);
+  is(none, 409); assert.equal(none.body.details.code, 'no_stock'); assert.match(none.body.error, /^No 65-gallon Recycling carts are in the yard/);
   is(await sw('POST', '/carts/stock', { token: deskA.token, body: { stream_id: s.recycling, size_gal: 65, reason: 'received', quantity: 2 } }), 403, 'the front desk does not move stock');
   const got = await sw('POST', '/carts/stock', { token: crewA.token, body: { stream_id: s.recycling, size_gal: 65, reason: 'received', quantity: 2, note: 'Truckload from the vendor' } });
   is(got, 200); assert.equal(got.body.on_hand, 2);
@@ -441,17 +469,19 @@ test('a facility\'s monthly report comes in from a spreadsheet; bad lines are li
     `${lastMonth}-19,MRF-6,Blue Mountain MRF,Single Stream,30000,31000,,`,
     `${lastMonth}-20,MRF-1,Blue Mountain MRF,Single Stream,,,6.10,0`,
     `${Number(lastMonth.slice(5)) }/21/${lastMonth.slice(0, 4)},MRF-7,Blue Mountain MRF,Commercial cardboard,,,0.75,$12.50`,
+    '2030-01-02,MRF-8,Blue Mountain MRF,Single Stream,,,1.00,',
   ].join('\n');
   const dry = await sw('POST', '/tonnage/import', { token: deskA.token, body: { csv, source_name: 'Blue Mountain MRF statement', dry_run: true } });
   is(dry, 200);
-  assert.equal(dry.body.added, 3); assert.equal(dry.body.skipped.length, 5);
+  assert.equal(dry.body.added, 3); assert.equal(dry.body.skipped.length, 6, 'the check refuses what the import refuses, a date to come too');
+  assert.match(dry.body.skipped.find((x) => x.line === 10).reason, /future/);
   assert.equal((await q('SELECT COUNT(*) AS n FROM weigh_tickets WHERE tenant_id = ? AND ticket_no LIKE ?', [A.id, 'MRF-%']))[0].n, 0, 'a check adds nothing');
   const r = await sw('POST', '/tonnage/import', { token: deskA.token, body: { csv, source_name: 'Blue Mountain MRF statement', file_name: 'mrf.csv' } });
   is(r, 201);
   assert.equal(r.body.added, 3);
   const why = Object.fromEntries(r.body.skipped.map((x) => [x.line, x.reason]));
   assert.match(why[4], /not on the facilities list/); assert.match(why[5], /not a real date/); assert.match(why[6], /not a stream or material/);
-  assert.match(why[7], /tare/); assert.match(why[8], /already entered/);
+  assert.match(why[7], /tare/); assert.match(why[8], /already entered/); assert.match(why[10], /future/);
   const [card] = await q("SELECT material, net_lb, fee_cents, source, import_id FROM weigh_tickets WHERE tenant_id = ? AND ticket_no = 'MRF-2'", [A.id]);
   assert.equal(card.material, 'corrugated'); assert.equal(card.net_lb, 2800); assert.equal(card.source, 'import'); assert.ok(card.import_id);
   assert.equal((await q("SELECT fee_cents FROM weigh_tickets WHERE tenant_id = ? AND ticket_no = 'MRF-7'", [A.id]))[0].fee_cents, 1250);
@@ -488,6 +518,26 @@ test('the figures: tons by stream, month, facility and zone; recycling rate; pou
   is(desk, 200); assert.ok(!/tipping_fee/.test(desk.text.split('\n')[0]), 'no fee column for the front desk');
   const mgr = await sw('GET', '/tonnage/tickets.csv', { token: A.token });
   assert.ok(/tipping_fee_dollars/.test(mgr.text.split('\n')[0]));
+});
+
+test('what counts as recycled is where the load went: yard waste or recycling taken to a landfill is disposal', async () => {
+  const s = S[A.id]; const year = Number(TODAY.slice(0, 4));
+  const before = (await sw('GET', `/tonnage/figures?year=${year}`, { token: A.token })).body;
+  const repBefore = (await sw('GET', `/recycling-report/${year}/report`, { token: A.token })).body;
+  const ts = await sw('POST', '/tonnage/facilities', { token: A.token, body: { name: 'County Transfer Station', kind: 'transfer' } });
+  for (const [facility, stream, no] of [[landfill, s.yard, 'LF-YARD-1'], [ts.body.id, s.recycling, 'TS-REC-1']]) {
+    is(await sw('POST', '/tonnage/tickets', { token: deskA.token, body: { on_date: TODAY, facility_id: facility, stream_id: stream, ticket_no: no, net_lb: 4000 } }), 201);
+  }
+  const after = (await sw('GET', `/tonnage/figures?year=${year}`, { token: A.token })).body;
+  assert.equal(after.totals.recycled_tons, before.totals.recycled_tons, 'not recycled');
+  assert.equal(Math.round((after.totals.all_tons - before.totals.all_tons) * 100) / 100, 4, 'but counted in all tons');
+  assert.ok(after.recycling_rate < before.recycling_rate);
+  assert.equal(after.totals.by_stream.yard, Math.round((before.totals.by_stream.yard + 2) * 100) / 100, 'still yard waste by stream');
+  const rep = (await sw('GET', `/recycling-report/${year}/report`, { token: A.token })).body;
+  const yardOf = (r) => (r.rows.find((x) => x.material === 'leaf_yard') || { total: 0 }).total;
+  assert.equal(yardOf(rep), yardOf(repBefore), 'not in the report\'s recycled materials');
+  assert.ok(!rep.sources.some((x) => ['Pioneer Crossing Landfill', 'County Transfer Station'].includes(x.processor)), 'a landfill is never a processor');
+  assert.equal(Math.round((rep.trash_tons - repBefore.trash_tons) * 100) / 100, 4, 'counted as disposal');
 });
 
 test('the monthly report gains a Trash and recycling section: tons, rate, missed pickups, carts delivered', async () => {
@@ -534,6 +584,7 @@ test('the reporter\'s form: no login, its own form only, checked, and it ends wh
   assert.equal(g.body.reporter, 'Valley Waste Haulers'); assert.equal(g.body.year, year);
   assert.deepEqual(g.body.columns.map((c) => c.key), ['res_curb', 'res_dropoff', 'com_curb', 'com_dropoff']);
   assert.ok(!g.body.materials.some((m) => m.key === 'msw'), 'trash is not a recycled material');
+  assert.equal(g.body.kind, 'hauler', 'the form words the nothing-to-report box by kind (a business: "We had nothing to recycle")');
   assert.ok(!/Main Street Grocery|Corner Diner|grocer/.test(g.text), 'nothing about other reporters');
   is(await pub('GET', B.slug, `/hauler-report/${tok}`), 404, 'only on its own municipality');
   is(await pub('GET', A.slug, `/hauler-report/${tok.slice(0, -2)}xx`), 404);
@@ -607,6 +658,10 @@ test('the municipal report: the four DEP / county columns, residue deducted, pro
 });
 
 test('the Section 904 packet: totals and the backing documents, printable, and a zip of the ticket photos', async () => {
+  const [t2] = await q("SELECT id FROM weigh_tickets WHERE tenant_id = ? AND ticket_no = 'PC-1005'", [A.id]);
+  const gpsPhoto = jpegWithGps();
+  assert.ok(photoFacts(gpsPhoto).lat, 'the test photo carries a position');
+  is(await sw('POST', `/tonnage/tickets/${t2.id}/photos`, { token: deskA.token, raw: gpsPhoto }), 201);
   const p = (await sw('GET', `/recycling-report/${year}/packet`, { token: A.token })).body;
   assert.ok(p.documents.tickets.length >= 5);
   assert.ok(p.documents.tickets.some((t) => t.photos === 1));
@@ -619,8 +674,15 @@ test('the Section 904 packet: totals and the backing documents, printable, and a
   assert.ok(names.some((x) => /^ticket-photos\/.*PC-1001.*\.jpg$/.test(x)), names.join(','));
   assert.ok(names.includes('tickets.csv') && names.includes('recycling-report.csv') && names.includes('SHA256SUMS.txt'));
   const sums = Buffer.from(files['SHA256SUMS.txt']).toString();
-  const photo = names.find((x) => x.startsWith('ticket-photos/'));
-  assert.ok(sums.includes(crypto.createHash('sha256').update(files[photo]).digest('hex')));
+  const photos = names.filter((x) => x.startsWith('ticket-photos/'));
+  assert.equal(photos.length, 2);
+  for (const ph of photos) {
+    assert.ok(sums.includes(crypto.createHash('sha256').update(files[ph]).digest('hex')), 'each file\'s SHA-256 is listed');
+    const facts = photoFacts(Buffer.from(files[ph]));
+    assert.ok(!facts.lat && !facts.lng, `${ph}: where it was taken is taken out`);
+  }
+  const kept = await q("SELECT original FROM weigh_ticket_photos p JOIN weigh_tickets t ON t.id = p.ticket_id WHERE t.ticket_no = 'PC-1005' AND t.tenant_id = ?", [A.id]);
+  assert.ok(photoFacts(kept[0].original).lat, 'the original in the app is kept as taken');
 });
 
 test('closing the report ends every link; opening it again does not bring old links back', async () => {
@@ -647,7 +709,36 @@ test('the requests spreadsheet leaves out residents\' names, phones, emails and 
   const full = await sw('GET', '/carts/export?contacts=1', { token: A.token });
   is(full, 200); assert.match(full.text, /Rae Resident/); assert.match(full.text.split('\r\n')[0], /house_number/);
   assert.ok((await q("SELECT id FROM audit_log WHERE tenant_id = ? AND action = 'cart_export_contacts'", [A.id])).length);
-  assert.ok(!/"fee"/.test(head), 'the front desk\'s copy has no money columns');
+  assert.ok(!/fee|paid|refund|dollars|cents/.test(head), `the front desk's copy has no money columns: ${head}`);
+  assert.match(full.text.split('\r\n')[0], /fee_dollars,paid_dollars,refunded_dollars/, 'a manager\'s copy has them');
+});
+
+test('no money for the crew or the front desk from any carts, tonnage or recycling report answer, JSON or spreadsheet', async () => {
+  const s = S[A.id];
+  const [req1] = await q('SELECT id FROM cart_requests WHERE tenant_id = ? AND fee_cents > 0 LIMIT 1', [A.id]);
+  const [tk] = await q('SELECT id FROM weigh_tickets WHERE tenant_id = ? AND fee_cents > 0 LIMIT 1', [A.id]);
+  const paths = ['/carts/setup', '/carts/options', '/carts/requests?show=all', `/carts/requests/${req1.id}`, `/carts/address?street_id=${s.streets[3]}&house_number=5`, '/carts', '/carts/counts',
+    `/carts/stops?date=${TODAY}`, '/carts/stock', '/carts/today', '/carts/export?contacts=1', '/carts/export', '/tonnage/setup', '/tonnage/tickets', `/tonnage/tickets/${tk.id}`, `/tonnage/figures?year=${year}`,
+    '/tonnage/imports', '/tonnage/tickets.csv', '/recycling-report', `/recycling-report/${year}`, `/recycling-report/${year}/report`, `/recycling-report/${year}/report.csv`, `/recycling-report/${year}/packet`];
+  const MONEY = /(cents|fee|cost|paid|refund|price|amount|dollars|revenue)/i;
+  const moneyKeys = (v, at = '') => (Array.isArray(v) ? v.flatMap((x, i) => moneyKeys(x, `${at}[${i}]`))
+    : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => (MONEY.test(k) && typeof x !== 'boolean' && !/^pay_status$|^pay_method$/.test(k) ? [`${at}.${k}`] : moneyKeys(x, `${at}.${k}`))) : []);
+  let seen = 0;
+  for (const who of [crewA, deskA]) {
+    for (const p of paths) {
+      const r = await sw('GET', p, { token: who.token });
+      if (r.status === 403) continue;
+      is(r, 200, `${p}`);
+      seen += 1;
+      if (/text\/csv/.test(r.headers.get('content-type') || '')) assert.ok(!MONEY.test(r.text.split('\r\n')[0]), `${p}: ${r.text.split('\r\n')[0]}`);
+      else assert.deepEqual(moneyKeys(r.body), [], `${p} for ${who.username}`);
+    }
+  }
+  assert.ok(seen >= 25, `swept ${seen} answers`);
+  // A manager does get them, so the sweep is not passing for want of money in the data.
+  const m = await sw('GET', '/carts/export', { token: A.token });
+  assert.ok(MONEY.test(m.text.split('\r\n')[0]));
+  assert.ok(moneyKeys((await sw('GET', `/tonnage/figures?year=${year}`, { token: A.token })).body).length > 0);
 });
 
 // ---------------------------------------------------------------- gating and isolation

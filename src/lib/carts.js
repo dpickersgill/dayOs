@@ -281,7 +281,8 @@ async function moveStock(conn, tenantId, { streamId, size, delta, reason, note =
   if (u.affectedRows !== 1) {
     const s = await one(conn, 'SELECT name FROM collection_streams WHERE tenant_id = ? AND id = ?', [tenantId, streamId]);
     const left = await one(conn, 'SELECT on_hand FROM cart_stock WHERE tenant_id = ? AND stream_id = ? AND size_gal = ?', [tenantId, streamId, size]);
-    throw conflict(`Only ${Number(left.on_hand)} ${size}-gallon ${s ? s.name : ''} cart${Number(left.on_hand) === 1 ? ' is' : 's are'} in the yard. Receive more carts first.`, { code: 'no_stock' });
+    const have = Number(left.on_hand); const what = `${size}-gallon ${s ? `${s.name} ` : ''}cart`;
+    throw conflict(have === 0 ? `No ${what}s are in the yard. Receive carts first.` : `Only ${have} ${what}${have === 1 ? ' is' : 's are'} in the yard. Receive more carts first.`, { code: 'no_stock' });
   }
   const now = await one(conn, 'SELECT on_hand FROM cart_stock WHERE tenant_id = ? AND stream_id = ? AND size_gal = ?', [tenantId, streamId, size]);
   await conn.query('INSERT INTO cart_stock_moves (tenant_id, stream_id, size_gal, delta, reason, note, request_id, on_hand, by_user) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

@@ -72,7 +72,7 @@ function mailWords(kind, { town, year, reporter, link, due, phone }) {
   const by = `Please answer by ${due}.${phone ? ` Questions? Call ${phone}.` : ''}`;
   if (kind === 'send') return { subject: `${town}: your ${year} recycling report`, text: [`Hello ${reporter},`, '', ask, '', how, '', by].join('\n') };
   if (kind === 'remind') return { subject: `Reminder: ${town} ${year} recycling report`, text: [`Hello ${reporter},`, '', `A reminder: we have not had your ${year} recycling numbers yet. ${ask}`, '', how, '', by].join('\n') };
-  return { subject: `Last reminder: ${town} ${year} recycling report`, text: [`Hello ${reporter},`, '', `We still need your ${year} recycling numbers for our report to the county, which is due ${due}. If you collected nothing in ${town}, the form has a box for that.`, '', how, '', phone ? `Questions? Call ${phone}.` : ''].join('\n') };
+  return { subject: `Last reminder: ${town} ${year} recycling report`, text: [`Hello ${reporter},`, '', `We still need your ${year} recycling numbers for our report to the county, which is due ${due}. If you have nothing to report for ${town}, the form has a box for that.`, '', how, '', phone ? `Questions? Call ${phone}.` : ''].join('\n') };
 }
 const dueWords = (d) => require('./bulkpickup').longDay(d);
 
@@ -121,8 +121,8 @@ const linesOf = (db, tenantId, formId) => rows(db, 'SELECT material, res_curb, r
  * res_dropoff, com_curb, com_dropoff, residue, processor }]. none: nothing collected in the municipality that year.
  */
 async function saveAnswer(conn, tenantId, formId, { lines = [], none = false, name = null, by = 'reporter', userId = null }) {
-  if (!none && !lines.length) throw bad('Add at least one material, or tick that you collected nothing here this year');
-  if (none && lines.length) throw bad('You ticked that you collected nothing here. Take out the materials, or untick it.');
+  if (!none && !lines.length) throw bad('Add at least one material, or tick the box that you have nothing to report this year');
+  if (none && lines.length) throw bad('You ticked that you have nothing to report. Take out the materials, or untick it.');
   const seen = new Set();
   for (const [i, l] of lines.entries()) {
     const n = i + 1;
@@ -159,8 +159,10 @@ async function build(db, tenantId, year) {
   const from = `${year}-01-01`; const to = `${year}-12-31`;
   const tick = await rows(db, `SELECT t.material, t.sector, f.name AS facility, f.residue_pct, SUM(t.net_lb) AS lb, COUNT(*) AS n FROM weigh_tickets t
     JOIN tonnage_facilities f ON f.tenant_id = t.tenant_id AND f.id = t.facility_id
-    WHERE t.tenant_id = ? AND t.on_date BETWEEN ? AND ? AND t.voided_at IS NULL AND t.material <> 'msw' GROUP BY t.material, t.sector, f.name, f.residue_pct`, [tenantId, from, to]);
-  const trash = await one(db, "SELECT COALESCE(SUM(net_lb), 0) AS lb FROM weigh_tickets WHERE tenant_id = ? AND on_date BETWEEN ? AND ? AND voided_at IS NULL AND material = 'msw'", [tenantId, from, to]);
+    WHERE t.tenant_id = ? AND t.on_date BETWEEN ? AND ? AND t.voided_at IS NULL AND ${T.RECYCLED_SQL} GROUP BY t.material, t.sector, f.name, f.residue_pct`, [tenantId, from, to]);
+  // Disposal: trash, and anything (yard waste too) taken to a landfill, transfer station or other facility.
+  const trash = await one(db, `SELECT COALESCE(SUM(t.net_lb), 0) AS lb FROM weigh_tickets t JOIN tonnage_facilities f ON f.tenant_id = t.tenant_id AND f.id = t.facility_id
+    WHERE t.tenant_id = ? AND t.on_date BETWEEN ? AND ? AND t.voided_at IS NULL AND NOT ${T.RECYCLED_SQL}`, [tenantId, from, to]);
   const sources = [];
   const own = new Map();
   for (const x of tick) {
@@ -221,7 +223,7 @@ function csvOf(rep) {
 /** The Section 904 packet: totals, and the backing documents (every ticket of the year, every reporter's answer). */
 async function packet(db, tenantId, year) {
   const rep = await build(db, tenantId, year);
-  const tickets = await rows(db, `SELECT t.id, t.on_date, t.ticket_no, f.name AS facility, t.stream_kind, t.material, t.sector, t.net_lb, t.source, t.hauler,
+  const tickets = await rows(db, `SELECT t.id, t.on_date, t.ticket_no, f.name AS facility, f.kind AS facility_kind, t.stream_kind, t.material, t.sector, t.net_lb, t.source, t.hauler,
       (SELECT COUNT(*) FROM weigh_ticket_photos p WHERE p.tenant_id = t.tenant_id AND p.ticket_id = t.id) AS photos
     FROM weigh_tickets t JOIN tonnage_facilities f ON f.tenant_id = t.tenant_id AND f.id = t.facility_id
     WHERE t.tenant_id = ? AND t.on_date BETWEEN ? AND ? AND t.voided_at IS NULL ORDER BY t.on_date, t.id`, [tenantId, `${year}-01-01`, `${year}-12-31`]);
@@ -230,7 +232,7 @@ async function packet(db, tenantId, year) {
     ...rep,
     documents: {
       tickets: tickets.map((x) => ({ id: Number(x.id), on_date: String(x.on_date).slice(0, 10), ticket_no: x.ticket_no, facility: x.facility, stream_kind: x.stream_kind, material: (T.MATERIAL[x.material] || {}).label || x.material,
-        sector: T.SECTORS[x.sector], net_tons: T.tons(x.net_lb), source: x.source, hauler: x.hauler, photos: Number(x.photos) })),
+        sector: T.SECTORS[x.sector], net_tons: T.tons(x.net_lb), counts_as: T.isRecycled(x.facility_kind, x.material) ? 'recycled' : 'disposal', source: x.source, hauler: x.hauler, photos: Number(x.photos) })),
       reports: forms.map((f) => ({ reporter: f.name, kind: f.kind, form: f.form, answered_at: f.answered_at, answered_by: f.answered_by, none_to_report: f.none_to_report, lines: f.lines, tons: f.tons })),
     },
   };
@@ -250,13 +252,17 @@ async function packetZip(db, tenantId, year) {
   const sums = [];
   for (const ph of photos) {
     const name = `ticket-photos/${String(ph.on_date).slice(0, 10)}_${safe(ph.facility)}_${safe(ph.ticket_no || `ticket-${ph.ticket_id}`)}_${ph.id}.${ext(ph.mime)}`;
-    files[name] = [new Uint8Array(ph.original), { level: 0 }];
-    sums.push(`${ph.sha256}  ${name}`);
+    // The packet leaves the municipality, so where the photo was taken comes out (lib/exif.js, as for public photos). The
+    // SHA-256 listed is of the copy in the zip; the original, as taken, stays in the app with its own.
+    const copy = require('./exif').stripGps(Buffer.from(ph.original));
+    if (!copy) continue; // a photo whose location cannot be taken out is not sent
+    files[name] = [new Uint8Array(copy), { level: 0 }];
+    sums.push(`${require('crypto').createHash('sha256').update(copy).digest('hex')}  ${name}`);
   }
-  files['tickets.csv'] = strToU8(toCsv(['id', 'on_date', 'ticket_no', 'facility', 'stream_kind', 'material', 'sector', 'net_tons', 'source', 'hauler', 'photos'], p.documents.tickets));
+  files['tickets.csv'] = strToU8(toCsv(['id', 'on_date', 'ticket_no', 'facility', 'stream_kind', 'material', 'sector', 'net_tons', 'counts_as', 'source', 'hauler', 'photos'], p.documents.tickets));
   files['recycling-report.csv'] = strToU8(csvOf(p));
   files['SHA256SUMS.txt'] = strToU8(`${sums.join('\n')}\n`);
-  return { zip: Buffer.from(zipSync(files)), photos: photos.length };
+  return { zip: Buffer.from(zipSync(files)), photos: sums.length };
 }
 
 /**

@@ -76,7 +76,7 @@ function draw(f, { saved = false } = {}) {
     saved ? h('p', { class: 'help-done', role: 'status' }, h('strong', null, 'Thank you. Your report is in.'), ' You can change it with this link until the municipality closes the report.') : null,
     h('p', null, `For ${f.reporter} (${f.form}). ${f.town} reports its recycling each year to the county under Pennsylvania's Act 101. Please give the tons you collected in ${f.town} in ${f.year}, by material, by ${f.due_words}.`),
     f.answered_at && !saved ? h('p', { class: 'muted' }, 'Your report is in. You can change it below.') : null,
-    h('label', { class: 'check' }, none, `We collected nothing in ${f.town} in ${f.year}`),
+    h('label', { class: 'check' }, none, f.kind === 'business' ? `We had nothing to recycle in ${f.year}` : `We collected nothing in ${f.town} in ${f.year}`),
     list, addBtn,
     h('div', { class: 'field' }, h('label', { for: 'r-name' }, 'Your name'), who),
     h('div', { class: 'help-trap', 'aria-hidden': 'true' }, trap), msg, send,

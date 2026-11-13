@@ -214,8 +214,8 @@ router.get('/tonnage/tickets.csv', office, async (req, res) => {
   if (!req.query.from) req.query.from = addDays(todayIn(await tzOf(t)), -366);
   const { where, params } = ticketFilter(req, t);
   const list = (await rows(pool, `${TICKETS} WHERE ${where.join(' AND ')} ORDER BY t.on_date, t.id LIMIT 50000`, params)).map(ticketShape);
-  const data = list.map((x) => ({ ...x, sector: T.SECTORS[x.sector], tipping_fee_dollars: dollars(x.fee_cents), photos: x.photos }));
-  const cols = ['id', 'on_date', 'ticket_no', 'facility', 'stream', 'stream_kind', 'material_label', 'sector', 'zone', 'truck', 'gross_lb', 'tare_lb', 'net_lb', 'net_tons', 'tipping_fee_dollars', 'source', 'hauler', 'photos'];
+  const data = list.map(({ fee_cents: fee, ...x }) => ({ ...x, sector: T.SECTORS[x.sector], tipping_fee_dollars: dollars(fee), photos: x.photos }));
+  const cols = ['id', 'on_date', 'ticket_no', 'facility', 'stream', 'stream_kind', 'material_label', 'sector', 'zone', 'truck', 'gross_lb', 'tare_lb', 'net_lb', 'net_tons', ...(['owner', 'manager'].includes(req.auth.role) ? ['tipping_fee_dollars'] : []), 'source', 'hauler', 'photos']; // the fee for owners and managers only
   await audit(pool, req, 'weigh_ticket_export', 'weigh_tickets', null, { rows: data.length });
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', 'attachment; filename="weigh-tickets.csv"').send(toCsv(cols, data));
 });

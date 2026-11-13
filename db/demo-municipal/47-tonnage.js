@@ -96,8 +96,13 @@ module.exports = async function tonnage(conn, tenantId, helpers = {}) {
   const landfill = await fac('Pioneer Crossing Landfill', 'landfill', 7250, 0);
   const mrf = await fac('Blue Mountain Recycling', 'recycling', 0, 8);
   const compost = await fac('Borough Leaf Compost Site', 'compost', null, 0);
-  const [haveTickets] = await q('SELECT COUNT(*) AS n FROM weigh_tickets WHERE tenant_id = ?', [tenantId]);
-  if (!Number(haveTickets.n)) {
+  // Its own marker (an import row), so the drivers' tickets of 46-routes.js do not stop the year being built.
+  const MARK = 'Demo: a year of weigh tickets';
+  const [haveYear] = await q('SELECT id FROM weigh_ticket_imports WHERE tenant_id = ? AND source_name = ?', [tenantId, MARK]);
+  if (!haveYear) {
+    // The marker is written first and its tickets point at it; INSERT IGNORE skips a ticket number already there, so a
+    // run that stopped half way finishes on the next one.
+    const importId = (await q('INSERT INTO weigh_ticket_imports (tenant_id, source_name, file_name) VALUES (?, ?, NULL)', [tenantId, MARK])).insertId;
     const start = `${thisYear - 1}-01-01`;
     const rows = [];
     let k = 0;
@@ -127,13 +132,14 @@ module.exports = async function tonnage(conn, tenantId, helpers = {}) {
     }
     for (const [d, no, facId, streamId, kind, material, zone, truck, gross, tare, feePerTon] of rows) {
       const net = gross - tare;
-      const [r] = await conn.query(`INSERT INTO weigh_tickets (tenant_id, on_date, ticket_no, facility_id, stream_id, stream_kind, material, sector, zone_id, truck_asset_id, gross_lb, tare_lb, net_lb, fee_cents, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'res_curb', ?, ?, ?, ?, ?, ?, ?)`, [tenantId, d, no, facId, streamId, kind, material, zone, truck ? truck.id : null, gross, tare, net, feePerTon === null ? null : Math.round((net / 2000) * feePerTon), no ? 'office' : 'import']);
-      if (no && d > addDays(now, -10)) {
+      const [r] = await conn.query(`INSERT IGNORE INTO weigh_tickets (tenant_id, on_date, ticket_no, facility_id, stream_id, stream_kind, material, sector, zone_id, truck_asset_id, gross_lb, tare_lb, net_lb, fee_cents, source, import_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'res_curb', ?, ?, ?, ?, ?, ?, ?, ?)`, [tenantId, d, no, facId, streamId, kind, material, zone, truck ? truck.id : null, gross, tare, net, feePerTon === null ? null : Math.round((net / 2000) * feePerTon), no ? 'office' : 'import', importId]);
+      if (r.affectedRows && no && d > addDays(now, -10)) {
         await conn.query('INSERT INTO weigh_ticket_photos (tenant_id, ticket_id, mime, bytes, sha256, original, taken_at, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [tenantId, r.insertId, 'image/jpeg', PHOTO.length, crypto.createHash('sha256').update(PHOTO).digest('hex'), PHOTO, `${d} 15:30:00`, `${d} 15:45:00`]);
       }
     }
+    await q('UPDATE weigh_ticket_imports SET rows_added = ? WHERE tenant_id = ? AND id = ?', [rows.length, tenantId, importId]);
     out.push(`${rows.length} weigh tickets`);
   }
 

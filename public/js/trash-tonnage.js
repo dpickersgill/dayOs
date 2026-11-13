@@ -372,7 +372,7 @@ async function figuresPart(panel) {
         figure(f.recycling_rate === null ? '–' : `${f.recycling_rate}%`, 'recycling rate', `${tons(f.totals.recycled_tons)} tons recycled`),
         figure(f.pounds_per_household === null ? '–' : lbs(f.pounds_per_household), 'pounds per household', f.households ? `${lbs(f.households)} households${f.households_source === 'carts' ? ' with carts' : ''}` : 'Households not known'),
         f.cost_per_ton_cents !== undefined && f.cost_per_ton_cents !== null ? figure(money(f.cost_per_ton_cents), 'per ton', `${money(f.fees_cents)} in tipping fees`) : null),
-      h('p', { class: 'muted small' }, 'Recycling rate: recycling, yard waste and food waste tons over all tons. Pounds per household: all tons over the households on the water customer list (or the addresses with carts).'),
+      h('p', { class: 'muted small' }, 'Recycling rate: tons taken to a recycling processor or compost site over all tons. Anything taken to a landfill or transfer station counts as disposal, even yard waste or recycling. Pounds per household: all tons over the households on the water customer list (or the addresses with carts).'),
       f.months.length ? h('div', { class: 'stack' }, h('h3', null, 'By month'),
         h('p', { class: 'tn-legend small' }, kinds.map((k) => h('span', null, h('i', { class: `tn-${k}` }), STREAM_WORDS[k]))),
         table([
@@ -635,7 +635,7 @@ async function answerDialog(year, formId, done) {
   const lines = [];
   (f.lines.length ? f.lines : [{}]).forEach(addLine);
   formDialog(`${f.reporter}: ${year}`, h('div', { class: 'stack' }, h('p', { class: 'muted small' }, f.form),
-    h('label', { class: 'check' }, none, 'They collected nothing in the municipality this year'), rowsEl, button('Add a material', () => addLine())), async () => {
+    h('label', { class: 'check' }, none, f.kind === 'business' ? 'They had nothing to recycle this year' : 'They collected nothing in the municipality this year'), rowsEl, button('Add a material', () => addLine())), async () => {
     const body = { none: none.checked, lines: none.checked ? [] : lines.map((x) => ({ material: x.mat.value, ...Object.fromEntries(x.cols.map((c) => [c.key, Number(c.el.value || 0)])), residue: Number(x.residue.value || 0), processor: x.proc.value.trim() })) };
     await post(`/solid-waste/recycling-report/${year}/forms/${formId}/answer`, body);
     toast('Answer saved'); await done();
@@ -658,12 +658,12 @@ async function municipalPart(panel, year) {
   appendAll(panel,
     h('div', { class: 'row no-print' }, button('Print', () => window.print()), button('Spreadsheet for the county', async () => { try { await download(`/solid-waste/recycling-report/${year}/report.csv`, `recycling-report-${year}.csv`); } catch (err) { fail(err); } }, { kind: 'primary' })),
     h('h2', null, `${rep.town}: ${year} municipal recycling report`),
-    h('p', null, rep.report ? `For ${rep.report.county} County, due ${fmtDay(rep.report.due_on)}.` : '', ` Trash: ${tons(rep.trash_tons)} tons. Recycling rate ${rep.recycling_rate === null ? 'not known' : `${rep.recycling_rate}%`}.`),
+    h('p', null, rep.report ? `For ${rep.report.county} County, due ${fmtDay(rep.report.due_on)}.` : '', ` Disposed (trash, and anything taken to a landfill or transfer station): ${tons(rep.trash_tons)} tons. Recycling rate ${rep.recycling_rate === null ? 'not known' : `${rep.recycling_rate}%`}.`),
     rep.rows.length ? reportTable(rep) : empty('No recycled tons yet: weigh tickets and reporters\' answers fill this in.'),
     rep.sources.length ? h('details', null, h('summary', null, 'Where each number came from'), table([
       { head: 'From', cell: (x) => x.source }, { head: 'Material', cell: (x) => x.label }, { head: 'Tons', num: true, cell: (x) => tons(x.total) }, { head: 'Residue', num: true, cell: (x) => tons(x.residue) }, { head: 'Processor', cell: (x) => x.processor },
     ], rep.sources)) : null,
-    h('p', { class: 'muted small' }, 'Own weigh tickets count recycled materials only, with each processor\'s residue share taken off (Tonnage, Facilities). Do not list a hauler whose tickets the office already enters, or its tons count twice.'));
+    h('p', { class: 'muted small' }, 'Own weigh tickets count only what went to a recycling processor or compost site, with each processor\'s residue share taken off (Tonnage, Facilities). A load taken to a landfill or transfer station is disposal, whatever it was. Do not list a hauler whose tickets the office already enters, or its tons count twice.'));
 }
 
 async function packetPart(panel, year) {
@@ -673,7 +673,7 @@ async function packetPart(panel, year) {
   appendAll(panel,
     h('div', { class: 'row no-print' }, button('Print', () => window.print()), button('Ticket photos (zip)', async () => { try { await download(`/solid-waste/recycling-report/${year}/packet.zip`, `section-904-${year}.zip`); } catch (err) { fail(err); } }, { kind: 'primary' })),
     h('h2', null, `${p.town}: Section 904 recycling performance grant, ${year}`),
-    h('p', null, `${tons(p.totals.total)} tons recycled (residue taken off), ${tons(p.trash_tons)} tons of trash; recycling rate ${p.recycling_rate === null ? 'not known' : `${p.recycling_rate}%`}.`),
+    h('p', null, `${tons(p.totals.total)} tons recycled (residue taken off), ${tons(p.trash_tons)} tons disposed (trash, and anything landfilled); recycling rate ${p.recycling_rate === null ? 'not known' : `${p.recycling_rate}%`}.`),
     p.rows.length ? reportTable(p) : null,
     h('h3', null, 'Backing documents'),
     h('p', null, `${p.documents.tickets.length} weigh tickets (${withPhoto} with a photo, in the zip with their SHA-256), and ${p.documents.reports.length} hauler and business reports.`),
