@@ -148,11 +148,11 @@ async function managePage(token) {
       h('p', { class: 'muted' }, `This page is for ${forWhat}. Addresses signed up with another phone or email have their own link.`),
       v.signups.length ? null : h('p', null, 'You have no addresses signed up now.'),
       ...v.signups.map((s) => {
-        const boxes = v.topics.map((t) => ({ t, ...check(`m-${s.id}-${t.key}`, t.always ? `${t.label} (always on)` : t.label, s.topics.includes(t.key), t.always ? { disabled: true } : {}) }));
+        const boxes = v.topics.map((t) => ({ t, ...check(`m-${s.key}-${t.key}`, t.always ? `${t.label} (always on)` : t.label, s.topics.includes(t.key), t.always ? { disabled: true } : {}) }));
         const save = h('button', { type: 'button', class: 'btn' }, 'Save topics');
-        save.addEventListener('click', () => act({ action: 'topics', signup_id: s.id, topics: boxes.filter((b) => b.box.checked).map((b) => b.t.key) }, 'Topics saved.'));
+        save.addEventListener('click', () => act({ action: 'topics', signup: s.key, topics: boxes.filter((b) => b.box.checked).map((b) => b.t.key) }, 'Topics saved.'));
         const remove = h('button', { type: 'button', class: 'btn' }, 'Remove this address');
-        remove.addEventListener('click', () => act({ action: 'remove', signup_id: s.id }, 'Address removed. You will not get alerts for it.'));
+        remove.addEventListener('click', () => act({ action: 'remove', signup: s.key }, 'Address removed. You will not get alerts for it.'));
         const how = [s.texts && `Texts to the phone ${s.phone_hint}: ${s.texts === 'on' ? 'on' : 'stopped'}`, s.emails && `Emails to ${s.email_hint}: ${s.emails === 'on' ? 'on' : 'stopped'}`].filter(Boolean);
         return h('section', { class: 'alert-card' }, h('h2', null, `${s.house_number || ''} ${s.street}${s.unit ? `, ${s.unit}` : ''}`.trim()),
           h('p', { class: 'muted' }, how.join('. ') || 'Waiting for you to confirm your phone or email.'), ...boxes.map((b) => b.el), h('div', { class: 'row' }, save, remove));

@@ -751,6 +751,22 @@ async function managed(req) {
 const throughAddress = (a) => (a.channel === 'sms'
   ? ["s.by_text = 1 AND s.phone IS NOT NULL AND RIGHT(REGEXP_REPLACE(s.phone, '[^0-9]', ''), 10) = ?", [a.addr]]
   : ['s.by_email = 1 AND LOWER(s.email) = ?', [a.addr]]);
+/**
+ * A sign-up as the manage page names it: letters only, signed for this address (2026.11.22 review). The page never sees
+ * the sign-up's database id, so it cannot be compared with anything else and says nothing of other sign-ups.
+ */
+const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+function signupKey(t, a, signupId) {
+  const mac = crypto.createHmac('sha256', config.linkSecret).update(`alerts-signup-key:${t.id}:${a.id}:${signupId}`).digest();
+  return Array.from(mac.subarray(0, 12), (b) => LETTERS[b % LETTERS.length]).join('');
+}
+/** The sign-up id behind a key from the manage page, among the sign-ups this address reaches, or null. */
+async function signupFromKey(t, a, key) {
+  const [where, params] = throughAddress(a);
+  const list = await rows(pool, `SELECT s.id FROM alert_signups s WHERE s.tenant_id = ? AND s.status = 'active' AND ${where}`, [t.id, ...params]);
+  const hit = list.find((x) => signupKey(t, a, x.id) === String(key || ''));
+  return hit ? Number(hit.id) : null;
+}
 async function manageView(t, a) {
   const [where, params] = throughAddress(a);
   const list = await rows(pool, `SELECT s.id, st.name AS street, s.house_number, s.unit, s.topics
@@ -759,7 +775,7 @@ async function manageView(t, a) {
   const hint = a.channel === 'sms' ? phoneHint(a.addr) : emailHint(a.addr);
   return {
     municipality: t.name, channel: a.channel, hint, topics: SN.TOPICS.map(([key, label]) => ({ key, label, always: key === 'water' })),
-    signups: list.map((s) => ({ id: s.id, street: s.street, house_number: s.house_number, unit: s.unit, topics: String(s.topics || '').split(',').filter(Boolean),
+    signups: list.map((s) => ({ key: signupKey(t, a, s.id), street: s.street, house_number: s.house_number, unit: s.unit, topics: String(s.topics || '').split(',').filter(Boolean),
       texts: a.channel === 'sms' ? state : null, emails: a.channel === 'email' ? state : null, phone_hint: a.channel === 'sms' ? hint : null, email_hint: a.channel === 'email' ? hint : null })),
   };
 }
@@ -784,9 +800,11 @@ publicRouter.get('/:slug/alerts/manage/:token', async (req, res) => {
   const { t, a } = await managed(req);
   res.set('Cache-Control', 'no-store').json(await manageView(t, a));
 });
+// A sign-up is named by its key from the manage view (signup); signup_id is still read from an older page.
+const signupRef = { signup: z.string().regex(/^[A-Z]{12}$/).optional(), signup_id: z.coerce.number().int().positive().optional() };
 const manageBody = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('topics'), signup_id: z.coerce.number().int().positive(), topics: z.array(z.enum(SN.TOPIC_KEYS)).max(10) }),
-  z.object({ action: z.literal('remove'), signup_id: z.coerce.number().int().positive() }),
+  z.object({ action: z.literal('topics'), ...signupRef, topics: z.array(z.enum(SN.TOPIC_KEYS)).max(10) }),
+  z.object({ action: z.literal('remove'), ...signupRef }),
   z.object({ action: z.literal('stop'), channel: z.enum(['sms', 'email']).optional() }),
 ]);
 publicRouter.post('/:slug/alerts/manage/:token', validate(manageBody), async (req, res) => {
@@ -797,8 +815,10 @@ publicRouter.post('/:slug/alerts/manage/:token', validate(manageBody), async (re
     if (b.channel && b.channel !== a.channel) throw bad(a.channel === 'sms' ? 'This link is for texts to one phone. Use the link in an alert email to stop emails.' : 'This link is for emails to one address. Reply STOP to a text to stop texts.');
     await SN.stopAddress(pool, t.id, a.channel, a.addr, 'manage_link');
   } else {
+    const target = b.signup ? await signupFromKey(t, a, b.signup) : b.signup_id || null;
+    if (!target) throw new AppError(404, 'That address is not on your alerts any more.');
     await tx(async (conn) => {
-      const id = await ownRow(conn, t, a, b.signup_id);
+      const id = await ownRow(conn, t, a, target);
       if (!id) throw new AppError(404, 'That address is not on your alerts any more.');
       if (b.action === 'topics') await conn.query('UPDATE alert_signups SET topics = ? WHERE tenant_id = ? AND id = ?', [[...new Set(['water', ...b.topics])].join(','), t.id, id]);
       else await conn.query("UPDATE alert_signups SET status = 'ended', ended_at = UTC_TIMESTAMP() WHERE tenant_id = ? AND id = ?", [t.id, id]);

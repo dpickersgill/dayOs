@@ -30,7 +30,7 @@
 const q = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
 const SOLIDWASTE_BLURB = 'The collection schedule and calendar for residents, reminders, missed pickups, carts, bulk pickup booked and paid online, and the annual recycling report.';
 const PLANS = [
-  ['muni-routes', 'Collection routes', 'For a borough with its own crew: the driver\'s route on a phone, done and skipped streets, weigh tickets, tonnage and what each collection day costs.', 'collectionroutes', 10000, 6],
+  ['muni-routes', 'Collection routes', 'For a borough with its own crew: the driver\'s route on a phone, each street marked done or not collected, weigh tickets, tonnage and what each collection day costs.', 'collectionroutes', 10000, 6],
   ['muni-hauler', 'Hauler oversight', 'For a borough with a contracted hauler: the contract, missed pickups sent to the hauler, the hauler\'s monthly reports and a scorecard.', 'hauler', 10000, 7],
 ];
 const indexExists = async (c, table, name) => (await c.query('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1', [table, name]))[0].length > 0;

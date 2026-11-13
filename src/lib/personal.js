@@ -134,6 +134,11 @@ const REGISTRY = [
   // stays on the door hanger list (a house on the street, no one's name). A later import from the billing system can bring
   // the account back: tell the person to ask the billing office too.
   { table: 'service_addresses', by: { email: ['email'], phone: ['phone'] }, erase: { set: { phone: null, email: null, contact_ok: 0, account_number: null } } },
+  // Trash and recycling (2026.11.22): a cart request keeps the contact typed on it, like a bulk booking; erasing blanks it
+  // and stops its messages, and the request stays with the street and the cart. A recycling reporter is a hauler or a
+  // business that reports its tons; the person to write to there is blanked, the business's name stays on the report.
+  { table: 'cart_requests', by: { email: ['contact_email'], phone: ['contact_phone'] }, erase: { set: { contact_name: null, contact_phone: null, contact_email: null, texts_ok: 0, emails_ok: 0 } } },
+  { table: 'recycling_reporters', by: { email: ['email'], phone: ['phone'] }, erase: { set: { contact_name: null, email: null, phone: null } } },
   // Logins and staff are never anonymised here (the route refuses); listed so the export shows them.
   { table: 'staff', by: { person: ['person_id'] }, erase: { keep: 'Staff records are not anonymised here.' } },
   { table: 'users', by: { person: ['person_id'] }, erase: { keep: 'Sign-ins are not anonymised here.' }, columns: ['id', 'email', 'username', 'role', 'active', 'created_at', 'access_ends_on'] },
@@ -166,6 +171,9 @@ const NOT_GUESTS = {
   // muni release 1: request_settings holds the municipality's office and after-hours numbers. (requests and bulk_bookings
   // keep the contact typed on them and are in REGISTRY above.)
   request_settings: 'a municipality setting (its office and after-hours numbers)',
+  // Trash and recycling (2026.11.22): the contracted hauler's office phone and email residents are shown; and when the
+  // crew's phone marked a street done or skipped (phone_at is a time, not a number).
+  collection_settings: 'a municipality setting (its hauler\u2019s office phone and email)', collection_stop_marks: 'the crew marking a street done or skipped (phone_at is when the phone marked it, not a number)',
   brief_prefs: 'a staff login\u2019s morning brief setting', morning_briefs: 'the day\u2019s morning brief for staff (counts, no guest names), kept 30 days', brief_sends: 'which staff were sent the morning brief, kept 30 days',
 };
 

@@ -256,13 +256,16 @@ test('plans are sold to one kind: the ski pricing page and billing screen never 
     ['muni-stormwater', 'Stormwater', 'addon', 'stormwater', 10000, 120000],
     ['muni-solidwaste', 'Trash and recycling', 'addon', 'solidwaste', 15000, 180000],
     ['muni-buildings', 'Buildings', 'addon', 'buildings', 10000, 120000],
+    // 2026.11.22: the Trash and recycling add-ons' own add-ons (they need Trash and recycling on).
+    ['muni-routes', 'Collection routes', 'addon', 'collectionroutes', 10000, 120000],
+    ['muni-hauler', 'Hauler oversight', 'addon', 'hauler', 10000, 120000],
   ]);
 
   const mb = await api('GET', '/billing', { token: muni.token });
   is(mb, 200);
   assert.equal(mb.body.org_type, 'municipality');
   assert.deepEqual(mb.body.plans.map((p) => p.code), ['muni-core']);
-  assert.deepEqual(mb.body.addons.map((p) => p.code), ['muni-water', 'muni-sewer', 'muni-stormwater', 'muni-solidwaste', 'muni-buildings']);
+  assert.deepEqual(mb.body.addons.map((p) => p.code), ['muni-water', 'muni-sewer', 'muni-stormwater', 'muni-solidwaste', 'muni-buildings', 'muni-routes', 'muni-hauler']);
   const sb = await api('GET', '/billing', { token: skiToken });
   is(sb, 200);
   assert.ok(sb.body.plans.length && !sb.body.plans.some((p) => p.code.startsWith('muni-')));

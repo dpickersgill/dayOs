@@ -212,7 +212,7 @@ test('1: one person with a phone and an email has two links, each reaching only 
   assert.deepEqual(t.signups.map((s) => [s.house_number, s.texts, s.emails]), [['120', 'on', null]]);
   assert.deepEqual(m.signups.map((s) => [s.house_number, s.texts, s.emails]), [['120', null, 'on']]);
   // Removing through the email link leaves the texts on.
-  ok(await api('POST', `/public/${A.slug}/alerts/manage/${tokenOf(byMail)}`, { body: { action: 'remove', signup_id: m.signups[0].id } }));
+  ok(await api('POST', `/public/${A.slug}/alerts/manage/${tokenOf(byMail)}`, { body: { action: 'remove', signup: m.signups[0].key } }));
   assert.deepEqual(ok(await api('GET', `/public/${A.slug}/alerts/manage/${tokenOf(byText)}`)).signups.map((s) => s.texts), ['on']);
   // The staff list shows the name typed on the sign-up.
   const list = ok(await api('GET', `/street-notices/residents?street_id=${S['Main Street']}`, { token: A.token }));

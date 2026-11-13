@@ -1771,7 +1771,7 @@ export const ARTICLES = [
     tips: ['Addresses shows the carts on record at a house, and lets you put one on record that is already there.', 'With Collection routes, the day\u2019s deliveries also show on that day\u2019s route.'],
     related: ['trash-carts'] },
   { id: 'trash-carts-setup', app: 'bulk', who: [], orgs: ['municipality'], title: 'Cart sizes and fees', keywords: 'cart sizes 35 65 95 gallon fee extra replacement free stripe card online page rules',
-    intro: 'Managers list the cart sizes offered for each stream and the fee for an extra cart and for a replacement. A new home\u2019s first cart and a stolen cart are always free; a fee of $0 makes the others free too.',
+    intro: 'Managers list the cart sizes offered for each stream and the fee for an extra cart and for a replacement. A new home\u2019s first cart and a stolen cart are always free; a fee of 0 dollars makes the others free too.',
     steps: ['Open Trash and recycling, Carts, Sizes and fees.', 'For each stream tick the sizes you hand out (35, 65 or 95 gallons) and type the fees.', 'Set how many extra carts one address may have for a stream, and the points residents read on the page.', 'Copy the page link to your website.'],
     tips: ['Fees are paid by card on your own Stripe account, connected under Settings, Payments. Until it is connected, residents pay at the office.', 'A size you untick stops being offered; carts already out keep it.'],
     related: ['trash-carts'] },
