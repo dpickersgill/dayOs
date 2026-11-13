@@ -248,6 +248,22 @@ test('the iCalendar feed: all-day events per collection, moved days named, folde
   assert.match(unfolded, /DESCRIPTION:Rake to the curb\\; not into the street\\, please/);
   assert.equal((unfolded.match(/BEGIN:VEVENT/g) || []).length, (unfolded.match(/END:VEVENT/g) || []).length);
   assert.doesNotMatch(unfolded, /@example|555-/);
+  // UIDs name the municipality on a fixed domain, never the host asked; SEQUENCE goes up when a day moves.
+  const uids = unfolded.match(/^UID:.*$/gm);
+  assert.ok(uids.length && uids.every((u) => u.endsWith(`@${T.slug}.collection.verdynt.com`)), uids[0]);
+  assert.doesNotMatch(unfolded, /127\.0\.0\.1/);
+  assert.equal((unfolded.match(/^SEQUENCE:/gm) || []).length, (unfolded.match(/BEGIN:VEVENT/g) || []).length);
+  const seqOf = (text, date) => Number((new RegExp(`SEQUENCE:(\\d+)\\r\\nDTSTAMP:[^\\r]+\\r\\nDTSTART;VALUE=DATE:${date}`).exec(text) || [])[1]);
+  const next = ok(await pub(T, `/lookup?street=${T.streets['Main Street']}&no=1`)).next[0];
+  const day = next.date.replace(/-/g, '');
+  assert.equal(seqOf(unfolded, day), next.moved ? 1 : 0);
+  ok(await api('POST', '/solid-waste/collection/changes', { token: T.token, body: { on_date: next.date, moved_to: plus(next.date, 1), zone_ids: [T.zone], reason: 'snow', notice: false } }), 201);
+  const after = (await (await fetch(`${base}/api/v1/public/${T.slug}/collection/calendar.ics?zone=${T.zone}`)).text()).replace(/\r\n /g, '');
+  const moved = /UID:([^\r]+)\r\nSEQUENCE:(\d+)\r\nDTSTAMP:[^\r]+\r\nDTSTART;VALUE=DATE:(\d+)\r\nDTEND;VALUE=DATE:\d+\r\nSUMMARY:Trash \(moved for snow\)/.exec(after);
+  assert.ok(moved, 'the moved day');
+  assert.equal(moved[3], plus(next.date, 1).replace(/-/g, ''));
+  assert.ok(Number(moved[2]) > 1);
+  assert.ok(moved[1].startsWith(next.original.replace(/-/g, '')), 'the same UID: the event moves, it is not a new one');
   const onlyRec = await (await fetch(`${base}/api/v1/public/${T.slug}/collection/calendar.ics?zone=${T.zone}&streams=${T.rec}`)).text();
   assert.doesNotMatch(onlyRec, /SUMMARY:Trash/);
   assert.match(onlyRec, /SUMMARY:Recycling/);
@@ -409,20 +425,27 @@ test('staff take a missed pickup the check refuses (with a tick on screen); a se
   ok(await api('POST', '/requests', { token: deskT.token, body: { category_id: cat, street_id: T.streets['Main Street'], house_number: '44', stream_id: T.trash, source: 'phone', contact: { phone: '610-555-0150' } } }), 201);
   const msgs = await q("SELECT m.body FROM chat_messages m JOIN chat_threads t ON t.tenant_id = m.tenant_id AND t.id = m.thread_id WHERE m.tenant_id = ? AND t.name = 'Missed pickups'", [T.id]);
   assert.equal(msgs.length, 1);
-  assert.match(msgs[0].body, /Repeat missed pickup on Main Street: 2 at the same address/);
+  assert.match(msgs[0].body, /Repeat missed pickup on Main Street: missed on 2 collection days at the same address/);
   assert.doesNotMatch(msgs[0].body, /44|555/);
+  // The same miss (today's trash) reported again is not a repeat: no second message.
+  ok(await api('POST', '/requests', { token: deskT.token, body: { category_id: cat, street_id: T.streets['Main Street'], house_number: '44', stream_id: T.trash, source: 'phone', contact: { phone: '610-555-0151' } } }), 201);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM chat_messages m JOIN chat_threads t ON t.tenant_id = m.tenant_id AND t.id = m.thread_id WHERE m.tenant_id = ? AND t.name = 'Missed pickups'", [T.id]))[0].n, 1);
+  // Two reports of one day at another address are never a repeat.
+  for (const ph of ['610-555-0152', '610-555-0153']) ok(await api('POST', '/requests', { token: deskT.token, body: { category_id: cat, street_id: T.streets['Main Street'], house_number: '46', stream_id: T.trash, source: 'phone', contact: { phone: ph } } }), 201);
+  assert.equal((await q("SELECT COUNT(*) AS n FROM chat_messages m JOIN chat_threads t ON t.tenant_id = m.tenant_id AND t.id = m.thread_id WHERE m.tenant_id = ? AND t.name = 'Missed pickups'", [T.id]))[0].n, 1);
   // The tab, the menu count, + New and the Today card read the same number.
   const list = ok(await api('GET', '/solid-waste/collection/missed', { token: deskT.token }));
-  assert.equal(list.waiting, 2);
-  assert.equal(list.data[0].repeat, 2);
+  assert.equal(list.waiting, 5);
+  assert.deepEqual(list.data.filter((m) => /\b44\b/.test(m.place)).map((m) => m.repeat), [2, 2, 2]);
+  assert.deepEqual(list.data.filter((m) => /\b46\b/.test(m.place)).map((m) => m.repeat), [0, 0], 'one day reported twice');
   const counts = ok(await api('GET', '/nav/counts', { token: deskT.token })).counts;
-  assert.equal(counts.bulk.n, 2);
+  assert.ok(counts.bulk.n >= 5);
   assert.ok(ok(await api('GET', '/nav/new', { token: deskT.token })).items.includes('missed_pickup'));
   const crewT = await T.addLogin('staff');
   assert.ok(!ok(await api('GET', '/nav/new', { token: crewT.token })).items.includes('missed_pickup'));
   assert.equal(ok(await api('GET', '/nav/counts', { token: crewT.token })).counts.bulk, undefined);
   const today2 = ok(await api('GET', '/solid-waste/today', { token: deskT.token }));
-  assert.equal(today2.cards.find((c) => c.title === 'Missed pickups').count, 2);
+  assert.equal(today2.cards.find((c) => c.title === 'Missed pickups').count, 5);
   assert.ok(today2.cards.find((c) => c.title === 'Collection today'));
 });
 

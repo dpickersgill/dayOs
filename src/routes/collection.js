@@ -448,14 +448,26 @@ router.get('/collection/missed', anyone, async (req, res) => {
   const show = first(req.query.show) === 'all' ? 'all' : 'open';
   const list = await rows(pool, `${Q.REQ_SQL} WHERE r.tenant_id = ? AND c.code = 'missed'${show === 'open' ? " AND r.status IN ('new','assigned','made_safe')" : ' AND r.reported_at >= UTC_TIMESTAMP() - INTERVAL 120 DAY'} ORDER BY r.reported_at DESC LIMIT 500`, [t]);
   const streams = new Map((await C.streamsOf(pool, t, { all: true })).map((s) => [s.id, s]));
-  const counts = list.length ? await rows(pool, `SELECT r.street_id, r.house_number, COUNT(*) AS n FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
-    WHERE r.tenant_id = ? AND c.code = 'missed' AND r.reported_at >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND r.street_id IS NOT NULL GROUP BY r.street_id, r.house_number`, [t]) : [];
-  const repeat = new Map(counts.map((c) => [`${c.street_id}|${String(c.house_number || '').trim().toLowerCase()}`, n(c.n)]));
+  // Repeats: missed pickups at the same address on different collection days in the last 60 days (lib/missedpickup.js).
+  const MP = require('../lib/missedpickup');
+  const near = list.length ? await rows(pool, `SELECT r.id, r.street_id, r.house_number, r.stream_id, r.reported_at FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
+    WHERE r.tenant_id = ? AND c.code = 'missed' AND r.reported_at >= UTC_TIMESTAMP() - INTERVAL 180 DAY AND r.street_id IS NOT NULL AND r.status <> 'duplicate'`, [t]) : [];
+  const places = new Map();
+  for (const x of near) { const k2 = `${x.street_id}|${String(x.house_number || '').trim().toLowerCase()}`; if (!places.has(k2)) places.set(k2, []); places.get(k2).push(x); }
+  const dayOf = new Map();
+  for (const group of places.values()) if (group.length > 1) for (const [id, d] of await MP.missedDays(pool, t, group)) dayOf.set(id, d);
+  const ms = (d) => Date.parse(`${d}T12:00:00Z`);
+  const repeatOf = (r) => {
+    const group = places.get(`${r.street_id}|${String(r.house_number || '').trim().toLowerCase()}`) || [];
+    const mine = dayOf.get(Number(r.id));
+    if (!mine) return 1;
+    return new Set(group.map((x) => dayOf.get(Number(x.id))).filter((d) => d && Math.abs(ms(d) - ms(mine)) <= 60 * 86400000)).size;
+  };
   res.json({
     show, waiting: await missedWaiting(pool, t),
     data: list.map((r) => {
       const s = r.stream_id ? streams.get(Number(r.stream_id)) : null;
-      const times = repeat.get(`${r.street_id}|${String(r.house_number || '').trim().toLowerCase()}`) || 1;
+      const times = repeatOf(r);
       return { id: Number(r.id), reference: r.reference, place: Q.placeWords(r), street: r.street_name || null, status: r.status, status_words: Q.STATUS_WORDS[r.status], reported_at: r.reported_at, source: r.source,
         stream: s ? s.name : null, stream_color: s ? s.color : null, check: r.pickup_check || null, check_words: r.pickup_check ? CHECK_WORDS[r.pickup_check] || r.pickup_check : null, repeat: times > 1 ? times : 0 };
     }),
@@ -681,16 +693,19 @@ publicRouter.get('/:slug/collection/calendar.ics', async (req, res) => {
   const days = (await C.collectionDays(pool, t.id, { zoneId: zn.id, from: addDays(today, -30), to: addDays(today, 365) })).filter((d) => !only.length || only.includes(d.streamId));
   const events = (await rows(pool, 'SELECT id, kind, name, starts_on, ends_on, notes, zone_ids FROM collection_events WHERE tenant_id = ? AND ends_on >= ? ORDER BY starts_on', [t.id, addDays(today, -30)]))
     .filter((e) => { const zs = C.asList(e.zone_ids); return !zs.length || zs.includes(Number(zn.id)); });
-  const host = String(req.hostname || 'verdynt').replace(/[^a-z0-9.-]/gi, '');
+  // UIDs name the municipality and a fixed domain, never the host the feed was fetched from, so the same day is the same
+  // event whichever address a phone used. SEQUENCE goes up when a day moves: 0 as planned, 1 moved for a holiday, and
+  // past that each change (snow, weather) a step higher than any before it, so calendar apps take the new day.
+  const host = `${String(t.slug).toLowerCase().replace(/[^a-z0-9-]/g, '')}.collection.verdynt.com`;
   const stamp = `${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Verdynt OS//Collection calendar//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     `X-WR-CALNAME:${icsText(`${t.name}: trash and recycling (${zn.name})`)}`, `X-WR-TIMEZONE:${icsText(t.timezone)}`, 'REFRESH-INTERVAL;VALUE=DURATION:PT12H', 'X-PUBLISHED-TTL:PT12H'];
   for (const d of days) {
-    lines.push('BEGIN:VEVENT', `UID:${compact(d.original)}-${d.streamId}-${zn.id}-${t.id}@${host}`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${compact(d.date)}`, `DTEND;VALUE=DATE:${compact(addDays(d.date, 1))}`,
+    lines.push('BEGIN:VEVENT', `UID:${compact(d.original)}-${d.streamId}-${zn.id}@${host}`, `SEQUENCE:${d.changeId ? d.changeId + 1 : d.moved ? 1 : 0}`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${compact(d.date)}`, `DTEND;VALUE=DATE:${compact(addDays(d.date, 1))}`,
       `SUMMARY:${icsText(`${d.streamName}${d.moved ? ` (${C.REASON_WORDS[d.reason] || 'moved'})` : ''}`)}`, `CATEGORIES:${icsText(C.KIND_WORDS[d.kind] || 'Collection')}`, 'TRANSP:TRANSPARENT', 'END:VEVENT');
   }
   for (const e of events) {
-    lines.push('BEGIN:VEVENT', `UID:event-${e.id}-${t.id}@${host}`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${compact(e.starts_on)}`, `DTEND;VALUE=DATE:${compact(addDays(String(e.ends_on).slice(0, 10), 1))}`,
+    lines.push('BEGIN:VEVENT', `UID:event-${e.id}@${host}`, 'SEQUENCE:0', `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${compact(e.starts_on)}`, `DTEND;VALUE=DATE:${compact(addDays(String(e.ends_on).slice(0, 10), 1))}`,
       `SUMMARY:${icsText(e.name)}`, ...(e.notes ? [`DESCRIPTION:${icsText(e.notes)}`] : []), 'TRANSP:TRANSPARENT', 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');

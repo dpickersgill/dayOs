@@ -29,20 +29,63 @@ const payState = (b) => (b.status === 'cancelled' || b.status === 'expired' ? st
 // 2026.11.22: this view is the whole Trash and recycling app (the key stays bulk, so #/bulk keeps working). Its own tabs
 // carry an order; the add-ons' tabs register in ../trashtabs.js (from ../trash-routes.js and ../trash-tonnage.js) and
 // are placed by theirs. A missing add-on file is skipped.
+// The bulk pickup tabs sit in one top tab, "Bulk pickup", with a second row (2026.11.22 review: twelve tabs did not fit at
+// 1366 px). Their old addresses (#/bulk?tab=day, bookings, route, settings, report: Today cards, + New, links in mail)
+// keep working: the address is turned into #/bulk?tab=bulk&bulk=<that tab> before the tabs read it.
+export const BULK_SUB = ['day', 'bookings', 'route', 'settings', 'report'];
+/** The address with an old bulk tab moved to the second row, or null when there is nothing to move. */
+export function bulkAddress(hash) {
+  const [path, query] = String(hash || '').split('?');
+  if (!/^#\/?bulk$/.test(path || '')) return null;
+  const p = new URLSearchParams(query || '');
+  if (!BULK_SUB.includes(p.get('tab'))) return null;
+  p.set('bulk', p.get('tab')); p.set('tab', 'bulk');
+  return `${path}?${p.toString()}`;
+}
+function normalizeAddress() {
+  const to = bulkAddress(location.hash);
+  if (!to) return false;
+  try { history.replaceState(null, '', to); } catch (_) { return false; }
+  return true;
+}
+if (typeof window !== 'undefined') {
+  // A link to an old bulk tab while the app is on screen: move it, then let the tabs read the address again.
+  window.addEventListener('hashchange', () => { if (normalizeAddress()) window.dispatchEvent(new Event('popstate')); });
+}
+
 export async function render(root) {
+  normalizeAddress();
+  root.classList.add('trash-app');
   root.append(h('div', { class: 'page-head' }, h('h1', null, 'Trash and recycling'), h('p', { class: 'muted' }, 'The collection schedule and calendar, missed pickups, and bulk pickups residents book online or by phone.')));
   await Promise.all(['../trash-routes.js', '../trash-tonnage.js'].map((f) => import(f).catch(() => null)));
   let shell = { model: 'inhouse', setup_done: false, on: (ctx.me && ctx.me.modules) || [] };
   try { shell = await get('/solid-waste/collection/shell'); } catch (_) { /* the app's own tabs still work */ }
   const c = { me: ctx.me, role: ctx.me && ctx.me.role, manager: isManager(), on: shell.on, model: shell.model, setup_done: shell.setup_done };
-  const own = [[10, 'calendar', 'Calendar', S.calendarTab], [20, 'missed', 'Missed pickups', S.missedTab],
-    [50, 'day', 'Bulk pickup', dayTab], [55, 'bookings', 'Bulk bookings', bookingsTab], [60, 'route', 'Bulk route order', routeTab]]; // route: 2026.11.20 (bulk-route.js)
-  if (isManager()) own.push([80, 'schedule', 'Schedule', S.scheduleTab], [85, 'settings', 'Bulk settings', settingsTab], [90, 'report', 'Bulk report', reportTab]);
+  const bulkItems = [['day', 'Collection day', dayTab], ['bookings', 'Bookings', bookingsTab], ['route', 'Route order', routeTab]]; // route: 2026.11.20 (bulk-route.js)
+  if (isManager()) bulkItems.push(['settings', 'Settings', settingsTab], ['report', 'Report', reportTab]);
+  const bulkTab = (panel) => { const w = tabs(bulkItems, 'day', { param: 'bulk', row: 2 }); panel.append(w); scrollHint(w.querySelector('.tabs')); };
+  const own = [[10, 'calendar', 'Calendar', S.calendarTab], [20, 'missed', 'Missed pickups', S.missedTab], [50, 'bulk', 'Bulk pickup', bulkTab]];
+  if (isManager()) own.push([80, 'schedule', 'Schedule', S.scheduleTab]);
   const added = TABS.filter((t) => { try { return Boolean(t.show(c)); } catch (_) { return false; } })
     .map((t) => [t.order, t.id, t.label, (el) => t.render(el, { ...c, query: new URLSearchParams(String(location.hash).split('?')[1] || '') })]);
   const items = [...own, ...added].sort((a, b) => a[0] - b[0]).map(([, id, label, fn]) => [id, label, fn]);
-  const first = crewRole() && !office() ? (items.find((i) => i[0] === 'routes') ? 'routes' : 'day') : 'calendar';
-  root.append(tabs(items, hashParam('tab') || first));
+  const first = crewRole() && !office() ? (items.find((i) => i[0] === 'routes') ? 'routes' : 'bulk') : 'calendar';
+  const wrap = tabs(items, hashParam('tab') || first);
+  root.append(wrap);
+  scrollHint(wrap.querySelector('.tabs'));
+}
+
+/** A tab row wider than the screen fades at the edge that has more, so it is plain that it scrolls (a phone). */
+function scrollHint(bar) {
+  if (!bar) return;
+  const sync = () => {
+    const more = bar.scrollWidth > bar.clientWidth + 1;
+    bar.classList.toggle('more-right', more && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 2);
+    bar.classList.toggle('more-left', more && bar.scrollLeft > 2);
+  };
+  bar.addEventListener('scroll', sync, { passive: true });
+  window.addEventListener('resize', sync);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(sync); else setTimeout(sync, 0);
 }
 
 // ---------------------------------------------------------------- collection day
@@ -70,8 +113,8 @@ async function dayTab(panel) {
         h('div', { class: 'week-actions' }, views, mode === 'list' ? button('Print', () => window.print()) : null)),
       d.skipped ? h('p', { class: 'set-note' }, `No pickup this day${d.skip_note ? `: ${d.skip_note}` : ''}.`) : null,
       // The stops follow the route order a manager set for this weekday (2026.11.20); a street not in it comes last.
-      d.route && d.route.set && d.route.new_streets.length ? h('p', { class: 'set-note' }, `Not in the route order yet, so at the end: ${d.route.new_streets.join(', ')}.`, isManager() ? [' ', h('a', { href: `#/bulk?tab=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Add to the route')] : null) : null,
-      d.route && !d.route.set && d.stops.length && isManager() ? h('p', { class: 'muted small no-print' }, 'Stops are by street name. ', h('a', { href: `#/bulk?tab=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Set the driving order')) : null,
+      d.route && d.route.set && d.route.new_streets.length ? h('p', { class: 'set-note' }, `Not in the route order yet, so at the end: ${d.route.new_streets.join(', ')}.`, isManager() ? [' ', h('a', { href: `#/bulk?tab=bulk&bulk=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Add to the route')] : null) : null,
+      d.route && !d.route.set && d.stops.length && isManager() ? h('p', { class: 'muted small no-print' }, 'Stops are by street name. ', h('a', { href: `#/bulk?tab=bulk&bulk=route&weekday=${new Date(`${d.date}T12:00:00Z`).getUTCDay()}` }, 'Set the driving order')) : null,
       !d.collection_day && !d.stops.length ? h('p', { class: 'muted' }, `${fmtDay(d.date)} is not a collection day.`) : null,
       h('div', { class: 'figures' },
         figure(d.stops.length, `of ${d.capacity} stops`), figure(o.picked_up, 'picked up'), figure(o.not_out, 'not out'), figure(o.not_accepted, 'not accepted'), figure(o.left, 'to go')),

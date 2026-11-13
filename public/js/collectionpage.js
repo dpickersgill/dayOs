@@ -158,10 +158,20 @@ function whatGoesIn() {
   const list = page.streams.filter((s) => s.materials || s.not_accepted);
   if (!list.length && !page.ordinance_materials) return null;
   return h('section', { class: 'coll-what', 'aria-labelledby': 'c-what' }, h('h2', { id: 'c-what' }, 'What goes in each'),
-    list.map((s) => h('details', null, h('summary', null, h('span', { class: 'cl-chip', style: `--chip:${s.color}` }, s.name)),
-      s.materials ? [h('p', null, h('b', null, 'Yes')), h('ul', null, lines(s.materials).map((l) => h('li', null, l)))] : null,
-      s.not_accepted ? [h('p', null, h('b', null, 'No')), h('ul', null, lines(s.not_accepted).map((l) => h('li', null, l)))] : null)),
+    list.map((s) => disclosure(s)),
     page.ordinance_materials ? h('p', { class: 'small' }, h('b', null, 'Our recycling ordinance asks you to separate: '), lines(page.ordinance_materials).join(', '), '.') : null);
+}
+
+/** One stream's list behind a button that says it opens (a chevron, aria-expanded), not a bare fold. */
+function disclosure(s) {
+  const id = `c-what-${s.id}`;
+  const panel = h('div', { id, class: 'coll-disc-panel', hidden: true },
+    s.materials ? [h('p', null, h('b', null, 'Yes')), h('ul', null, lines(s.materials).map((l) => h('li', null, l)))] : null,
+    s.not_accepted ? [h('p', null, h('b', null, 'No')), h('ul', null, lines(s.not_accepted).map((l) => h('li', null, l)))] : null);
+  const btn = h('button', { type: 'button', class: 'coll-disc', 'aria-expanded': 'false', 'aria-controls': id },
+    h('span', { class: 'cl-chip', style: `--chip:${s.color}` }, s.name), h('span', { class: 'coll-disc-words' }, 'What goes in'), h('span', { class: 'coll-chev', 'aria-hidden': 'true' }));
+  btn.addEventListener('click', () => { const open = btn.getAttribute('aria-expanded') !== 'true'; btn.setAttribute('aria-expanded', String(open)); panel.hidden = !open; });
+  return h('div', { class: 'coll-disc-row' }, btn, panel);
 }
 
 function upcoming() {

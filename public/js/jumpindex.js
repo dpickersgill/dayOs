@@ -105,7 +105,7 @@ export const SUB_PAGES = [
   ['bulk', 'Collection schedule setup', '#/bulk?tab=schedule', 'schedule setup zones streams streets holidays trash recycling yard waste', mgr],
   ['bulk', 'Holidays and moved days', '#/bulk?tab=schedule&part=days', 'holiday snow day weather moved canceled leaf collection christmas trees hazardous', mgr],
   ['bulk', 'Act 101 education log', '#/bulk?tab=schedule&part=residents', 'act 101 education reminder mailer print recycling report reminders sign-ups', mgr],
-  ['bulk', 'Bulk pickup bookings', '#/bulk?tab=bookings', 'bulk pickup bookings furniture'],
+  ['bulk', 'Bulk pickup bookings', '#/bulk?tab=bulk&bulk=bookings', 'bulk pickup bookings furniture'],
   ['bulk', 'Cart requests', '#/bulk?tab=carts', 'cart can bin toter new extra replacement stolen request delivery'],
   ['bulk', 'Cart deliveries', '#/bulk?tab=carts&part=stops', 'cart delivery deliver crew load'],
   ['bulk', 'Carts in the yard', '#/bulk?tab=carts&part=stock', 'cart stock yard inventory receive scrap count'],

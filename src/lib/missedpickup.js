@@ -74,21 +74,47 @@ async function managersThread(conn, tenantId) {
 }
 
 /**
- * After a missed pickup is saved: when the same address had another one in the last 60 days, the managers hear about it
- * (a line in their Inbox and a phone alert) with the street and the request, never the resident. Never throws. Returns
- * how many missed pickups the address has had in those 60 days (this one included).
+ * The collection day each missed pickup is about: the last collection of its stream at the address on or before the day
+ * it was reported (any stream when none was given), or the day it was reported when the schedule has none.
+ * rows: [{ id, street_id, house_number, stream_id, reported_at }] at one address. Returns Map id -> 'YYYY-MM-DD'.
+ */
+async function missedDays(db, tenantId, list) {
+  const out = new Map();
+  if (!list.length) return out;
+  const zone = await C.zoneFor(db, tenantId, { streetId: list[0].street_id, houseNo: list[0].house_number });
+  for (const r of list) {
+    const day = String(r.reported_at).slice(0, 10);
+    let found = null;
+    if (zone && zone.zoneId) {
+      const { addDays } = require('./util');
+      const days = (await C.collectionDays(db, tenantId, { zoneId: zone.zoneId, from: addDays(day, -40), to: day })).filter((x) => !r.stream_id || x.streamId === Number(r.stream_id));
+      if (days.length) found = days[days.length - 1].date;
+    }
+    out.set(Number(r.id), found || day);
+  }
+  return out;
+}
+
+/**
+ * After a missed pickup is saved: when the same address had a missed pickup on a different collection day in the last 60
+ * days, the managers hear about it (a line in their Inbox and a phone alert) with the street and the request, never the
+ * resident. The same miss reported twice (the same collection day) is not a repeat. Never throws. Returns how many
+ * different collection days the address has had a missed pickup on in those 60 days.
  */
 async function afterSaved(tenantId, requestId) {
   try {
     const r = await one(pool, `SELECT r.id, r.reference, r.street_id, r.house_number, r.reported_at, s.name AS street, c.code FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
       LEFT JOIN streets s ON s.tenant_id = r.tenant_id AND s.id = r.street_id WHERE r.tenant_id = ? AND r.id = ?`, [tenantId, requestId]);
     if (!r || r.code !== 'missed' || !r.street_id || !String(r.house_number || '').trim()) return 0;
-    const same = await one(pool, `SELECT COUNT(*) AS n FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
-      WHERE r.tenant_id = ? AND c.code = 'missed' AND r.street_id = ? AND LOWER(TRIM(r.house_number)) = LOWER(TRIM(?)) AND r.reported_at >= ? - INTERVAL ? DAY AND r.status <> 'duplicate'`,
-    [tenantId, r.street_id, r.house_number, r.reported_at, REPEAT_DAYS]);
-    const times = Number(same.n);
-    if (times < 2) return times;
-    const text = `Repeat missed pickup on ${r.street}: ${times} at the same address in the last ${REPEAT_DAYS} days. Request ${r.reference}.`;
+    const list = await rows(pool, `SELECT r.id, r.street_id, r.house_number, r.stream_id, r.reported_at FROM requests r JOIN request_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
+      WHERE r.tenant_id = ? AND c.code = 'missed' AND r.street_id = ? AND LOWER(TRIM(r.house_number)) = LOWER(TRIM(?)) AND r.reported_at >= ? - INTERVAL ? DAY AND r.reported_at <= ? AND r.status <> 'duplicate'`,
+    [tenantId, r.street_id, r.house_number, r.reported_at, REPEAT_DAYS, r.reported_at]);
+    const days = await missedDays(pool, tenantId, list);
+    const mine = days.get(Number(r.id));
+    const times = new Set(days.values()).size;
+    // A second report about a day already reported adds nothing new.
+    if (times < 2 || [...days].some(([id, d]) => id !== Number(r.id) && d === mine)) return times;
+    const text = `Repeat missed pickup on ${r.street}: missed on ${times} collection days at the same address in the last ${REPEAT_DAYS} days. Request ${r.reference}.`;
     const th = await tx(async (conn) => {
       const t2 = await managersThread(conn, tenantId);
       if (!t2) return null;
@@ -104,4 +130,4 @@ async function afterSaved(tenantId, requestId) {
   }
 }
 
-module.exports = { missedInfo, gate, save, afterSaved, REPEAT_DAYS, THREAD_NAME };
+module.exports = { missedInfo, gate, save, afterSaved, missedDays, REPEAT_DAYS, THREAD_NAME };

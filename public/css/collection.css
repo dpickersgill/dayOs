@@ -73,3 +73,18 @@
   .coll .no-print, .coll-links, .coll-notice, .coll form { display: none !important; }
   .coll-year { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* ---- the Trash and recycling app's tab row: a fade at the edge with more, when it scrolls (2026.11.22 review) ---- */
+.trash-app .tabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+.trash-app .tabs.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
+.trash-app .tabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
+
+/* ---- the public page's "What goes in each": a button that plainly opens (2026.11.22 review) ---- */
+.coll-disc-row { border-bottom: 1px solid var(--line); }
+.coll-disc { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 6px 4px; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.coll-disc:focus-visible { outline: 3px solid var(--accent-line); outline-offset: 2px; }
+.coll-disc-words { flex: 1; color: var(--accent-ink); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.coll-chev { width: 10px; height: 10px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); margin: 0 8px 4px; transition: transform .15s; flex: none; }
+.coll-disc[aria-expanded='true'] .coll-chev { transform: rotate(-135deg); margin-bottom: -4px; }
+.coll-disc-panel { padding: 0 4px 10px; }
+.coll-disc-panel ul { margin: 4px 0 8px; padding-left: 22px; }

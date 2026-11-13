@@ -168,7 +168,7 @@ async function collectionDays(conn, tenantId, { zoneId, from, to }) {
       const change = changes.find((c) => c.on_date === item.date && (!c.zone_ids.length || c.zone_ids.includes(Number(zoneId))));
       if (change) {
         if (!change.moved_to) continue; // canceled
-        item.date = change.moved_to; item.moved = true; item.reason = change.reason;
+        item.date = change.moved_to; item.moved = true; item.reason = change.reason; item.changeId = change.id;
       }
       out.push(item);
     }
