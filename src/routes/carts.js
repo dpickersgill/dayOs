@@ -471,9 +471,10 @@ router.get('/carts/export', office, async (req, res) => {
   const data = list.map((r) => ({
     reference: r.reference, requested: String(r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at).slice(0, 10), kind: C.KINDS[r.kind], stream: r.stream, size_gal: r.size_gal, street: r.street,
     ...(contacts ? { house_number: r.house_number, unit: r.unit || '', name: r.contact_name || '', phone: r.contact_phone || '', email: r.contact_email || '' } : {}),
-    source: r.source, status: r.status, deliver_on: day(r.deliver_on) || '', pay_status: r.pay_status, fee: dollars(r.fee_cents), paid: dollars(r.paid_cents), refunded: dollars(r.refunded_cents),
+    source: r.source, status: r.status, deliver_on: day(r.deliver_on) || '', pay_status: r.pay_status,
+    ...(isManagerRole(req) ? { fee_dollars: dollars(r.fee_cents), paid_dollars: dollars(r.paid_cents), refunded_dollars: dollars(r.refunded_cents) } : {}),
   }));
-  const cols = ['reference', 'requested', 'kind', 'stream', 'size_gal', 'street', ...(contacts ? ['house_number', 'unit', 'name', 'phone', 'email'] : []), 'source', 'status', 'deliver_on', 'pay_status', 'fee', 'paid', 'refunded'];
+  const cols = ['reference', 'requested', 'kind', 'stream', 'size_gal', 'street', ...(contacts ? ['house_number', 'unit', 'name', 'phone', 'email'] : []), 'source', 'status', 'deliver_on', 'pay_status', ...(isManagerRole(req) ? ['fee_dollars', 'paid_dollars', 'refunded_dollars'] : [])]; // money for owners and managers only (and lib/nomoney.js takes out any *_dollars column)
   await audit(pool, req, contacts ? 'cart_export_contacts' : 'cart_export', 'cart_requests', null, { from, to, rows: data.length, contacts });
   res.set('Content-Type', 'text/csv; charset=utf-8').set('Content-Disposition', `attachment; filename="cart-requests-${from}-to-${to}${contacts ? '-with-contacts' : ''}.csv"`).send(toCsv(cols, data));
 });

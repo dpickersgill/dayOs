@@ -362,7 +362,9 @@ async function draftNotice(conn, req, ch) {
   const why = CHANGE_REASON[ch.reason];
   const day = C.longDay(ch.on_date);
   const smsText = ch.moved_to ? `${day.split(',')[0]}'s trash and recycling pickup moves to ${C.longDay(ch.moved_to)} because of ${why}.` : `No trash or recycling pickup on ${day} because of ${why}.`;
-  const body = `${smsText}${ch.note ? ` ${ch.note}` : ''}\n\nThis is for ${ch.zone_ids.length ? `these collection zones: ${zoneNames.join(', ')}` : 'every collection zone'}. Please have your carts at the curb by 6 AM.`;
+  // The "out by" rule is the borough's own (Schedule, Setup); without one, nothing is said about a time.
+  const curb = ((await C.settingsOf(conn, t)) || {}).curb_by;
+  const body = `${smsText}${ch.note ? ` ${ch.note}` : ''}\n\nThis is for ${ch.zone_ids.length ? `these collection zones: ${zoneNames.join(', ')}` : 'every collection zone'}.${curb ? ` ${String(curb).replace(/\.?\s*$/, '.')}` : ''}`;
   const title = ch.moved_to ? `Pickup moves to ${C.longDay(ch.moved_to)}` : `No pickup on ${day}`;
   const code = () => Array.from(require('crypto').randomBytes(6), (x) => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[x % 31]).join('');
   let id = null;
